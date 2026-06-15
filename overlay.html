@@ -1588,16 +1588,149 @@
 	    }
 	    return null;
 	  }
-	  function definitionTextForEntry(entry) {
+	  function glossaryPlainText(glossary) {
+	    const raw = String((glossary && glossary.glossary) || '');
+	    const parsed = parseGlossaryJson(raw);
+	    return normalizeWhitespace(parsed ? plainTextFromNode(parsed) : raw);
+	  }
+	  function glossaryDataForEntry(entry) {
 	    const term = entry && entry.term ? entry.term : {};
 	    const glossaries = Array.isArray(term.glossaries) ? term.glossaries : [];
-	    return glossaries.slice(0, Math.max(1, Number(state.config.maxGlossesPerEntry || 4))).map(glossary => {
-	      const raw = String((glossary && glossary.glossary) || '');
-	      const parsed = parseGlossaryJson(raw);
-	      const text = normalizeWhitespace(parsed ? plainTextFromNode(parsed) : raw);
-	      const dict = normalizeWhitespace(glossary && glossary.dict);
-	      return text ? (dict ? '[' + dict + '] ' + text : text) : '';
-	    }).filter(Boolean).join('\n\n').slice(0, 30000);
+	    const byDictionary = {};
+	    const dictionaryOrder = [];
+	    const all = [];
+	    const brief = [];
+	    glossaries.forEach(glossary => {
+	      const text = glossaryPlainText(glossary);
+	      if (!text) return;
+	      const dictionary = String((glossary && glossary.dict) || '').trim() || tr('Dictionary');
+	      if (!Object.prototype.hasOwnProperty.call(byDictionary, dictionary)) {
+	        byDictionary[dictionary] = [];
+	        dictionaryOrder.push(dictionary);
+	      }
+	      byDictionary[dictionary].push(text);
+	      all.push('[' + dictionary + '] ' + text);
+	      brief.push(text);
+	    });
+	    const singleGlossaries = {};
+	    dictionaryOrder.forEach(dictionary => {
+	      singleGlossaries[dictionary] = '[' + dictionary + '] ' + byDictionary[dictionary].join('\n');
+	    });
+	    const selectedDictionary = dictionaryOrder[0] || '';
+	    return {
+	      glossary: all.join('\n\n').slice(0, 30000),
+	      glossaryBrief: brief.join('\n\n').slice(0, 30000),
+	      glossaryFirst: selectedDictionary ? singleGlossaries[selectedDictionary] : '',
+	      selectedDictionary,
+	      selectedGlossary: selectedDictionary ? singleGlossaries[selectedDictionary] : '',
+	      singleGlossaries
+	    };
+	  }
+	  function furiganaPlainForEntry(entry) {
+	    const term = entry && entry.term ? entry.term : {};
+	    const expression = displayHeadwordForEntry(entry);
+	    const reading = String(term.reading || '');
+	    if (!reading || !expression || compareTextKey(expression) === compareTextKey(reading)) return expression;
+	    return expression + '[' + reading + ']';
+	  }
+	  function frequencyDataForEntry(entry) {
+	    const term = entry && entry.term ? entry.term : {};
+	    const groups = Array.isArray(term.frequencies) ? term.frequencies : [];
+	    const lines = [];
+	    const ranks = [];
+	    const seenDictionaries = Object.create(null);
+	    groups.forEach(group => {
+	      const dictionary = normalizeWhitespace(group && (group.dict || group.dictName || group.dictionary));
+	      const values = Array.isArray(group && group.frequencies) ? group.frequencies : [];
+	      const display = values.map(value => normalizeWhitespace(
+	        (value && (value.displayValue || value.display_value)) ||
+	        (value && value.value !== undefined ? String(value.value) : '')
+	      )).filter(Boolean);
+	      if (dictionary || display.length) lines.push((dictionary ? dictionary + ': ' : '') + display.join(', '));
+	      if (dictionary && seenDictionaries[dictionary]) return;
+	      if (dictionary) seenDictionaries[dictionary] = true;
+	      const first = values[0];
+	      const raw = first && ((first.displayValue || first.display_value) !== undefined
+	        ? (first.displayValue || first.display_value)
+	        : first.value);
+	      const match = String(raw === undefined || raw === null ? '' : raw).match(/^\s*(\d+)/);
+	      const rank = match ? Number(match[1]) : Number(raw);
+	      if (Number.isFinite(rank) && rank > 0) ranks.push(rank);
+	    });
+	    const harmonic = ranks.length
+	      ? String(Math.floor(ranks.length / ranks.reduce((sum, rank) => sum + (1 / rank), 0)))
+	      : '';
+	    return { frequencies: lines.join('\n'), frequencyHarmonicRank: harmonic };
+	  }
+	  function pitchDataForEntry(entry) {
+	    const term = entry && entry.term ? entry.term : {};
+	    const groups = Array.isArray(term.pitches) ? term.pitches : [];
+	    const positions = [];
+	    groups.forEach(group => {
+	      const values = Array.isArray(group && group.positions)
+	        ? group.positions
+	        : (Array.isArray(group && group.pitchPositions)
+	          ? group.pitchPositions
+	          : (Array.isArray(group && group.pitch_positions) ? group.pitch_positions : []));
+	      values.forEach(value => {
+	        const position = Number(value);
+	        if (Number.isFinite(position) && positions.indexOf(position) < 0) positions.push(position);
+	      });
+	    });
+	    const rules = Array.isArray(term.rules) ? term.rules : String(term.rules || '').split(/\s+/);
+	    const verbOrAdjective = rules.some(rule => /^(?:v|adj-i)/i.test(String(rule || '')));
+	    const moraCount = splitJapaneseMoras(String(term.reading || term.expression || '')).length;
+	    const categories = [];
+	    positions.forEach(position => {
+	      let category = '';
+	      if (position === 0) category = 'heiban';
+	      else if (verbOrAdjective) category = 'kifuku';
+	      else if (position === 1) category = 'atamadaka';
+	      else if (position > 1) category = position >= moraCount ? 'odaka' : 'nakadaka';
+	      if (category && categories.indexOf(category) < 0) categories.push(category);
+	    });
+	    return {
+	      pitchAccentPositions: positions.map(position => '[' + String(position) + ']').join('\n'),
+	      pitchAccentCategories: categories.join(',')
+	    };
+	  }
+	  function popupSelectionText() {
+	    try {
+	      const selection = window.getSelection && window.getSelection();
+	      return normalizeWhitespace(selection && selection.toString ? selection.toString() : '');
+	    } catch (_) {
+	      return '';
+	    }
+	  }
+	  function ankiPayloadForEntry(entry, requestId) {
+	    const term = entry && entry.term ? entry.term : {};
+	    const glossary = glossaryDataForEntry(entry);
+	    const frequency = frequencyDataForEntry(entry);
+	    const pitch = pitchDataForEntry(entry);
+	    return {
+	      type: 'anki-add',
+	      requestId,
+	      lineId: state.lineId,
+	      position: state.currentPos,
+	      sentence: state.text,
+	      expression: displayHeadwordForEntry(entry),
+	      reading: String(term.reading || ''),
+	      furiganaPlain: furiganaPlainForEntry(entry),
+	      definition: glossary.glossary,
+	      glossary: glossary.glossary,
+	      glossaryBrief: glossary.glossaryBrief,
+	      glossaryFirst: glossary.glossaryFirst,
+	      selectedDictionary: glossary.selectedDictionary,
+	      selectedGlossary: glossary.selectedGlossary,
+	      singleGlossaries: glossary.singleGlossaries,
+	      popupSelectionText: popupSelectionText(),
+	      frequencies: frequency.frequencies,
+	      frequencyHarmonicRank: frequency.frequencyHarmonicRank,
+	      pitchAccentPositions: pitch.pitchAccentPositions,
+	      pitchAccentCategories: pitch.pitchAccentCategories,
+	      dictionary: Object.keys(glossary.singleGlossaries).join(', '),
+	      at: Date.now()
+	    };
 	  }
 	  function requestAnkiExport(button) {
 	    const entryIndex = Math.max(0, Number(button.getAttribute('data-anki-entry-index') || 0) || 0);
@@ -1610,20 +1743,8 @@
 	      return;
 	    }
 	    if (state.ankiPendingRequestId) return;
-	    const term = entry.term || {};
 	    const requestId = 'anki-' + String(Date.now()) + '-' + String(++state.ankiRequestSeq);
-	    const payload = {
-	      type: 'anki-add',
-	      requestId,
-	      lineId: state.lineId,
-	      position: state.currentPos,
-	      sentence: state.text,
-	      expression: displayHeadwordForEntry(entry),
-	      reading: String(term.reading || ''),
-	      definition: definitionTextForEntry(entry),
-	      dictionary: (Array.isArray(term.glossaries) ? term.glossaries : []).map(g => String((g && g.dict) || '')).filter(Boolean).join(', '),
-	      at: Date.now()
-	    };
+	    const payload = ankiPayloadForEntry(entry, requestId);
 	    state.ankiPendingRequestId = requestId;
 	    state.ankiPendingButton = button;
 	    button.disabled = true;

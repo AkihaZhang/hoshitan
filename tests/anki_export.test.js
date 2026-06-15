@@ -14,8 +14,9 @@ const settings = {
     Sentence: '{sentence}',
     Expression: '{expression}',
     ExpressionReading: '{reading}',
-    MainDefinition: '{definition}',
-    MiscInfo: '{source}'
+    MainDefinition: '{single-glossary-明鏡日汉双解辞典}',
+    MiscInfo: '{source}',
+    Frequencies: '{frequency-harmonic-rank}'
   }),
   ankiTags: 'hoshitan test, test',
   ankiAllowDuplicate: false,
@@ -36,7 +37,8 @@ const responses = {
     'ExpressionReading',
     'MainDefinition',
     'Sentence',
-    'MiscInfo'
+    'MiscInfo',
+    'Frequencies'
   ],
   addNote: 123456789
 };
@@ -128,7 +130,16 @@ function assert(condition, message) {
     sentence: 'トイレ　トイレ',
     expression: 'トイレ',
     reading: 'トイレ',
-    definition: '<test> & definition'
+    furiganaPlain: 'トイレ',
+    definition: '<test> & definition',
+    glossary: '<test> & definition',
+    glossaryBrief: '<test> & definition',
+    glossaryFirst: '[明鏡日汉双解辞典] <test> & definition',
+    selectedGlossary: '[明鏡日汉双解辞典] <test> & definition',
+    singleGlossaries: {
+      '明鏡日汉双解辞典': '[明鏡日汉双解辞典] <test> & definition'
+    },
+    frequencyHarmonicRank: '184'
   });
 
   const addCall = actions.find(call => call.options.data.action === 'addNote');
@@ -139,8 +150,9 @@ function assert(condition, message) {
   assert(note.modelName === 'Lapis', 'Export must use the configured note type');
   assert(note.fields.Sentence === 'トイレ　トイレ', 'Sentence should map to the configured field');
   assert(note.fields.Expression === 'トイレ', 'Expression should map to the configured field');
-  assert(note.fields.MainDefinition === '&lt;test&gt; &amp; definition', 'Definition HTML should be escaped');
+  assert(note.fields.MainDefinition === '[明鏡日汉双解辞典] &lt;test&gt; &amp; definition', 'Per-dictionary glossary should map by dictionary title');
   assert(note.fields.MiscInfo === 'episode.mkv @ 00:07.099', 'Source field should include a timestamp');
+  assert(note.fields.Frequencies === '184', 'Frequency harmonic rank should map to an Anki field');
   assert(note.tags.length === 2 && note.tags[0] === 'hoshitan' && note.tags[1] === 'test', 'Tags should be deduplicated');
   assert(!note.picture && !note.audio, 'Disabled media should not be attached');
   assert(overlayPosts.some(post => post.name === 'anki-export-result' && post.data.ok), 'Overlay should receive success');

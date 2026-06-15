@@ -1,7 +1,7 @@
 {
   "name": "Hoshitan",
   "identifier": "io.github.akihazhang.hoshitan",
-  "version": "0.1.0-dev.1",
+  "version": "0.1.0-dev.2",
   "author": {
     "name": "AkihaZhang"
   },
@@ -11,7 +11,7 @@
   "preferencesPage": "preferences.html",
   "helpPage": "README.md",
   "ghRepo": "AkihaZhang/hoshitan",
-  "ghVersion": 1,
+  "ghVersion": 2,
   "preferenceDefaults": {
     "enabledByDefault": true,
     "hideNativeSubtitles": true,

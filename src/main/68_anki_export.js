@@ -16,9 +16,9 @@ function ankiSettings() {
     deckName: String(ankiSetting("ankiDeckName", "Default") || ""),
     modelName: String(ankiSetting("ankiModelName", "Basic") || ""),
     fieldMappings,
-    imageFields: ankiFieldsMappedTo(fieldMappings, "{image}"),
+    imageFields: ankiFieldsMappedToAny(fieldMappings, ["{image}", "{book-cover}"]),
     wordAudioFields: ankiFieldsMappedTo(fieldMappings, "{audio}"),
-    sentenceAudioFields: ankiFieldsMappedTo(fieldMappings, "{sentence-audio}"),
+    sentenceAudioFields: ankiFieldsMappedToAny(fieldMappings, ["{sentence-audio}", "{sasayaki-audio}"]),
     tags: String(ankiSetting("ankiTags", "hoshitan") || ""),
     allowDuplicate: preferenceValueToBool(ankiSetting("ankiAllowDuplicate", false), false),
     includeScreenshot: preferenceValueToBool(ankiSetting("ankiIncludeScreenshot", true), true),
@@ -26,6 +26,34 @@ function ankiSettings() {
     audioPaddingMs: Math.max(0, Math.min(5000, Number(ankiSetting("ankiAudioPaddingMs", 120)) || 0)),
     ffmpegPath: String(ankiSetting("ankiFfmpegPath", "/opt/homebrew/bin/ffmpeg") || "")
   };
+}
+function ankiMappingPlaceholderValid(mapping) {
+  if (/^\{single-glossary-.+\}$/.test(mapping)) return true;
+  return [
+    "{expression}",
+    "{reading}",
+    "{furigana-plain}",
+    "{audio}",
+    "{glossary}",
+    "{glossary-brief}",
+    "{glossary-first}",
+    "{selected-glossary}",
+    "{selected-glossary-fallback}",
+    "{popup-selection-text}",
+    "{sentence}",
+    "{frequencies}",
+    "{frequency-harmonic-rank}",
+    "{pitch-accent-positions}",
+    "{pitch-accent-categories}",
+    "{document-title}",
+    "{book-cover}",
+    "{sasayaki-audio}",
+    "{definition}",
+    "{image}",
+    "{sentence-audio}",
+    "{source}",
+    "{dictionary}"
+  ].indexOf(mapping) >= 0;
 }
 function ankiFieldMappings() {
   let parsed = {};
@@ -38,7 +66,7 @@ function ankiFieldMappings() {
     Object.keys(parsed).forEach(fieldName => {
       const name = String(fieldName || "").trim();
       const mapping = String(parsed[fieldName] || "").trim();
-      if (name && /^\{(?:expression|reading|sentence|definition|image|audio|sentence-audio|source|dictionary)\}$/.test(mapping)) {
+      if (name && ankiMappingPlaceholderValid(mapping)) {
         out[name] = mapping;
       }
     });
@@ -61,6 +89,21 @@ function ankiFieldMappings() {
 }
 function ankiFieldsMappedTo(mappings, placeholder) {
   return Object.keys(mappings || {}).filter(fieldName => mappings[fieldName] === placeholder);
+}
+function ankiFieldsMappedToAny(mappings, placeholders) {
+  const allowed = Object.create(null);
+  (placeholders || []).forEach(placeholder => { allowed[String(placeholder)] = true; });
+  return Object.keys(mappings || {}).filter(fieldName => allowed[mappings[fieldName]]);
+}
+function ankiSingleGlossaryValue(singleGlossaries, dictionaryTitle) {
+  if (Object.prototype.hasOwnProperty.call(singleGlossaries, dictionaryTitle)) {
+    return singleGlossaries[dictionaryTitle];
+  }
+  const normalizedTitle = String(dictionaryTitle || "").replace(/\s+/g, " ").trim();
+  const matched = Object.keys(singleGlossaries || {}).find(title =>
+    String(title || "").replace(/\s+/g, " ").trim() === normalizedTitle
+  );
+  return matched ? singleGlossaries[matched] : "";
 }
 function ankiText(value, maxLength) {
   const normalized = String(value || "").replace(/\u0000/g, "").replace(/\r/g, "").trim();
@@ -85,19 +128,42 @@ function ankiTags(value) {
 }
 function ankiFieldsFromPayload(payload, settings, sourceText) {
   const fields = {};
+  const singleGlossaries = payload && payload.singleGlossaries && typeof payload.singleGlossaries === "object"
+    ? payload.singleGlossaries
+    : {};
+  const glossary = payload && (payload.glossary || payload.definition);
+  const glossaryFirst = payload && (payload.glossaryFirst || payload.selectedGlossary || glossary);
   const values = {
     "{sentence}": payload && payload.sentence,
     "{expression}": payload && payload.expression,
     "{reading}": payload && payload.reading,
-    "{definition}": payload && payload.definition,
+    "{furigana-plain}": payload && (payload.furiganaPlain || payload.expression),
+    "{definition}": glossary,
+    "{glossary}": glossary,
+    "{glossary-brief}": payload && (payload.glossaryBrief || glossary),
+    "{glossary-first}": glossaryFirst,
+    "{selected-glossary}": payload && payload.selectedGlossary,
+    "{selected-glossary-fallback}": payload && (payload.selectedGlossary || glossaryFirst),
+    "{popup-selection-text}": payload && payload.popupSelectionText,
+    "{frequencies}": payload && payload.frequencies,
+    "{frequency-harmonic-rank}": payload && payload.frequencyHarmonicRank,
+    "{pitch-accent-positions}": payload && payload.pitchAccentPositions,
+    "{pitch-accent-categories}": payload && payload.pitchAccentCategories,
+    "{document-title}": ankiStringProperty("filename", "") || sourceText,
     "{source}": sourceText,
     "{dictionary}": payload && payload.dictionary,
     "{image}": "",
+    "{book-cover}": "",
     "{audio}": "",
-    "{sentence-audio}": ""
+    "{sentence-audio}": "",
+    "{sasayaki-audio}": ""
   };
   Object.keys(settings.fieldMappings || {}).forEach(fieldName => {
-    fields[fieldName] = ankiEscapeHtml(values[settings.fieldMappings[fieldName]] || "");
+    const mapping = settings.fieldMappings[fieldName];
+    let value = values[mapping];
+    const singleMatch = /^\{single-glossary-(.+)\}$/.exec(mapping);
+    if (singleMatch) value = ankiSingleGlossaryValue(singleGlossaries, singleMatch[1]);
+    fields[fieldName] = ankiEscapeHtml(value || "");
   });
   return fields;
 }

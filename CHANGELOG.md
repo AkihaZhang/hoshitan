@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.0-dev.2 - 2026-06-15
+
+### Added
+
+- Added Hoshi Reader-compatible Anki placeholders for furigana, glossaries, popup selection, frequency, pitch accent, document title, screenshot, and subtitle audio.
+- Added dynamic `{single-glossary-DICTIONARY}` mappings for installed term dictionaries.
+
+### Fixed
+
+- Preserved dictionary titles containing full-width spaces when resolving per-dictionary Anki fields.
+- Kept the existing Hoshitan field placeholders compatible while mapping `{book-cover}` to the video screenshot and `{sasayaki-audio}` to the subtitle MP3 clip.
+
 ## 0.1.0-dev.1 - 2026-06-15
 
 Initial Hoshitan testing build, based on the upstream project history.

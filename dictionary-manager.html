@@ -1191,23 +1191,25 @@
         word: '{expression}',
         term: '{expression}',
         vocab: '{expression}',
+        expressionfurigana: '{furigana-plain}',
         expressionreading: '{reading}',
         reading: '{reading}',
         kana: '{reading}',
         sentence: '{sentence}',
         sentencefurigana: '{sentence}',
         front: '{sentence}',
-        maindefinition: '{definition}',
-        definition: '{definition}',
-        glossary: '{definition}',
-        meaning: '{definition}',
-        back: '{definition}',
-        picture: '{image}',
-        definitionpicture: '{image}',
-        image: '{image}',
+        selectiontext: '{popup-selection-text}',
+        maindefinition: '{glossary}',
+        definition: '{glossary}',
+        glossary: '{glossary}',
+        meaning: '{glossary}',
+        back: '{glossary}',
+        picture: '{book-cover}',
+        definitionpicture: '{book-cover}',
+        image: '{book-cover}',
         expressionaudio: '{audio}',
         wordaudio: '{audio}',
-        sentenceaudio: '{sentence-audio}',
+        sentenceaudio: '{sasayaki-audio}',
         audio: '{audio}',
         miscinfo: '{source}',
         source: '{source}',
@@ -1215,6 +1217,50 @@
         dictionary: '{dictionary}'
       };
       return candidates[key] || '';
+    }
+    function ankiMappingOptions() {
+      const options = [
+        ['', '-'],
+        ['{expression}', '{expression}'],
+        ['{reading}', '{reading}'],
+        ['{furigana-plain}', '{furigana-plain}'],
+        ['{audio}', '{audio}'],
+        ['{glossary}', '{glossary}'],
+        ['{glossary-brief}', '{glossary-brief}'],
+        ['{glossary-first}', '{glossary-first}'],
+        ['{selected-glossary}', '{selected-glossary}'],
+        ['{selected-glossary-fallback}', '{selected-glossary-fallback}'],
+        ['{popup-selection-text}', '{popup-selection-text}'],
+        ['{sentence}', '{sentence}'],
+        ['{frequencies}', '{frequencies}'],
+        ['{frequency-harmonic-rank}', '{frequency-harmonic-rank}'],
+        ['{pitch-accent-positions}', '{pitch-accent-positions}'],
+        ['{pitch-accent-categories}', '{pitch-accent-categories}'],
+        ['{document-title}', '{document-title}'],
+        ['{book-cover}', '{book-cover}'],
+        ['{sasayaki-audio}', '{sasayaki-audio}']
+      ];
+      const seen = Object.create(null);
+      options.forEach(([value]) => { if (value) seen[value] = true; });
+      (state.dictionaries || []).forEach(dictionary => {
+        if (!dictionary || Number(dictionary.termCount || 0) <= 0) return;
+        const title = String(dictionary.title || dictionary.name || '').trim();
+        if (!title) return;
+        const value = '{single-glossary-' + title + '}';
+        if (seen[value]) return;
+        seen[value] = true;
+        options.push([value, value]);
+      });
+      [
+        ['{definition}', '{definition}'],
+        ['{image}', '{image}'],
+        ['{sentence-audio}', '{sentence-audio}'],
+        ['{source}', '{source}'],
+        ['{dictionary}', '{dictionary}']
+      ].forEach(option => {
+        if (!seen[option[0]]) options.push(option);
+      });
+      return options;
     }
     function pruneAnkiFieldMappings() {
       const available = Object.create(null);
@@ -1245,18 +1291,7 @@
         els.ankiFieldMappings.appendChild(empty);
         return;
       }
-      const options = [
-        ['', '-'],
-        ['{expression}', '{expression}'],
-        ['{reading}', '{reading}'],
-        ['{sentence}', '{sentence}'],
-        ['{definition}', '{definition}'],
-        ['{image}', '{image}'],
-        ['{audio}', '{audio}'],
-        ['{sentence-audio}', '{sentence-audio}'],
-        ['{source}', '{source}'],
-        ['{dictionary}', '{dictionary}']
-      ];
+      const options = ankiMappingOptions();
       state.ankiFieldNames.forEach(fieldName => {
         const name = String(fieldName);
         const row = document.createElement('div');
@@ -1268,11 +1303,16 @@
         const select = document.createElement('select');
         select.dataset.noI18n = 'true';
         select.dataset.busyControl = 'true';
-        options.forEach(([value, text]) => {
+        const selectedMapping = String(state.ankiFieldMappings[name] || '');
+        const fieldOptions = options.slice();
+        if (selectedMapping && !fieldOptions.some(([value]) => value === selectedMapping)) {
+          fieldOptions.unshift([selectedMapping, selectedMapping]);
+        }
+        fieldOptions.forEach(([value, text]) => {
           const option = document.createElement('option');
           option.value = value;
           option.textContent = text;
-          option.selected = value === String(state.ankiFieldMappings[name] || '');
+          option.selected = value === selectedMapping;
           select.appendChild(option);
         });
         const commitMapping = () => {
