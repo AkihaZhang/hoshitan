@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0-dev.4 - 2026-06-15
+
+- Fixed an IINA crash when using video shortcuts. Shortcut handlers now avoid unsafe JavaScript array bridging in `mpv.command`.
+
 ## 0.1.0-dev.3 - 2026-06-15
 
 ### Added

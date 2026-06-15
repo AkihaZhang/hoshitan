@@ -10,7 +10,7 @@
 
 const { core, mpv, event, overlay, menu, input, ws, preferences, console, file, http, utils, standaloneWindow } = iina;
 
-const VERSION = "0.1.0-dev.3";
+const VERSION = "0.1.0-dev.4";
 const RECOMMENDED_JITENDEX_URL = "https://github.com/stephenmk/stephenmk.github.io/releases/latest/download/jitendex-yomitan.zip";
 
 let enabled = false;
@@ -4740,14 +4740,14 @@ function registerShortcut() {
     console.warn("Could not register Shift+H fallback: " + compactError(error));
   }
   registerInputShortcut("SPACE", "play/pause", () => setPauseState(!pauseState()));
-  registerInputShortcut("LEFT", "seek backward 5 seconds", () => mpv.command("seek", [-5, "relative+exact"]));
-  registerInputShortcut("RIGHT", "seek forward 5 seconds", () => mpv.command("seek", [5, "relative+exact"]));
-  registerInputShortcut("[", "previous subtitle", () => mpv.command("sub-seek", [-1]));
-  registerInputShortcut("]", "next subtitle", () => mpv.command("sub-seek", [1]));
+  registerInputShortcut("LEFT", "seek backward 5 seconds", () => core.seek(-5, true));
+  registerInputShortcut("RIGHT", "seek forward 5 seconds", () => core.seek(5, true));
+  registerInputShortcut("[", "previous subtitle", () => mpv.command("sub-seek", ["-1"]));
+  registerInputShortcut("]", "next subtitle", () => mpv.command("sub-seek", ["1"]));
   registerInputShortcut("s", "toggle subtitles", toggleSubtitleDisplay);
   registerInputShortcut("f", "toggle fullscreen", () => mpv.set("fullscreen", !mpv.getFlag("fullscreen")));
   registerInputShortcut("ESC", "close lookup popup", () => postToOverlay("close-popup", {}));
-  registerInputShortcut("Meta+w", "close video", () => mpv.command("stop", []));
+  registerInputShortcut("Meta+w", "close video", () => core.stop());
 }
 
 function dictionaryManagerAvailable() {

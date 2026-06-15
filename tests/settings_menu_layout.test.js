@@ -11,7 +11,7 @@ const info = JSON.parse(fs.readFileSync(path.join(root, 'Info.json'), 'utf8'));
 assert(info.name === 'Hoshitan', 'Plugin display name should use the Hoshitan brand');
 assert(info.identifier === 'io.github.akihazhang.hoshitan', 'Plugin identifier should be independent from upstream');
 assert(info.author && info.author.name === 'AkihaZhang', 'Plugin author metadata should name the fork maintainer');
-assert(info.version === '0.1.0-dev.3', 'Testing builds should use the Hoshitan development version');
+assert(info.version === '0.1.0-dev.4', 'Testing builds should use the Hoshitan development version');
 assert(info.ghRepo === 'AkihaZhang/hoshitan', 'GitHub updates should target the Hoshitan repository');
 assert(info.preferenceDefaults.etymologyCollapseDefault === 'collapsed', 'Etymology should default collapsed globally');
 assert(info.preferenceDefaults.wiktionaryEtymologyCollapseOverride === 'collapsed', 'Wiktionary/Kaikki override should default collapsed');
@@ -149,5 +149,10 @@ assert(/registerInputShortcut\("LEFT", "seek backward 5 seconds"/.test(lifecycle
 assert(/registerInputShortcut\("\[", "previous subtitle"/.test(lifecycleSource), 'Video shortcuts should include previous subtitle');
 assert(/registerInputShortcut\("ESC", "close lookup popup"/.test(lifecycleSource), 'Video shortcuts should include Escape popup close');
 assert(/registerInputShortcut\("Meta\+w", "close video"/.test(lifecycleSource), 'Video shortcuts should include Command-W stop/back');
+assert(/core\.seek\(-5, true\)/.test(lifecycleSource), 'Video seek shortcuts should use the typed IINA core API');
+assert(/mpv\.command\("sub-seek", \["-1"\]\)/.test(lifecycleSource), 'Subtitle seek command arguments should be strings');
+assert(/core\.stop\(\)/.test(lifecycleSource), 'Command-W should use the typed IINA core stop API');
+assert(!/mpv\.command\([^;\n]*\[\s*\]\)/.test(lifecycleSource), 'IINA mpv commands must not receive untyped empty JavaScript arrays');
+assert(!/mpv\.command\([^;\n]*\[\s*-?\d/.test(lifecycleSource), 'IINA mpv command arrays must not contain JavaScript numbers');
 
 console.log('settings and menu layout tests passed');
