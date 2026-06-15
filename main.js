@@ -10,7 +10,7 @@
 
 const { core, mpv, event, overlay, menu, input, ws, preferences, console, file, http, utils, standaloneWindow } = iina;
 
-const VERSION = "0.1.0-dev.2";
+const VERSION = "0.1.0-dev.3";
 const RECOMMENDED_JITENDEX_URL = "https://github.com/stephenmk/stephenmk.github.io/releases/latest/download/jitendex-yomitan.zip";
 
 let enabled = false;
@@ -41,6 +41,7 @@ let hoverLookupSequence = 0;
 let hoverLookupActiveKey = "";
 let lastShortcutToggleAt = 0;
 let shortcutRegistered = false;
+let subtitleDisplayEnabled = true;
 let lookupPopupPauseActive = false;
 let lookupPopupPauseShouldResume = false;
 let lookupPopupPauseResumeTimer = null;
@@ -59,11 +60,15 @@ let debugLogFlushTimer = null;
 let iinaAppearanceHint = "";
 let iinaAppearanceHintRefreshInFlight = false;
 let iinaAppearanceHintLastRefreshAt = 0;
+let dictionaryStylesCacheKey = "";
+let dictionaryStylesCacheValue = {};
+let dictionaryStylesCacheAt = 0;
 const DEBUG_LOG_MAX_BYTES = 1000000;
 const DEBUG_LOG_FLUSH_DELAY_MS = 750;
 const LOOKUP_POPUP_RESUME_DELAY_MS = 90;
 const SUBTITLE_EMPTY_GRACE_MS = 260;
 const SUBTITLE_REPLAY_INTERVAL_MS = 1500;
+const DICTIONARY_STYLES_CACHE_MS = 30000;
 
 function pref(key, fallback) {
   const value = preferences.get(key);
@@ -1761,10 +1766,11 @@ function scheduleIINAAppearanceHintRefresh(force) {
     iinaAppearanceHintRefreshInFlight = false;
   });
 }
-function overlayConfig() {
+function overlayConfig(options) {
+  options = options || {};
   const language = selectedLanguageModule();
   scheduleIINAAppearanceHintRefresh(false);
-  return {
+  const config = {
     uiLanguage: configuredUiLanguage(),
     resolvedUiLanguage: resolvedUiLanguage(),
     language: selectedLanguageOverlayConfig(),
@@ -1790,6 +1796,10 @@ function overlayConfig() {
     debugLogVerbose: prefBool("debugLogVerbose", false),
     overlayBridgePort
   };
+  if (options.includeDictionaryStyles !== false) {
+    config.dictionaryStyles = activeDictionaryStyles(language);
+  }
+  return config;
 }
 function readCurrentSubtitle() {
   const properties = ["sub-text", "secondary-sub-text"];
@@ -1808,7 +1818,7 @@ function publishSubtitle(text) {
   const language = selectedLanguageModule();
   const dicts = activeDictionaryPaths(language);
   debugVerbose("publishSubtitle lineId=" + currentSubtitleLineId + " language=" + language.id + " activeDicts=" + dicts.length + " len=" + String(normalized || "").length + " text=" + JSON.stringify(String(normalized || "").slice(0, 80)));
-  postToOverlay("subtitle", { text: normalized, config: overlayConfig(), lineId: currentSubtitleLineId });
+  postToOverlay("subtitle", { text: normalized, config: overlayConfig({ includeDictionaryStyles: false }), lineId: currentSubtitleLineId });
   postToOverlay("line-lookup-reset", { lineId: currentSubtitleLineId });
   // v1.5.0: no full-line background precompute. Hover requests are looked up
   // directly and serialized so the hovered word is never blocked by a batch.
@@ -1822,7 +1832,7 @@ function replayCurrentSubtitle() {
   if (!lastSubtitle || !currentSubtitleLineId) return;
   lastSubtitlePublishedAt = Date.now();
   debugVerbose("replaySubtitle lineId=" + currentSubtitleLineId + " len=" + lastSubtitle.length);
-  postToOverlay("subtitle", { text: lastSubtitle, config: overlayConfig(), lineId: currentSubtitleLineId });
+  postToOverlay("subtitle", { text: lastSubtitle, lineId: currentSubtitleLineId });
 }
 function canHideNativeSubtitlesForCurrentLanguage() {
   if (!lookupBackendReadyForNativeHide) return false;
@@ -2557,6 +2567,42 @@ function activeDictionaryEntries(language) {
 }
 function activeDictionaryPaths(language) {
   return activeDictionaryEntries(language).map(d => pathJoin(dictRoot(), d.name));
+}
+function activeDictionaryStyles(language) {
+  const entries = activeDictionaryEntries(language);
+  const cacheKey = entries.map(entry => String(entry.path || pathJoin(dictRoot(), entry.name))).join("\n");
+  const now = Date.now();
+  if (cacheKey === dictionaryStylesCacheKey && now - dictionaryStylesCacheAt < DICTIONARY_STYLES_CACHE_MS) {
+    return dictionaryStylesCacheValue;
+  }
+  const styles = {};
+  let totalBytes = 0;
+  entries.forEach(entry => {
+    if (totalBytes >= 300000) return;
+    const dictPath = String(entry.path || pathJoin(dictRoot(), entry.name));
+    const candidates = [pathJoin(dictPath, "styles.css"), pathJoin(dictPath, "style.css")];
+    let css = "";
+    for (let i = 0; i < candidates.length; i++) {
+      try {
+        if (!file.exists(candidates[i])) continue;
+        css = String(file.read(candidates[i]) || "").slice(0, 100000);
+        if (css.trim()) break;
+      } catch (error) {
+        debugWarn("Could not read dictionary styles for " + String(entry.title || entry.name) + ": " + compactError(error));
+      }
+    }
+    if (!css.trim()) return;
+    css = css.slice(0, Math.max(0, 300000 - totalBytes));
+    totalBytes += css.length;
+    const title = String(entry.title || entry.name || "").trim();
+    const name = String(entry.name || "").trim();
+    if (title) styles[title] = css;
+    if (name && name !== title) styles[name] = css;
+  });
+  dictionaryStylesCacheKey = cacheKey;
+  dictionaryStylesCacheValue = styles;
+  dictionaryStylesCacheAt = now;
+  return styles;
 }
 function dictionarySetupMessage(language, dicts) {
   const lang = language || selectedLanguageModule();
@@ -3817,6 +3863,8 @@ function ensureOverlayBridge() {
 	          handleLookupPopupVisibility(payload);
 	        } else if (payload && typeof payload === "object" && payload.type === "lookup") {
 	          handleBridgeLookup(payload);
+	        } else if (payload && typeof payload === "object" && payload.type === "nested-lookup") {
+	          handleNestedLookup(payload);
 	        } else if (payload && typeof payload === "object" && payload.type === "audio-source") {
 	          handleBridgeAudioSource(payload);
 	        } else if (payload && typeof payload === "object" && payload.type === "open-url") {
@@ -3979,6 +4027,23 @@ function ensureOverlayBridge() {
   pendingHoverLookup = { requestId, lineId, position, key, seq: ++hoverLookupSequence };
   debugVerbose("hover lookup queued requestId=" + requestId + " key=" + key + " currentLineId=" + currentSubtitleLineId + " inFlight=" + hoverLookupInFlight + " activeKey=" + hoverLookupActiveKey);
   processHoverLookupQueue();
+}
+
+function handleNestedLookup(payload) {
+  const requestId = String((payload && payload.requestId) || ("nested-" + String(++requestSerial)));
+  const text = cleanSubtitleText(String((payload && payload.text) || "")).slice(0, 120);
+  if (!enabled || !text) {
+    postToOverlay("nested-lookup-result", { requestId, ok: false, error: "No lookup text was selected." });
+    return;
+  }
+  (async () => {
+    try {
+      const result = await lookupAtPosition(text, 0, requestId);
+      postToOverlay("nested-lookup-result", { requestId, ok: true, result, text });
+    } catch (error) {
+      postToOverlay("nested-lookup-result", { requestId, ok: false, error: compactError(error), text });
+    }
+  })();
 }
 function processHoverLookupQueue() {
   if (hoverLookupInFlight) return;
@@ -4405,6 +4470,7 @@ function registerOverlayMessageHandlers() {
   });
   overlay.onMessage("lookup-at", payload => { handleLookupAt(payload); });
   overlay.onMessage("lookup-at-lite", payload => { handleLookupAt(payload); });
+  overlay.onMessage("nested-lookup", payload => { handleNestedLookup(payload); });
   overlay.onMessage("lookup-popup-visibility", payload => { handleLookupPopupVisibility(payload); });
   overlay.onMessage("lookup-popup-visible", payload => { handleLookupPopupVisibility(payload); });
   overlay.onMessage("open-external-url", payload => { openExternalUrlFromOverlay(payload && payload.url !== undefined ? payload.url : payload); });
@@ -4630,6 +4696,30 @@ function toggleFromShortcut(data) {
     return true;
   }
 }
+function shortcutAction(label, action) {
+  return data => {
+    try {
+      if (data && data.isRepeat) return true;
+      action();
+    } catch (error) {
+      debugWarn("Shortcut " + label + " failed: " + compactError(error));
+    }
+    return true;
+  };
+}
+function toggleSubtitleDisplay() {
+  subtitleDisplayEnabled = !subtitleDisplayEnabled;
+  postToOverlay("subtitle-visibility", { visible: subtitleDisplayEnabled });
+  showOSD(subtitleDisplayEnabled ? "Subtitles: On" : "Subtitles: Off");
+}
+function registerInputShortcut(key, label, action) {
+  try {
+    input.onKeyDown(key, shortcutAction(label, action), input.PRIORITY_HIGH);
+    debugLog("registered input shortcut " + key + " for " + label);
+  } catch (error) {
+    debugWarn("Could not register shortcut " + key + " for " + label + ": " + compactError(error));
+  }
+}
 function registerShortcut() {
   if (shortcutRegistered) return;
   shortcutRegistered = true;
@@ -4649,6 +4739,15 @@ function registerShortcut() {
   } catch (error) {
     console.warn("Could not register Shift+H fallback: " + compactError(error));
   }
+  registerInputShortcut("SPACE", "play/pause", () => setPauseState(!pauseState()));
+  registerInputShortcut("LEFT", "seek backward 5 seconds", () => mpv.command("seek", [-5, "relative+exact"]));
+  registerInputShortcut("RIGHT", "seek forward 5 seconds", () => mpv.command("seek", [5, "relative+exact"]));
+  registerInputShortcut("[", "previous subtitle", () => mpv.command("sub-seek", [-1]));
+  registerInputShortcut("]", "next subtitle", () => mpv.command("sub-seek", [1]));
+  registerInputShortcut("s", "toggle subtitles", toggleSubtitleDisplay);
+  registerInputShortcut("f", "toggle fullscreen", () => mpv.set("fullscreen", !mpv.getFlag("fullscreen")));
+  registerInputShortcut("ESC", "close lookup popup", () => postToOverlay("close-popup", {}));
+  registerInputShortcut("Meta+w", "close video", () => mpv.command("stop", []));
 }
 
 function dictionaryManagerAvailable() {
@@ -5786,6 +5885,8 @@ event.on("iina.window-loaded", () => {
   setEnabled(prefBool("enabledByDefault", true));
 });
 event.on("mpv.file-loaded", () => {
+  subtitleDisplayEnabled = true;
+  postToOverlay("subtitle-visibility", { visible: true });
   lastSubtitle = null;
   subtitleEmptySince = 0;
   lastSubtitlePublishedAt = 0;

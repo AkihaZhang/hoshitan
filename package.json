@@ -1,6 +1,6 @@
 {
   "name": "hoshitan",
-  "version": "0.1.0-dev.2",
+  "version": "0.1.0-dev.3",
   "private": true,
   "description": "Subtitle dictionary lookup and Anki card creation for IINA",
   "license": "GPL-3.0-only",
@@ -9,7 +9,7 @@
     "package": "python3 scripts/build_plugin.py --package dist/hoshitan.iinaplgz",
     "validate": "python3 scripts/build_plugin.py --validate",
     "validate:release": "python3 scripts/build_plugin.py --validate --require-backend",
-    "test": "node tests/languages.test.js && node tests/import_validation.test.js && node tests/dictionary_pipeline.test.js && node tests/dictionary_import_manifest.test.js && node tests/lookup_candidate_selection.test.js && node tests/overlay_word_units.test.js && node tests/overlay_dictionary_formatting.test.js && node tests/overlay_audio.test.js && node tests/audio_bridge.test.js && node tests/local_audio.test.js && node tests/subtitle_polling.test.js && node tests/overlay_startup.test.js && node tests/overlay_bridge_latency.test.js && node tests/i18n.test.js && node tests/anki_payload.test.js && node tests/anki_export.test.js && node tests/popup_pause_preference.test.js && node tests/dictionary_manager_bridge.test.js && node tests/settings_menu_layout.test.js && node tests/native_backend_schema.test.js && node tests/debug_log_performance.test.js && node tests/check_generated_syntax.js && python3 scripts/build_plugin.py --validate",
+    "test": "node tests/languages.test.js && node tests/import_validation.test.js && node tests/dictionary_pipeline.test.js && node tests/dictionary_import_manifest.test.js && node tests/lookup_candidate_selection.test.js && node tests/overlay_word_units.test.js && node tests/overlay_dictionary_formatting.test.js && node tests/overlay_audio.test.js && node tests/overlay_popup_interactions.test.js && node tests/audio_bridge.test.js && node tests/local_audio.test.js && node tests/subtitle_polling.test.js && node tests/overlay_startup.test.js && node tests/overlay_bridge_latency.test.js && node tests/i18n.test.js && node tests/anki_payload.test.js && node tests/anki_export.test.js && node tests/popup_pause_preference.test.js && node tests/dictionary_manager_bridge.test.js && node tests/settings_menu_layout.test.js && node tests/native_backend_schema.test.js && node tests/debug_log_performance.test.js && node tests/check_generated_syntax.js && python3 scripts/build_plugin.py --validate",
     "test:perf": "node tests/lookup_performance.test.js",
     "pack": "/Applications/IINA.app/Contents/MacOS/iina-plugin pack .",
     "link": "/Applications/IINA.app/Contents/MacOS/iina-plugin link .",

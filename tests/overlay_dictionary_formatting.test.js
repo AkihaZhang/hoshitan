@@ -22,6 +22,13 @@ overlay.applyConfig({
 });
 assert(context.__head.children.length === 1, 'Custom CSS should create a style element');
 assert(/font-size: 16px/.test(context.__head.children[0].textContent), 'Custom CSS should be applied');
+overlay.applyConfig({
+  dictionaryStyles: {
+    'Jitendex': 'span[data-sc-content="part-of-speech-info"] { color: red; }'
+  }
+});
+assert(context.__head.children.length === 2, 'Dictionary CSS should create a separate scoped style element');
+assert(/dict-section\[data-dictionary="Jitendex"\]/.test(context.__head.children[1].textContent), 'Dictionary CSS should be scoped to its dictionary section');
 
 overlay.applyConfig({ popupTheme: 'light' });
 assert(/\btheme-light\b/.test(context.document.documentElement.className), 'Forced light mode should apply the light theme class');
@@ -224,6 +231,20 @@ assert(/<details class="dict-details example-section">/.test(examplesHtml), 'Wik
 assert(!/<details class="dict-details example-section" open>/.test(examplesHtml), 'Example sections should default collapsed');
 assert(/<b>it<\/b>/.test(examplesHtml), 'Inline Wiktionary bold text should be preserved inside examples');
 
+const styledAttributeHtml = overlay.renderGlossaryPayload({
+  dict: 'Jitendex',
+  glossary: JSON.stringify([{
+    type: 'structured-content',
+    content: [{
+      tag: 'span',
+      data: { content: 'part-of-speech-info', class: 'tag' },
+      content: 'noun'
+    }]
+  }])
+});
+assert(/data-sc-content="part-of-speech-info"/.test(styledAttributeHtml), 'Structured glossary output should preserve Yomitan data-sc-content attributes');
+assert(/data-sc-class="tag"/.test(styledAttributeHtml), 'Structured glossary output should preserve Yomitan data-sc-class attributes');
+
 const wrappedJapaneseHtml = overlay.renderGlossaryPayload({
   dict: '明鏡国語辞典 第三版',
   glossary: JSON.stringify([{
@@ -330,7 +351,7 @@ assert(/class="pos-pill misc-pill misc-male"/.test(formsHtml), 'Jitendex misc ta
 assert(/class="attribution-row"/.test(formsHtml), 'Jitendex attribution links should render at the bottom');
 assert(/data-external-url="https:\/\/www\.edrdg\.org\/jmwsgi\/entr\.py\?svc=jmdict&amp;q=123"/.test(formsHtml), 'JMdict attribution links should be clickable');
 assert(/data-external-url="https:\/\/tatoeba\.org\/en\/sentences\/show\/456"/.test(formsHtml), 'Tatoeba attribution links should be clickable');
-assert(/class="custom-marker"><span class="sense-number">①<\/span>/.test(formsHtml), 'Jitendex custom sense markers should be preserved');
+assert(/class="custom-marker"[^>]*><span class="sense-number">①<\/span>/.test(formsHtml), 'Jitendex custom sense markers should be preserved');
 assert(!/forms待つ俟つまつ/.test(formsHtml), 'Jitendex forms should not collapse into raw plaintext');
 
 const jitendexPriorityHtml = overlay.renderGlossaryPayload({

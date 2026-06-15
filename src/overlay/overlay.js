@@ -6,6 +6,7 @@
 
   const state = {
     enabled: false,
+    subtitleVisible: true,
     text: '',
     chars: [],
     lineId: 0,
@@ -26,6 +27,7 @@
 	      scanLength: 24,
 	      audioAutoPlay: false,
 	      audioSources: [],
+	      dictionaryStyles: {},
 	      etymologyCollapseDefault: 'collapsed',
 	      wiktionaryEtymologyCollapseOverride: 'collapsed',
 	      customPopupCss: '',
@@ -53,7 +55,12 @@
     ankiPendingRequestId: '',
     ankiPendingButton: null,
     lookupRequestSeq: 0,
+    currentLookupStored: null,
+    nestedLookupHistory: [],
+    nestedLookupRequestId: '',
+    nestedLookupRequestSeq: 0,
     audioPlaying: null,
+    audioPlayRequestSeq: 0,
     audioCache: Object.create(null),
     audioAutoPlayed: Object.create(null),
     audioSourceRequestSeq: 0,
@@ -96,7 +103,10 @@
       'Added': '已添加',
       'Try Again': '重试',
       'Added to Anki.': '已添加到 Anki。',
-      'Anki export failed.': 'Anki 导出失败。'
+      'Anki export failed.': 'Anki 导出失败。',
+      'Back': '返回',
+      'Close': '关闭',
+      'Looking up selection…': '正在查询选中文本…'
     }
   };
   function overlayUiLanguage() {
@@ -127,6 +137,8 @@
   const LOOKUP_RETRY_INTERVAL_MS = 60;
 	  let customPopupStyleEl = null;
 	  let lastCustomPopupCss = null;
+	  let dictionaryStylesEl = null;
+	  let lastDictionaryStylesSignature = '';
 	  let popupThemeHintQuery = null;
 	  let popupThemeHintListenerRegistered = false;
 
@@ -450,11 +462,13 @@
 	    reading = String(reading || '').trim();
 	    const sources = Array.isArray(options.sources) ? normalizeAudioSources(options.sources) : activeAudioSources();
 	    if (!term || !sources.length) return false;
+	    const requestSeq = ++state.audioPlayRequestSeq;
 	    const key = audioTermReadingKey(term, reading);
 	    if (button) button.dataset.audioKey = key;
 	    setAudioButtonsStateForKey(key, 'loading', 'Finding audio...');
 	    try {
 	      const result = await findPlayableAudio(term, reading, sources);
+	      if (requestSeq !== state.audioPlayRequestSeq) return false;
 	      if (!result || !result.audio) {
 	        setAudioButtonsStateForKey(key, 'missing', 'Could not find audio');
 	        return false;
@@ -629,6 +643,37 @@
 	      overlayDebug("custom popup CSS apply failed " + String(error && error.message ? error.message : error));
 	    }
 	  }
+	  function cssAttributeValue(value) {
+	    return String(value || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/[\r\n\f]/g, ' ');
+	  }
+	  function applyDictionaryStyles(styles) {
+	    const source = styles && typeof styles === 'object' && !Array.isArray(styles) ? styles : {};
+	    const names = Object.keys(source).sort();
+	    const signature = names.map(name => name + '\u0000' + String(source[name] || '')).join('\u0001');
+	    if (signature === lastDictionaryStylesSignature) return;
+	    lastDictionaryStylesSignature = signature;
+	    let total = 0;
+	    const rules = [];
+	    names.forEach(name => {
+	      if (total >= 300000) return;
+	      const css = String(source[name] || '').slice(0, Math.max(0, Math.min(100000, 300000 - total)));
+	      if (!css.trim()) return;
+	      total += css.length;
+	      rules.push('#popup .dict-section[data-dictionary="' + cssAttributeValue(name) + '"] {' + css + '}');
+	    });
+	    try {
+	      if (!dictionaryStylesEl) {
+	        dictionaryStylesEl = document.createElement('style');
+	        dictionaryStylesEl.id = 'hoshitan-dictionary-styles';
+	        const host = document.head || document.documentElement;
+	        if (host && host.appendChild) host.appendChild(dictionaryStylesEl);
+	      }
+	      dictionaryStylesEl.textContent = rules.join('\n');
+	      overlayDebug("dictionary CSS applied dictionaries=" + names.length + " bytes=" + total);
+	    } catch (error) {
+	      overlayDebug("dictionary CSS apply failed " + String(error && error.message ? error.message : error));
+	    }
+	  }
   function normalizePopupTheme(value) {
     const theme = String(value || '').trim().toLowerCase();
     if (theme === 'dark' || theme === 'light' || theme === 'inherit') return theme;
@@ -780,22 +825,30 @@
 	    if (state.config.subtitleShadowOffset) document.documentElement.style.setProperty('--subtitle-shadow-offset', String(state.config.subtitleShadowOffset));
 	    if (state.config.subtitleShadowBlur) document.documentElement.style.setProperty('--subtitle-shadow-blur', String(state.config.subtitleShadowBlur));
 	    applyCustomPopupCss(state.config.customPopupCss || '');
+	    applyDictionaryStyles(state.config.dictionaryStyles || {});
 	    if (state.config.overlayBridgePort) {
 	      state.bridgePort = Number(state.config.overlayBridgePort);
 	      ensureBridgeSocket();
 	    }
 	    if (state.currentPos !== null && state.lookupByPos[state.currentPos] && !popupEl.classList.contains('hidden')) {
-	      renderStoredLookup(state.lookupByPos[state.currentPos]);
+	      const visibleLookup = state.currentLookupStored || state.lookupByPos[state.currentPos];
+	      renderStoredLookup(visibleLookup, { nested: state.nestedLookupHistory.length > 0 });
 	    }
 	    if (state.task) renderTaskPanel();
 	    overlayDebug("config applied bridgePort=" + String(state.bridgePort) + " popupScale=" + String(state.config.popupScale) + " popupTheme=" + String(state.config.popupTheme || "inherit") + " etymologyCollapseDefault=" + String(state.config.etymologyCollapseDefault || "collapsed") + " wiktionaryOverride=" + String(state.config.wiktionaryEtymologyCollapseOverride || "inherit"));
 	  }
 
   function renderSubtitle(text, lineId) {
-    state.text = flattenSubtitleText(text);
+    const nextText = flattenSubtitleText(text);
+    const nextLineId = Number(lineId || 0);
+    if (nextText === state.text && nextLineId === state.lineId && subtitleEl.children && subtitleEl.children.length) {
+      if (state.enabled && state.subtitleVisible && nextText) subtitleEl.classList.remove('hidden');
+      return;
+    }
+    state.text = nextText;
     overlayDebug("renderSubtitle lineId=" + state.lineId + " chars=" + Array.from(state.text || '').length + " text=" + JSON.stringify(String(state.text || '').slice(0, 80)));
     state.chars = Array.from(state.text);
-    state.lineId = Number(lineId || 0);
+    state.lineId = nextLineId;
     Object.keys(state.pendingLookupTimers || {}).forEach(k => clearTimeout(state.pendingLookupTimers[k]));
     Object.keys(state.pendingLookupRequests || {}).forEach(k => cancelPendingLookupRequest(k));
     cancelPendingAudioSourceRequests();
@@ -806,10 +859,13 @@
     state.audioAutoPlayed = Object.create(null);
     state.progress = null;
     state.currentPos = null;
+    state.currentLookupStored = null;
+    state.nestedLookupHistory = [];
+    state.nestedLookupRequestId = '';
     state.activeMatchStart = null;
     state.activeMatchLength = 0;
     subtitleEl.textContent = '';
-    if (!state.enabled || !state.text) {
+    if (!state.enabled || !state.subtitleVisible || !state.text) {
       subtitleEl.classList.add('hidden');
       hidePopup();
       return;
@@ -969,6 +1025,11 @@
     const sameUnitVisible = state.currentPos === pos && !popupEl.classList.contains('hidden');
     overlayDebug("char enter rawPos=" + rawPos + " unitPos=" + pos + " unitKey=" + unit.key + " word=" + String(unit.isWord) + " char=" + JSON.stringify(target.textContent || "") + " cached=" + String(!!state.lookupByPos[pos]));
     state.currentPos = pos;
+    if (!sameUnitVisible) {
+      state.currentLookupStored = null;
+      state.nestedLookupHistory = [];
+      state.nestedLookupRequestId = '';
+    }
     const stored = state.lookupByPos[pos];
     if (sameUnitVisible) {
       if (stored) renderStoredLookup(stored);
@@ -1001,7 +1062,15 @@
 	  function closestAnkiButton(target) {
 	    let el = target;
 	    while (el && el !== popupEl) {
-	      if (el.getAttribute && el.getAttribute('data-anki-entry-index') !== '') return el;
+	      if (el.hasAttribute && el.hasAttribute('data-anki-entry-index')) return el;
+	      el = el.parentNode;
+	    }
+	    return null;
+	  }
+	  function closestPopupAction(target) {
+	    let el = target;
+	    while (el && el !== popupEl) {
+	      if (el.dataset && el.dataset.popupAction) return el;
 	      el = el.parentNode;
 	    }
 	    return null;
@@ -1120,6 +1189,31 @@
 	      return '';
 	    }
 	  }
+	  function requestNestedLookup(text) {
+	    const lookupText = normalizeWhitespace(text).slice(0, 120);
+	    if (!lookupText || !state.currentLookupStored || state.nestedLookupRequestId) return false;
+	    const requestId = 'nested-' + String(Date.now()) + '-' + String(++state.nestedLookupRequestSeq);
+	    state.nestedLookupRequestId = requestId;
+	    setPopupBody('<div class="loading">' + escapeHtml(tr('Looking up selection…')) + '</div>');
+	    const payload = { type: 'nested-lookup', requestId, text: lookupText, at: Date.now() };
+	    if (!sendBridgeMessage(payload)) {
+	      try { iina.postMessage('nested-lookup', payload); }
+	      catch (error) {
+	        state.nestedLookupRequestId = '';
+	        setPopupBody('<div class="error">' + escapeHtml(String(error && error.message ? error.message : error)) + '</div>');
+	        return false;
+	      }
+	    }
+	    return true;
+	  }
+	  function showPreviousNestedLookup() {
+	    if (!state.nestedLookupHistory.length) return false;
+	    state.nestedLookupRequestId = '';
+	    const previous = state.nestedLookupHistory.pop();
+	    state.currentLookupStored = previous || null;
+	    renderStoredLookup(previous, { nested: state.nestedLookupHistory.length > 0 });
+	    return true;
+	  }
 	  function ankiPayloadForEntry(entry, requestId) {
 	    const term = entry && entry.term ? entry.term : {};
 	    const glossary = glossaryDataForEntry(entry);
@@ -1152,7 +1246,7 @@
 	  }
 	  function requestAnkiExport(button) {
 	    const entryIndex = Math.max(0, Number(button.getAttribute('data-anki-entry-index') || 0) || 0);
-	    const stored = state.lookupByPos[state.currentPos];
+	    const stored = state.currentLookupStored || state.lookupByPos[state.currentPos];
 	    const result = stored && stored.result ? stored.result : {};
 	    const entries = Array.isArray(result.results) ? result.results : [];
 	    const entry = entries[entryIndex];
@@ -1181,6 +1275,16 @@
 	    }
 	  }
 	  function onPopupClick(ev) {
+	    const actionButton = closestPopupAction(ev.target);
+	    if (actionButton) {
+	      ev.preventDefault();
+	      ev.stopPropagation();
+	      if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
+	      const action = String(actionButton.dataset.popupAction || '');
+	      if (action === 'close') hidePopup();
+	      else if (action === 'back') showPreviousNestedLookup();
+	      return;
+	    }
 	    const ankiButton = closestAnkiButton(ev.target);
 	    if (ankiButton) {
 	      ev.preventDefault();
@@ -1206,6 +1310,13 @@
 	  popupEl.addEventListener('mouseenter', cancelHidePopupTimer);
 	  popupEl.addEventListener('mouseleave', scheduleHidePopup);
 	  popupEl.addEventListener('click', onPopupClick, true);
+	  popupEl.addEventListener('dblclick', event => {
+	    if (closestPopupAction(event.target) || closestAnkiButton(event.target) || closestExternalLink(event.target)) return;
+	    const text = popupSelectionText().slice(0, 120);
+	    if (!text || !Array.from(text).some(isLookupableChar)) return;
+	    try { event.preventDefault(); event.stopPropagation(); } catch (_) {}
+	    requestNestedLookup(text);
+	  });
   function trapPopupWheel(ev) {
     if (popupEl.classList.contains('hidden')) return;
     ev.preventDefault();
@@ -1406,10 +1517,16 @@
 
   function hidePopup() {
     hideAudioSourceMenu();
+    state.audioPlayRequestSeq++;
+    cancelPendingAudioSourceRequests();
+    stopCurrentAudio();
     setLookupPopupVisibility(false);
     popupEl.classList.add('hidden');
     state.currentPos = null;
     state.currentAnchor = null;
+    state.currentLookupStored = null;
+    state.nestedLookupHistory = [];
+    state.nestedLookupRequestId = '';
     Object.keys(state.pendingLookupTimers || {}).forEach(k => clearTimeout(state.pendingLookupTimers[k]));
     Object.keys(state.pendingLookupRequests || {}).forEach(k => cancelPendingLookupRequest(k));
     state.pendingLookupTimers = Object.create(null);
@@ -1442,9 +1559,13 @@
 	  }
 	  function renderPopupHead(heading, reading, secondaryText, audioData) {
 	    const audioHtml = audioData ? renderAudioButtonHtml(audioData.term, audioData.reading) : '';
+	    const backHtml = state.nestedLookupHistory.length
+	      ? '<button type="button" class="popup-control-button popup-back-button" data-popup-action="back" title="' + escapeHtml(tr('Back')) + '" aria-label="' + escapeHtml(tr('Back')) + '">‹</button>'
+	      : '';
+	    const closeHtml = '<button type="button" class="popup-control-button popup-close-button" data-popup-action="close" title="' + escapeHtml(tr('Close')) + '" aria-label="' + escapeHtml(tr('Close')) + '">×</button>';
 	    return '<div class="head-main"><div class="head-title"><span class="term">' + escapeHtml(heading || '') + '</span>' +
 	      (reading ? '<span class="reading">' + escapeHtml(reading) + '</span>' : '') + '</div>' +
-	      audioHtml + '</div>' +
+	      '<div class="head-actions">' + backHtml + audioHtml + closeHtml + '</div></div>' +
 	      (secondaryText ? '<div class="lookup-source">' + escapeHtml(secondaryText) + '</div>' : '');
 	  }
 	  function showPopup(anchor, heading, bodyHtml) {
@@ -1641,6 +1762,30 @@
 	  function nodeDataMap(node) {
 	    return (node && typeof node === 'object' && node.data && typeof node.data === 'object') ? node.data : {};
 	  }
+	  function structuredDataAttributes(node, omitTitle) {
+	    if (!node || typeof node !== 'object') return '';
+	    const pairs = [];
+	    const seen = Object.create(null);
+	    const add = (name, value) => {
+	      const attr = String(name || '');
+	      if (!attr || seen[attr] || !/^[^\s"'<>/=]+$/.test(attr)) return;
+	      if (value !== null && typeof value === 'object') return;
+	      seen[attr] = true;
+	      pairs.push(attr + '="' + escapeHtml(value === true ? '' : String(value == null ? '' : value)) + '"');
+	    };
+	    const data = nodeDataMap(node);
+	    Object.keys(data).forEach(key => {
+	      if (key === 'class' || key === 'className') add('data-sc-class', data[key]);
+	      else if (key === 'content' || key === 'data-content') add('data-sc-content', data[key]);
+	      else add('data-sc-' + key, data[key]);
+	    });
+	    const attrs = node.attributes || node.attrs || {};
+	    Object.keys(attrs).forEach(key => {
+	      if ((!omitTitle && key === 'title') || key.indexOf('data-') === 0) add(key, attrs[key]);
+	    });
+	    if (!omitTitle && node.title) add('title', node.title);
+	    return pairs.length ? ' ' + pairs.join(' ') : '';
+	  }
 	  function hasDataFlag(node, name) {
 	    const data = nodeDataMap(node);
 	    return Object.prototype.hasOwnProperty.call(data, name);
@@ -1829,7 +1974,7 @@
 	    const body = links.length ? links.join(' · ') : escapeAndLinkifyText(text);
 	    if (!body) return '';
 	    overlayDebug("detected source/backlink row source=" + String(ctx && ctx.sourceKind || "generic"));
-	    return '<div class="source-row"><span class="source-label">Source</span> ' + body + '</div>';
+	    return '<div class="source-row"' + structuredDataAttributes(node) + '><span class="source-label">Source</span> ' + body + '</div>';
 	  }
 	  function renderAttributionRow(node, ctx) {
 	    const linkNodes = findNodes(node, n => n && n.tag === 'a');
@@ -1837,7 +1982,7 @@
 	    const text = normalizeWhitespace(plainTextFromNode(node.content));
 	    const body = links.length ? links.join(' | ') : escapeAndLinkifyText(text);
 	    if (!body) return '';
-	    return '<div class="attribution-row">' + body + '</div>';
+	    return '<div class="attribution-row"' + structuredDataAttributes(node) + '>' + body + '</div>';
 	  }
 	  function isPriorityTag(label) {
 	    const cleaned = normalizeWhitespace(label).replace(/^[\u2605*]\s*/, '');
@@ -1903,22 +2048,23 @@
 	    const kind = nodeDataContent(node);
 	    const cls = nodeClassName(node);
 	    const data = nodeDataMap(node);
+	    const attrs = structuredDataAttributes(node);
 	    const text = normalizeWhitespace(plainTextFromNode(node.content));
 	    const blocky = hasStructuredBlockContent(node);
 	    const body = blocky ? renderStructuredNode(node.content, ctx) : renderInlineNode(node.content, ctx);
-	    if (kind === 'bold-text') return '<b>' + body + '</b>';
-	    if (kind === 'example-keyword' || hasDataFlag(node, 'spellout')) return '<span class="example-keyword">' + body + '</span>';
-	    if (kind === 'tag') return renderOneTag(text, data.category || 'tag');
-	    if (kind === 'forms-label') return '<span class="forms-label" title="' + escapeHtml(nodeTitle(node) || 'forms') + '">' + escapeHtml(text || 'forms') + '</span>';
-	    if (hasDataFlag(node, 'POS') || hasDataFlag(node, 'pos') || hasDataFlag(node, 'hinshi') || kind === 'part-of-speech-info') return '<span class="pos-pill" title="' + escapeHtml(nodeTitle(node)) + '">' + body + '</span>';
-	    if (kind === 'misc-info') return '<span class="pos-pill misc-pill misc-' + escapeHtml(String(data.code || 'info')) + '" title="' + escapeHtml(nodeTitle(node)) + '">' + body + '</span>';
-	    if (hasDataFlag(node, 'katsuyo')) return '<span class="grammar-inline">' + body + '</span>';
-	    if (hasDataFlag(node, 'num') || hasDataFlag(node, 'bc') || hasDataFlag(node, 'rect') || /(?:^|\s)(?:FM|gaiji)(?:\s|$)/i.test(cls)) return '<span class="sense-number">' + body + '</span>';
-	    if (hasDataFlag(node, 'sup')) return '<span class="usage-marker">' + body + '</span>';
-	    if (hasDataFlag(node, 'logo') || hasDataFlag(node, '補足ロゴ')) return '<span class="section-label">' + body + '</span>';
-	    if (hasDataFlag(node, 'ex') || hasDataFlag(node, 'ExG') || hasDataFlag(node, 'example')) return '<span class="dict-inline-example">' + body + '</span>';
-	    if (hasDataFlag(node, 'headword') || /(?:見出|headword|カナ|かな|表記)/.test(cls)) return '<span class="dict-headword-inline">' + body + '</span>';
-	    return body;
+	    if (kind === 'bold-text') return '<span' + attrs + '><b>' + body + '</b></span>';
+	    if (kind === 'example-keyword' || hasDataFlag(node, 'spellout')) return '<span class="example-keyword"' + attrs + '>' + body + '</span>';
+	    if (kind === 'tag') return '<span' + attrs + '>' + renderOneTag(text, data.category || 'tag') + '</span>';
+	    if (kind === 'forms-label') return '<span class="forms-label"' + structuredDataAttributes(node, true) + ' title="' + escapeHtml(nodeTitle(node) || 'forms') + '">' + escapeHtml(text || 'forms') + '</span>';
+	    if (hasDataFlag(node, 'POS') || hasDataFlag(node, 'pos') || hasDataFlag(node, 'hinshi') || kind === 'part-of-speech-info') return '<span class="pos-pill"' + structuredDataAttributes(node, true) + ' title="' + escapeHtml(nodeTitle(node)) + '">' + body + '</span>';
+	    if (kind === 'misc-info') return '<span class="pos-pill misc-pill misc-' + escapeHtml(String(data.code || 'info')) + '"' + structuredDataAttributes(node, true) + ' title="' + escapeHtml(nodeTitle(node)) + '">' + body + '</span>';
+	    if (hasDataFlag(node, 'katsuyo')) return '<span class="grammar-inline"' + attrs + '>' + body + '</span>';
+	    if (hasDataFlag(node, 'num') || hasDataFlag(node, 'bc') || hasDataFlag(node, 'rect') || /(?:^|\s)(?:FM|gaiji)(?:\s|$)/i.test(cls)) return '<span class="sense-number"' + attrs + '>' + body + '</span>';
+	    if (hasDataFlag(node, 'sup')) return '<span class="usage-marker"' + attrs + '>' + body + '</span>';
+	    if (hasDataFlag(node, 'logo') || hasDataFlag(node, '補足ロゴ')) return '<span class="section-label"' + attrs + '>' + body + '</span>';
+	    if (hasDataFlag(node, 'ex') || hasDataFlag(node, 'ExG') || hasDataFlag(node, 'example')) return '<span class="dict-inline-example"' + attrs + '>' + body + '</span>';
+	    if (hasDataFlag(node, 'headword') || /(?:見出|headword|カナ|かな|表記)/.test(cls)) return '<span class="dict-headword-inline"' + attrs + '>' + body + '</span>';
+	    return '<span class="gloss-sc-span"' + attrs + '>' + body + '</span>';
 	  }
 	  function renderExampleBox(node, ctx) {
 	    const jaNode = findNodes(node, n => n && n.data && n.data.content === 'example-sentence-a')[0];
@@ -1929,7 +2075,7 @@
 	    const cite = citeNode ? renderInlineNode(citeNode.content, ctx) : '';
 	    if (!ja && !en && !cite) return '';
 	    const primaryClass = en ? 'example-ja' : 'example-text';
-	    return '<div class="example-card">' + (ja ? '<div class="' + primaryClass + '">' + ja + '</div>' : '') + (en ? '<div class="example-en">' + en + '</div>' : '') + (cite ? '<div class="example-cite">' + cite + '</div>' : '') + '</div>';
+	    return '<div class="example-card"' + structuredDataAttributes(node) + '>' + (ja ? '<div class="' + primaryClass + '">' + ja + '</div>' : '') + (en ? '<div class="example-en">' + en + '</div>' : '') + (cite ? '<div class="example-cite">' + cite + '</div>' : '') + '</div>';
 	  }
 	  function renderSenseNoteBox(node, ctx) {
 	    const labelNode = findNodes(node, n => n && n.data && n.data.content === 'sense-note-label')[0];
@@ -1937,7 +2083,7 @@
 	    const label = labelNode ? renderInlineNode(labelNode.content, ctx) : tr('Note');
 	    const content = contentNode ? renderInlineNode(contentNode.content, ctx) : renderInlineNode(node.content, ctx);
 	    if (!content) return '';
-	    return '<div class="note-card"><div class="note-label">' + (label || tr('Note')) + '</div><div class="note-content">' + content + '</div></div>';
+	    return '<div class="note-card"' + structuredDataAttributes(node) + '><div class="note-label">' + (label || tr('Note')) + '</div><div class="note-content">' + content + '</div></div>';
 	  }
 	  function renderXrefBox(node, ctx) {
 	    const labelNode = findNodes(node, n => n && n.data && n.data.content === 'reference-label')[0];
@@ -1947,7 +2093,7 @@
 	    const links = linkNodes.map(n => renderInlineNode(n, ctx)).filter(Boolean);
 	    const gloss = glossNode ? renderInlineNode(glossNode.content, ctx) : '';
 	    if (!links.length && !gloss) return '';
-	    return '<div class="xref-card">' + '<span class="xref-label">' + escapeHtml(label || tr('See also')) + '</span>' + (links.length ? '<div>' + links.join(' · ') + '</div>' : '') + (gloss ? '<div class="xref-glossary">' + gloss + '</div>' : '') + '</div>';
+	    return '<div class="xref-card"' + structuredDataAttributes(node) + '>' + '<span class="xref-label">' + escapeHtml(label || tr('See also')) + '</span>' + (links.length ? '<div>' + links.join(' · ') + '</div>' : '') + (gloss ? '<div class="xref-glossary">' + gloss + '</div>' : '') + '</div>';
 	  }
 	  function renderListMarker(item) {
 	    const style = item && item.style ? item.style : {};
@@ -1957,12 +2103,13 @@
 	  function renderListNode(node, ctx, ordered, className) {
 	    const tag = ordered ? 'ol' : 'ul';
 	    const items = toArray(node.content);
-	    return '<' + tag + ' class="glossary-list ' + className + '">' + items.map(item => {
+	    return '<' + tag + ' class="glossary-list ' + className + '"' + structuredDataAttributes(node) + '>' + items.map(item => {
 	      const marker = renderListMarker(item);
 	      const content = item && typeof item === 'object' && item.tag === 'li' ? item.content : item;
 	      const body = renderStructuredNode(content, ctx);
-	      if (marker) return '<li class="custom-marker"><span class="sense-number">' + escapeHtml(marker) + '</span>' + body + '</li>';
-	      return '<li>' + body + '</li>';
+	      const itemAttrs = item && typeof item === 'object' ? structuredDataAttributes(item) : '';
+	      if (marker) return '<li class="custom-marker"' + itemAttrs + '><span class="sense-number">' + escapeHtml(marker) + '</span>' + body + '</li>';
+	      return '<li' + itemAttrs + '>' + body + '</li>';
 	    }).join('') + '</' + tag + '>';
 	  }
 	  function renderGlossaryLinesNode(node, ctx) {
@@ -1992,10 +2139,10 @@
 	    if (!body && tag === 'th') body = '&nbsp;';
 	    const cls = nodeClassName(node);
 	    const classAttr = cls ? ' class="' + escapeHtml(cls) + '"' : '';
-	    return '<' + tag + classAttr + '>' + body + '</' + tag + '>';
+	    return '<' + tag + classAttr + structuredDataAttributes(node) + '>' + body + '</' + tag + '>';
 	  }
 	  function renderTableNode(node, ctx) {
-	    return '<table class="forms-table">' + toArray(node.content).map(row => renderStructuredNode(row, ctx)).join('') + '</table>';
+	    return '<table class="forms-table"' + structuredDataAttributes(node) + '>' + toArray(node.content).map(row => renderStructuredNode(row, ctx)).join('') + '</table>';
 	  }
 	  function renderFormsNode(node, ctx) {
 	    return '<div class="forms-block">' + renderStructuredNode(node.content, ctx) + '</div>';
@@ -2022,7 +2169,7 @@
 	    if (hasDataFlag(node, '活用') || hasDataFlag(node, '参考') || hasDataFlag(node, 'column') || hasDataFlag(node, 'コラム') || hasDataFlag(node, '表現')) outClass += ' info-block';
 	    if (hasDataFlag(node, 'title2')) outClass += ' subsection-title';
 	    if (kind === 'extra-info') outClass += ' extra-info';
-	    return '<div class="' + outClass + '">' + body + '</div>';
+	    return '<div class="' + outClass + '"' + structuredDataAttributes(node) + '>' + body + '</div>';
 	  }
 	  function renderStructuredNode(node, ctx) {
 	    if (node == null) return '';
@@ -2037,16 +2184,17 @@
 	    if (kind === 'attribution') return renderAttributionRow(node, ctx);
 	    if (tag === 'details' || isGrammarDetails(node) || isEtymologyDetails(node)) return renderDetailsNode(node, ctx);
 	    if (kind === 'backlink') return renderBacklinkRow(node, ctx);
-	    if (kind === 'tags') return '<span class="inline-tag-row">' + renderStructuredNode(node.content, ctx) + '</span>';
-	    if (kind === 'tag') return renderOneTag(plainTextFromNode(node.content), nodeDataMap(node).category || 'tag');
-	    if (kind === 'part-of-speech-info') return '<span class="pos-pill">' + escapeHtml(plainTextFromNode(node.content)) + '</span>';
+	    if (kind === 'tags') return '<span class="inline-tag-row"' + structuredDataAttributes(node) + '>' + renderStructuredNode(node.content, ctx) + '</span>';
+	    if (kind === 'tag') return '<span' + structuredDataAttributes(node) + '>' + renderOneTag(plainTextFromNode(node.content), nodeDataMap(node).category || 'tag') + '</span>';
+	    if (kind === 'part-of-speech-info') return '<span class="pos-pill"' + structuredDataAttributes(node) + '>' + escapeHtml(plainTextFromNode(node.content)) + '</span>';
 	    if (kind === 'misc-info') return renderStructuredSpan(node, ctx);
 	    if ((cls === 'extra-box' && kind === 'example-sentence') || kind === 'example-sentence') return renderExampleBox(node, ctx);
 	    if (cls === 'extra-box' && kind === 'sense-note') return renderSenseNoteBox(node, ctx);
 	    if (cls === 'extra-box' && kind === 'xref') return renderXrefBox(node, ctx);
-	    if (kind === 'sense-groups') return '<div class="sense-groups">' + renderStructuredNode(node.content, ctx) + '</div>';
-	    if (kind === 'sense-group') return '<div class="sense-group">' + renderStructuredNode(node.content, ctx) + '</div>';
-	    if (kind === 'sense') return '<div class="sense-body">' + renderStructuredNode(node.content, ctx) + '</div>';
+	    if (kind === 'sense-groups' && (tag === 'ul' || tag === 'ol')) return renderListNode(node, ctx, tag === 'ol', 'sense-groups');
+	    if (kind === 'sense-groups') return '<div class="sense-groups"' + structuredDataAttributes(node) + '>' + renderStructuredNode(node.content, ctx) + '</div>';
+	    if (kind === 'sense-group') return '<div class="sense-group"' + structuredDataAttributes(node) + '>' + renderStructuredNode(node.content, ctx) + '</div>';
+	    if (kind === 'sense') return '<div class="sense-body"' + structuredDataAttributes(node) + '>' + renderStructuredNode(node.content, ctx) + '</div>';
 	    if (kind === 'forms') return renderFormsNode(node, ctx);
 	    if (kind === 'glossary' && (tag === 'ul' || tag === 'ol')) return renderGlossaryLinesNode(node, ctx);
 	    if (kind === 'glosses' && (tag === 'ul' || tag === 'ol')) return renderListNode(node, ctx, true, 'glosses-list');
@@ -2056,13 +2204,13 @@
 	    if (tag === 'br') return '<br>';
 	    if (tag === 'a') return renderInlineNode(node, ctx);
 	    if (tag === 'table') return renderTableNode(node, ctx);
-	    if (tag === 'tr') return '<tr>' + renderStructuredNode(node.content, ctx) + '</tr>';
+	    if (tag === 'tr') return '<tr' + structuredDataAttributes(node) + '>' + renderStructuredNode(node.content, ctx) + '</tr>';
 	    if (tag === 'th' || tag === 'td') return renderTableCell(node, ctx);
 	    if (tag === 'thead' || tag === 'tbody') return renderStructuredNode(node.content, ctx);
 	    if (tag === 'span') return renderStructuredSpan(node, ctx);
 	    if (tag === 'ul') return renderListNode(node, ctx, false, '');
 	    if (tag === 'ol') return renderListNode(node, ctx, true, '');
-	    if (tag === 'li') return '<div class="list-item-body">' + renderStructuredNode(node.content, ctx) + '</div>';
+	    if (tag === 'li') return '<div class="list-item-body"' + structuredDataAttributes(node) + '>' + renderStructuredNode(node.content, ctx) + '</div>';
 	    if (tag === 'div') return renderBlockNode(node, ctx);
 	    return renderStructuredNode(node.content, ctx);
 	  }
@@ -2183,7 +2331,9 @@
 	    state.audioAutoPlayed[key] = true;
 	    playAudioForTerm(data.term, data.reading, null, { auto: true }).catch(() => {});
 	  }
-	  function renderStoredLookup(stored) {
+	  function renderStoredLookup(stored, options) {
+    options = options || {};
+    state.currentLookupStored = stored || null;
     if (!stored || !stored.ok) {
       setPopupBody('<div class="error">' + escapeHtml((stored && stored.error) || tr('Lookup failed')) + '</div>');
       return;
@@ -2193,15 +2343,19 @@
     if (!entries.length) {
       const lang = activeLanguage();
       const label = lang.lookupUnit === 'word' || lang.wordMode === 'latin-word' || lang.wordMode === 'korean-run' ? 'word' : 'character';
-      activateNoResultMatch(stored);
+      if (!options.nested) activateNoResultMatch(stored);
       overlayDebug("render no-result pos=" + String(state.currentPos) + " lookupStart=" + String(result.lookupStart) + " lookupEnd=" + String(result.lookupEnd) + " reason=" + String(result.noResultReason || "empty"));
-      setPopupBody('<div class="empty">' + escapeHtml(tr(label === 'word' ? 'No dictionary entry found from this word.' : 'No dictionary entry found from this character.')) + '</div>');
+      const nestedHeading = options.nested ? String(stored.nestedText || result.lookupText || result.text || '') : undefined;
+      setPopupBody(
+        '<div class="empty">' + escapeHtml(tr(label === 'word' ? 'No dictionary entry found from this word.' : 'No dictionary entry found from this character.')) + '</div>',
+        nestedHeading
+      );
       return;
     }
 	    const first = entries[0];
 	    const header = displayHeaderForResult(result, first);
 	    const headerAudio = audioDataForEntry(first);
-	    if (state.currentPos !== null && state.currentPos !== undefined) {
+	    if (!options.nested && state.currentPos !== null && state.currentPos !== undefined) {
 	      activateStoredMatch(stored, lookupPreviewForPosition(state.currentPos));
 	    }
 	    const maxEntries = Math.max(1, state.config.maxEntries || 3);
@@ -2224,7 +2378,7 @@
 	      html += renderEntryMetadata(term);
       const glossaries = Array.isArray(term.glossaries) ? term.glossaries : [];
       glossaries.slice(0, maxGlosses).forEach(g => {
-        html += '<div class="dict-section">';
+        html += '<div class="dict-section" data-dictionary="' + escapeHtml(String(g.dict || '')) + '">';
         html += '<div class="dict-header">';
         if (g.dict) html += '<span class="dict-name">' + escapeHtml(g.dict) + '</span>';
         html += '</div>';
@@ -2235,7 +2389,7 @@
       html += '</div>';
     });
 	    setPopupBody(html, header.heading, header.reading, header.secondary, headerAudio);
-	    maybeAutoPlayEntryAudio(stored, first);
+	    if (!options.nested) maybeAutoPlayEntryAudio(stored, first);
 	  }
 
   function updateCharReady(pos) {
@@ -2315,6 +2469,16 @@
     if (!state.enabled) renderSubtitle('', state.lineId);
     else renderSubtitle(state.text, state.lineId);
   });
+  iina.onMessage('subtitle-visibility', payload => {
+    state.subtitleVisible = !payload || payload.visible !== false;
+    if (!state.subtitleVisible) {
+      subtitleEl.classList.add('hidden');
+      hidePopup();
+    } else if (state.enabled && state.text) {
+      subtitleEl.classList.remove('hidden');
+    }
+  });
+  iina.onMessage('close-popup', () => hidePopup());
   iina.onMessage('subtitle', payload => {
     if (payload && payload.config) applyConfig(payload.config);
     renderSubtitle(payload && payload.text ? payload.text : '', payload && payload.lineId ? payload.lineId : 0);
@@ -2344,6 +2508,25 @@
     const req = requestId ? state.pendingAudioSourceRequests[requestId] : null;
     if (!req || typeof req.finish !== 'function') return;
     req.finish(payload || null);
+  });
+  iina.onMessage('nested-lookup-result', payload => {
+    const requestId = String((payload && payload.requestId) || '');
+    if (!requestId || requestId !== state.nestedLookupRequestId) return;
+    state.nestedLookupRequestId = '';
+    if (!payload.ok) {
+      setPopupBody('<div class="error">' + escapeHtml(String(payload.error || tr('Lookup failed'))) + '</div>');
+      return;
+    }
+    const previous = state.currentLookupStored;
+    if (previous) state.nestedLookupHistory.push(previous);
+    const stored = {
+      ok: true,
+      position: state.currentPos,
+      nested: true,
+      nestedText: String(payload.text || ''),
+      result: payload.result || {}
+    };
+    renderStoredLookup(stored, { nested: true });
   });
 
   iina.onMessage('line-lookup-result', payload => {
@@ -2391,7 +2574,10 @@
     hideAudioSourceMenu();
   });
   document.addEventListener('keydown', event => {
-    if (event && event.key === 'Escape') hideAudioSourceMenu();
+    if (event && event.key === 'Escape') {
+      hideAudioSourceMenu();
+      hidePopup();
+    }
   });
   window.addEventListener('resize', () => {
     hideAudioSourceMenu();

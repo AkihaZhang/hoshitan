@@ -216,6 +216,7 @@
     #popup .head { padding: 14px 18px 12px; }
     #popup .head-main { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-width: 0; }
     #popup .head-title { flex: 1 1 auto; min-width: 0; }
+    #popup .head-actions { display: flex; align-items: center; gap: 7px; flex: 0 0 auto; }
     #popup .term { font-size: 30px; font-weight: 800; line-height: 1.15; }
     #popup .reading { margin-left: 10px; color: var(--popup-reading); font-size: 16px; font-weight: 650; }
     #popup .lookup-source { margin-top: 4px; color: var(--popup-faint); font-size: 12px; font-weight: 650; line-height: 1.25; }
@@ -248,6 +249,31 @@
       pointer-events: auto;
     }
     .audio-button:hover { color: var(--popup-heading); border-color: var(--popup-border); background: var(--popup-chip-bg); }
+    .popup-control-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 auto;
+      width: 26px;
+      height: 26px;
+      border: 1px solid var(--popup-divider);
+      border-radius: 999px;
+      padding: 0;
+      color: var(--popup-muted);
+      background: var(--popup-subtle-chip-bg);
+      font: inherit;
+      font-size: 22px;
+      line-height: 1;
+      cursor: pointer;
+      pointer-events: auto;
+    }
+    .popup-control-button:hover {
+      color: var(--popup-heading);
+      border-color: var(--popup-border);
+      background: var(--popup-chip-bg);
+    }
+    .popup-back-button { font-size: 26px; padding-bottom: 2px; }
+    .popup-close-button { font-size: 20px; padding-bottom: 2px; }
     .dict-term .audio-button { position: absolute; top: 1px; right: 0; margin: 0; }
     .audio-button[data-audio-state="loading"] { opacity: 0.72; }
     .audio-button[data-audio-state="loading"] .audio-icon { animation: audio-pulse 0.82s ease-in-out infinite alternate; }

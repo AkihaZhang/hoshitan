@@ -84,6 +84,7 @@ const resetCount = posts.filter(post => post.name === 'line-lookup-reset').lengt
 context.pollSubtitle();
 const replay = posts.filter(post => post.name === 'subtitle').slice(-1)[0];
 assert(replay.data.lineId === secondaryLineId, 'Heartbeat replay should preserve the subtitle line id');
+assert(!Object.prototype.hasOwnProperty.call(replay.data, 'config'), 'Heartbeat replay should not resend the full overlay configuration');
 assert(posts.filter(post => post.name === 'line-lookup-reset').length === resetCount, 'Heartbeat replay should not reset active lookups');
 assert(firstLineId !== secondaryLineId, 'A genuinely changed subtitle should get a new line id');
 

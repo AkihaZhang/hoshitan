@@ -11,7 +11,7 @@ const info = JSON.parse(fs.readFileSync(path.join(root, 'Info.json'), 'utf8'));
 assert(info.name === 'Hoshitan', 'Plugin display name should use the Hoshitan brand');
 assert(info.identifier === 'io.github.akihazhang.hoshitan', 'Plugin identifier should be independent from upstream');
 assert(info.author && info.author.name === 'AkihaZhang', 'Plugin author metadata should name the fork maintainer');
-assert(info.version === '0.1.0-dev.2', 'Testing builds should use the Hoshitan development version');
+assert(info.version === '0.1.0-dev.3', 'Testing builds should use the Hoshitan development version');
 assert(info.ghRepo === 'AkihaZhang/hoshitan', 'GitHub updates should target the Hoshitan repository');
 assert(info.preferenceDefaults.etymologyCollapseDefault === 'collapsed', 'Etymology should default collapsed globally');
 assert(info.preferenceDefaults.wiktionaryEtymologyCollapseOverride === 'collapsed', 'Wiktionary/Kaikki override should default collapsed');
@@ -58,6 +58,10 @@ assert(/appearance:\s*menulist/.test(managerHtml), 'Anki field mapping controls 
 assert(/dictionary-manager-anki-refresh/.test(managerHtml), 'Settings manager should load Anki deck and field metadata');
 assert(/function ankiMappingOptions\(\)/.test(managerHtml), 'Settings manager should centralize Hoshi-compatible Anki mapping options');
 assert(/single-glossary-/.test(managerHtml), 'Settings manager should add per-dictionary glossary mappings');
+assert(!/\['\{book-cover\}', '\{book-cover\}'\]/.test(managerHtml), 'Settings should not expose the legacy book-cover mapping');
+assert(!/\['\{sasayaki-audio\}', '\{sasayaki-audio\}'\]/.test(managerHtml), 'Settings should not expose the legacy sasayaki-audio mapping');
+assert(/picture:\s*'\{image\}'/.test(managerHtml), 'Picture fields should auto-map to the canonical image mapping');
+assert(/sentenceaudio:\s*'\{sentence-audio\}'/.test(managerHtml), 'SentenceAudio should auto-map to the canonical sentence-audio mapping');
 assert(/\{frequency-harmonic-rank\}/.test(managerHtml), 'Settings manager should expose frequency metadata mappings');
 assert(/\{pitch-accent-categories\}/.test(managerHtml), 'Settings manager should expose pitch accent mappings');
 assert(/data-panel="audio"/.test(managerHtml), 'Settings manager should expose a dedicated audio panel');
@@ -140,5 +144,10 @@ assert(
   lifecycleSource.indexOf('if (!videoWindowAvailableForOverlayLoad())') < lifecycleSource.indexOf('initializeOverlay();'),
   'Profile overlay reload should skip initializeOverlay before iina.window-loaded'
 );
+assert(/registerInputShortcut\("SPACE", "play\/pause"/.test(lifecycleSource), 'Video shortcuts should include Space play/pause');
+assert(/registerInputShortcut\("LEFT", "seek backward 5 seconds"/.test(lifecycleSource), 'Video shortcuts should include Left seek');
+assert(/registerInputShortcut\("\[", "previous subtitle"/.test(lifecycleSource), 'Video shortcuts should include previous subtitle');
+assert(/registerInputShortcut\("ESC", "close lookup popup"/.test(lifecycleSource), 'Video shortcuts should include Escape popup close');
+assert(/registerInputShortcut\("Meta\+w", "close video"/.test(lifecycleSource), 'Video shortcuts should include Command-W stop/back');
 
 console.log('settings and menu layout tests passed');

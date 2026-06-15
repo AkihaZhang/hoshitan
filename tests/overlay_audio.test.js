@@ -5,9 +5,11 @@ const { context, overlay } = loadOverlayForTest([
   'applyConfig',
   'showPopup',
   'renderStoredLookup',
+  'renderSubtitle',
   'audioTermReadingKey',
   'playAudioForTerm',
-  'showAudioSourceMenu'
+  'showAudioSourceMenu',
+  'closestAnkiButton'
 ]);
 
 let fetchCalled = false;
@@ -73,6 +75,22 @@ overlay.renderStoredLookup({
     }]
   }
 });
+
+const unrelatedAudioButton = context.document.createElement('button');
+unrelatedAudioButton.className = 'audio-button';
+unrelatedAudioButton.parentNode = context.__elements.popup;
+assert(overlay.closestAnkiButton(unrelatedAudioButton) === null, 'Audio buttons must not be mistaken for Anki export buttons');
+
+overlay.state.enabled = true;
+overlay.renderSubtitle('読む', 91);
+overlay.state.audioAutoPlayed['91:0:test'] = true;
+overlay.renderSubtitle('読む', 91);
+assert(overlay.state.audioAutoPlayed['91:0:test'] === true, 'Replaying the same subtitle line must not reset audio auto-play state');
+overlay.state.subtitleVisible = false;
+context.__elements.subtitle.classList.add('hidden');
+overlay.renderSubtitle('読む', 91);
+assert(context.__elements.subtitle.classList.contains('hidden'), 'Heartbeat replay must not re-show subtitles hidden by the S shortcut');
+overlay.state.subtitleVisible = true;
 
 const headHtml = context.__elements.popup.children[0]._innerHTML;
 assert(/class="audio-button"/.test(headHtml), 'Lookup result header should render a speaker button when audio sources are configured');

@@ -49,7 +49,8 @@ class FakeElement {
     this.attributes[name] = String(value);
     if (name === 'data-pos') this.dataset.pos = String(value);
   }
-  getAttribute(name) { return this.attributes[name] || ''; }
+  getAttribute(name) { return Object.prototype.hasOwnProperty.call(this.attributes, name) ? this.attributes[name] : null; }
+  hasAttribute(name) { return Object.prototype.hasOwnProperty.call(this.attributes, name); }
   appendChild(child) {
     if (child.tagName === '#fragment') {
       child.children.slice().forEach(grandchild => this.appendChild(grandchild));

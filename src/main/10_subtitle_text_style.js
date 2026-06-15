@@ -179,10 +179,11 @@ function scheduleIINAAppearanceHintRefresh(force) {
     iinaAppearanceHintRefreshInFlight = false;
   });
 }
-function overlayConfig() {
+function overlayConfig(options) {
+  options = options || {};
   const language = selectedLanguageModule();
   scheduleIINAAppearanceHintRefresh(false);
-  return {
+  const config = {
     uiLanguage: configuredUiLanguage(),
     resolvedUiLanguage: resolvedUiLanguage(),
     language: selectedLanguageOverlayConfig(),
@@ -208,6 +209,10 @@ function overlayConfig() {
     debugLogVerbose: prefBool("debugLogVerbose", false),
     overlayBridgePort
   };
+  if (options.includeDictionaryStyles !== false) {
+    config.dictionaryStyles = activeDictionaryStyles(language);
+  }
+  return config;
 }
 function readCurrentSubtitle() {
   const properties = ["sub-text", "secondary-sub-text"];
@@ -226,7 +231,7 @@ function publishSubtitle(text) {
   const language = selectedLanguageModule();
   const dicts = activeDictionaryPaths(language);
   debugVerbose("publishSubtitle lineId=" + currentSubtitleLineId + " language=" + language.id + " activeDicts=" + dicts.length + " len=" + String(normalized || "").length + " text=" + JSON.stringify(String(normalized || "").slice(0, 80)));
-  postToOverlay("subtitle", { text: normalized, config: overlayConfig(), lineId: currentSubtitleLineId });
+  postToOverlay("subtitle", { text: normalized, config: overlayConfig({ includeDictionaryStyles: false }), lineId: currentSubtitleLineId });
   postToOverlay("line-lookup-reset", { lineId: currentSubtitleLineId });
   // v1.5.0: no full-line background precompute. Hover requests are looked up
   // directly and serialized so the hovered word is never blocked by a batch.
@@ -240,7 +245,7 @@ function replayCurrentSubtitle() {
   if (!lastSubtitle || !currentSubtitleLineId) return;
   lastSubtitlePublishedAt = Date.now();
   debugVerbose("replaySubtitle lineId=" + currentSubtitleLineId + " len=" + lastSubtitle.length);
-  postToOverlay("subtitle", { text: lastSubtitle, config: overlayConfig(), lineId: currentSubtitleLineId });
+  postToOverlay("subtitle", { text: lastSubtitle, lineId: currentSubtitleLineId });
 }
 function canHideNativeSubtitlesForCurrentLanguage() {
   if (!lookupBackendReadyForNativeHide) return false;

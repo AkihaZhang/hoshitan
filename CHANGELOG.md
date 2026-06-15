@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.0-dev.3 - 2026-06-15
+
+### Added
+
+- Added scoped Yomitan dictionary `styles.css` support while preserving structured `data-sc-*` attributes.
+- Added popup close and nested-lookup Back controls; double-click selected popup text to look it up.
+- Added video shortcuts for playback, seeking, subtitle navigation and visibility, fullscreen, popup close, and video stop.
+
+### Fixed
+
+- Stopped audio-button clicks from being misrouted to Anki export and showing a false missing-entry error.
+- Prevented stale audio requests and subtitle heartbeat replays from repeatedly playing the first word.
+- Changed visible Anki mappings to the canonical `{image}` and `{sentence-audio}` names while retaining legacy import compatibility.
+- Reduced overlay traffic by sending dictionary styles only during configuration synchronization instead of every subtitle heartbeat.
+
 ## 0.1.0-dev.2 - 2026-06-15
 
 ### Added
@@ -10,7 +25,7 @@
 ### Fixed
 
 - Preserved dictionary titles containing full-width spaces when resolving per-dictionary Anki fields.
-- Kept the existing Hoshitan field placeholders compatible while mapping `{book-cover}` to the video screenshot and `{sasayaki-audio}` to the subtitle MP3 clip.
+- Kept legacy Hoshi Reader field aliases compatible while mapping them to the video screenshot and subtitle MP3 clip.
 
 ## 0.1.0-dev.1 - 2026-06-15
 

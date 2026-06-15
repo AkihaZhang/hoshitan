@@ -12,6 +12,8 @@ event.on("iina.window-loaded", () => {
   setEnabled(prefBool("enabledByDefault", true));
 });
 event.on("mpv.file-loaded", () => {
+  subtitleDisplayEnabled = true;
+  postToOverlay("subtitle-visibility", { visible: true });
   lastSubtitle = null;
   subtitleEmptySince = 0;
   lastSubtitlePublishedAt = 0;

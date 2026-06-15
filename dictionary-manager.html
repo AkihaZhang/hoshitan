@@ -1179,7 +1179,10 @@
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return out;
       Object.keys(parsed).forEach(field => {
         const name = String(field || '').trim();
-        const mapping = String(parsed[field] || '').trim();
+        const rawMapping = String(parsed[field] || '').trim();
+        const mapping = rawMapping === '{book-cover}'
+          ? '{image}'
+          : (rawMapping === '{sasayaki-audio}' ? '{sentence-audio}' : rawMapping);
         if (name && mapping) out[name] = mapping;
       });
       return out;
@@ -1204,12 +1207,12 @@
         glossary: '{glossary}',
         meaning: '{glossary}',
         back: '{glossary}',
-        picture: '{book-cover}',
-        definitionpicture: '{book-cover}',
-        image: '{book-cover}',
+        picture: '{image}',
+        definitionpicture: '{image}',
+        image: '{image}',
         expressionaudio: '{audio}',
         wordaudio: '{audio}',
-        sentenceaudio: '{sasayaki-audio}',
+        sentenceaudio: '{sentence-audio}',
         audio: '{audio}',
         miscinfo: '{source}',
         source: '{source}',
@@ -1237,8 +1240,8 @@
         ['{pitch-accent-positions}', '{pitch-accent-positions}'],
         ['{pitch-accent-categories}', '{pitch-accent-categories}'],
         ['{document-title}', '{document-title}'],
-        ['{book-cover}', '{book-cover}'],
-        ['{sasayaki-audio}', '{sasayaki-audio}']
+        ['{image}', '{image}'],
+        ['{sentence-audio}', '{sentence-audio}']
       ];
       const seen = Object.create(null);
       options.forEach(([value]) => { if (value) seen[value] = true; });
@@ -1253,8 +1256,6 @@
       });
       [
         ['{definition}', '{definition}'],
-        ['{image}', '{image}'],
-        ['{sentence-audio}', '{sentence-audio}'],
         ['{source}', '{source}'],
         ['{dictionary}', '{dictionary}']
       ].forEach(option => {

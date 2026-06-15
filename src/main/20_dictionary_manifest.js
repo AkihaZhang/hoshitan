@@ -420,6 +420,42 @@ function activeDictionaryEntries(language) {
 function activeDictionaryPaths(language) {
   return activeDictionaryEntries(language).map(d => pathJoin(dictRoot(), d.name));
 }
+function activeDictionaryStyles(language) {
+  const entries = activeDictionaryEntries(language);
+  const cacheKey = entries.map(entry => String(entry.path || pathJoin(dictRoot(), entry.name))).join("\n");
+  const now = Date.now();
+  if (cacheKey === dictionaryStylesCacheKey && now - dictionaryStylesCacheAt < DICTIONARY_STYLES_CACHE_MS) {
+    return dictionaryStylesCacheValue;
+  }
+  const styles = {};
+  let totalBytes = 0;
+  entries.forEach(entry => {
+    if (totalBytes >= 300000) return;
+    const dictPath = String(entry.path || pathJoin(dictRoot(), entry.name));
+    const candidates = [pathJoin(dictPath, "styles.css"), pathJoin(dictPath, "style.css")];
+    let css = "";
+    for (let i = 0; i < candidates.length; i++) {
+      try {
+        if (!file.exists(candidates[i])) continue;
+        css = String(file.read(candidates[i]) || "").slice(0, 100000);
+        if (css.trim()) break;
+      } catch (error) {
+        debugWarn("Could not read dictionary styles for " + String(entry.title || entry.name) + ": " + compactError(error));
+      }
+    }
+    if (!css.trim()) return;
+    css = css.slice(0, Math.max(0, 300000 - totalBytes));
+    totalBytes += css.length;
+    const title = String(entry.title || entry.name || "").trim();
+    const name = String(entry.name || "").trim();
+    if (title) styles[title] = css;
+    if (name && name !== title) styles[name] = css;
+  });
+  dictionaryStylesCacheKey = cacheKey;
+  dictionaryStylesCacheValue = styles;
+  dictionaryStylesCacheAt = now;
+  return styles;
+}
 function dictionarySetupMessage(language, dicts) {
   const lang = language || selectedLanguageModule();
   const label = typeof languageLabelForUi === "function" ? languageLabelForUi(lang) : (lang.label || lang.id || "selected language");

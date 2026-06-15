@@ -56,6 +56,20 @@ There is no stable package release yet. Development packages may be attached to 
 6. Pause playback, move the pointer over subtitle text, and wait for the popup.
 7. If the popup does not appear, press **Shift+H** to toggle Hoshitan on.
 
+Dictionary popups load each imported Yomitan dictionary's bundled `styles.css` when present. Double-click text inside a popup to perform a nested lookup, use the Back button to return, and use the close button or **Esc** to dismiss it.
+
+## Video Shortcuts
+
+| Action | Shortcut |
+| --- | --- |
+| Play / pause | `Space` |
+| Seek backward / forward 5 seconds | `Left` / `Right` |
+| Previous / next subtitle | `[` / `]` |
+| Toggle lookup subtitle visibility | `S` |
+| Toggle fullscreen | `F` |
+| Close dictionary popup | `Esc` |
+| Stop the current video / return | `Cmd+W` |
+
 ## Dictionaries
 
 Open **Plugins -> Hoshitan -> Settings...** to install the recommended Japanese dictionary, import local Yomitan-compatible dictionary ZIP files, enable or disable dictionaries, and reorder lookup priority.

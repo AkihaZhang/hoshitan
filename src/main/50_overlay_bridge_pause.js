@@ -26,6 +26,8 @@ function ensureOverlayBridge() {
 	          handleLookupPopupVisibility(payload);
 	        } else if (payload && typeof payload === "object" && payload.type === "lookup") {
 	          handleBridgeLookup(payload);
+	        } else if (payload && typeof payload === "object" && payload.type === "nested-lookup") {
+	          handleNestedLookup(payload);
 	        } else if (payload && typeof payload === "object" && payload.type === "audio-source") {
 	          handleBridgeAudioSource(payload);
 	        } else if (payload && typeof payload === "object" && payload.type === "open-url") {
@@ -188,6 +190,23 @@ function ensureOverlayBridge() {
   pendingHoverLookup = { requestId, lineId, position, key, seq: ++hoverLookupSequence };
   debugVerbose("hover lookup queued requestId=" + requestId + " key=" + key + " currentLineId=" + currentSubtitleLineId + " inFlight=" + hoverLookupInFlight + " activeKey=" + hoverLookupActiveKey);
   processHoverLookupQueue();
+}
+
+function handleNestedLookup(payload) {
+  const requestId = String((payload && payload.requestId) || ("nested-" + String(++requestSerial)));
+  const text = cleanSubtitleText(String((payload && payload.text) || "")).slice(0, 120);
+  if (!enabled || !text) {
+    postToOverlay("nested-lookup-result", { requestId, ok: false, error: "No lookup text was selected." });
+    return;
+  }
+  (async () => {
+    try {
+      const result = await lookupAtPosition(text, 0, requestId);
+      postToOverlay("nested-lookup-result", { requestId, ok: true, result, text });
+    } catch (error) {
+      postToOverlay("nested-lookup-result", { requestId, ok: false, error: compactError(error), text });
+    }
+  })();
 }
 function processHoverLookupQueue() {
   if (hoverLookupInFlight) return;

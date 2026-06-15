@@ -15,6 +15,7 @@ function registerOverlayMessageHandlers() {
   });
   overlay.onMessage("lookup-at", payload => { handleLookupAt(payload); });
   overlay.onMessage("lookup-at-lite", payload => { handleLookupAt(payload); });
+  overlay.onMessage("nested-lookup", payload => { handleNestedLookup(payload); });
   overlay.onMessage("lookup-popup-visibility", payload => { handleLookupPopupVisibility(payload); });
   overlay.onMessage("lookup-popup-visible", payload => { handleLookupPopupVisibility(payload); });
   overlay.onMessage("open-external-url", payload => { openExternalUrlFromOverlay(payload && payload.url !== undefined ? payload.url : payload); });
@@ -240,6 +241,30 @@ function toggleFromShortcut(data) {
     return true;
   }
 }
+function shortcutAction(label, action) {
+  return data => {
+    try {
+      if (data && data.isRepeat) return true;
+      action();
+    } catch (error) {
+      debugWarn("Shortcut " + label + " failed: " + compactError(error));
+    }
+    return true;
+  };
+}
+function toggleSubtitleDisplay() {
+  subtitleDisplayEnabled = !subtitleDisplayEnabled;
+  postToOverlay("subtitle-visibility", { visible: subtitleDisplayEnabled });
+  showOSD(subtitleDisplayEnabled ? "Subtitles: On" : "Subtitles: Off");
+}
+function registerInputShortcut(key, label, action) {
+  try {
+    input.onKeyDown(key, shortcutAction(label, action), input.PRIORITY_HIGH);
+    debugLog("registered input shortcut " + key + " for " + label);
+  } catch (error) {
+    debugWarn("Could not register shortcut " + key + " for " + label + ": " + compactError(error));
+  }
+}
 function registerShortcut() {
   if (shortcutRegistered) return;
   shortcutRegistered = true;
@@ -259,4 +284,13 @@ function registerShortcut() {
   } catch (error) {
     console.warn("Could not register Shift+H fallback: " + compactError(error));
   }
+  registerInputShortcut("SPACE", "play/pause", () => setPauseState(!pauseState()));
+  registerInputShortcut("LEFT", "seek backward 5 seconds", () => mpv.command("seek", [-5, "relative+exact"]));
+  registerInputShortcut("RIGHT", "seek forward 5 seconds", () => mpv.command("seek", [5, "relative+exact"]));
+  registerInputShortcut("[", "previous subtitle", () => mpv.command("sub-seek", [-1]));
+  registerInputShortcut("]", "next subtitle", () => mpv.command("sub-seek", [1]));
+  registerInputShortcut("s", "toggle subtitles", toggleSubtitleDisplay);
+  registerInputShortcut("f", "toggle fullscreen", () => mpv.set("fullscreen", !mpv.getFlag("fullscreen")));
+  registerInputShortcut("ESC", "close lookup popup", () => postToOverlay("close-popup", {}));
+  registerInputShortcut("Meta+w", "close video", () => mpv.command("stop", []));
 }

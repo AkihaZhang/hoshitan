@@ -10,7 +10,7 @@
 
 const { core, mpv, event, overlay, menu, input, ws, preferences, console, file, http, utils, standaloneWindow } = iina;
 
-const VERSION = "0.1.0-dev.2";
+const VERSION = "0.1.0-dev.3";
 const RECOMMENDED_JITENDEX_URL = "https://github.com/stephenmk/stephenmk.github.io/releases/latest/download/jitendex-yomitan.zip";
 
 let enabled = false;
@@ -41,6 +41,7 @@ let hoverLookupSequence = 0;
 let hoverLookupActiveKey = "";
 let lastShortcutToggleAt = 0;
 let shortcutRegistered = false;
+let subtitleDisplayEnabled = true;
 let lookupPopupPauseActive = false;
 let lookupPopupPauseShouldResume = false;
 let lookupPopupPauseResumeTimer = null;
@@ -59,11 +60,15 @@ let debugLogFlushTimer = null;
 let iinaAppearanceHint = "";
 let iinaAppearanceHintRefreshInFlight = false;
 let iinaAppearanceHintLastRefreshAt = 0;
+let dictionaryStylesCacheKey = "";
+let dictionaryStylesCacheValue = {};
+let dictionaryStylesCacheAt = 0;
 const DEBUG_LOG_MAX_BYTES = 1000000;
 const DEBUG_LOG_FLUSH_DELAY_MS = 750;
 const LOOKUP_POPUP_RESUME_DELAY_MS = 90;
 const SUBTITLE_EMPTY_GRACE_MS = 260;
 const SUBTITLE_REPLAY_INTERVAL_MS = 1500;
+const DICTIONARY_STYLES_CACHE_MS = 30000;
 
 function pref(key, fallback) {
   const value = preferences.get(key);
