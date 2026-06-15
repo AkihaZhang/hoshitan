@@ -1,26 +1,58 @@
+function synchronizeOverlayAfterLoad(reason) {
+  debugVerbose("synchronizing overlay state reason=" + String(reason || "unknown") + " generation=" + overlayLoadGeneration);
+  postToOverlay("config", overlayConfig());
+  postToOverlay("enabled", { enabled });
+  replayActiveOverlayTask();
+  if (enabled) pollSubtitle({ forceReplay: true });
+}
+function registerOverlayMessageHandlers() {
+  if (overlayMessageHandlersRegistered) return;
+  overlay.onMessage("ready", payload => {
+    overlayReadyGeneration = overlayLoadGeneration;
+    debugLog("overlay ready received payloadType=" + typeof payload);
+    handleLookupPopupOverlayReady(payload);
+    synchronizeOverlayAfterLoad("ready");
+  });
+  overlay.onMessage("lookup-at", payload => { handleLookupAt(payload); });
+  overlay.onMessage("lookup-at-lite", payload => { handleLookupAt(payload); });
+  overlay.onMessage("lookup-popup-visibility", payload => { handleLookupPopupVisibility(payload); });
+  overlay.onMessage("lookup-popup-visible", payload => { handleLookupPopupVisibility(payload); });
+  overlay.onMessage("open-external-url", payload => { openExternalUrlFromOverlay(payload && payload.url !== undefined ? payload.url : payload); });
+  overlay.onMessage("anki-add", payload => { handleAnkiAddRequest(payload); });
+  overlayMessageHandlersRegistered = true;
+}
+function scheduleOverlayLoadFallbacks(generation) {
+  [180, 700, 1600].forEach(delayMs => {
+    setTimeout(() => {
+      if (!initialized || generation !== overlayLoadGeneration || overlayReadyGeneration === generation) return;
+      debugVerbose("overlay ready not received; applying startup fallback generation=" + generation + " delayMs=" + delayMs);
+      synchronizeOverlayAfterLoad("fallback-" + delayMs);
+    }, delayMs);
+  });
+}
+function loadOverlayDocument(reason) {
+  registerOverlayMessageHandlers();
+  const generation = ++overlayLoadGeneration;
+  debugVerbose("loading overlay document reason=" + String(reason || "unknown") + " generation=" + generation);
+  overlay.loadFile("overlay.html");
+  scheduleOverlayLoadFallbacks(generation);
+}
 function initializeOverlay() {
   ensureOverlayBridge();
   if (initialized) return;
   debugLog("initializeOverlay v" + VERSION + " initialized=" + initialized + " enabled=" + enabled);
-  overlay.loadFile("overlay.html");
-  overlay.setOpacity(1);
-  overlay.setClickable(true);
-  overlay.show();
+  registerOverlayMessageHandlers();
   initialized = true;
-  overlay.onMessage("ready", payload => {
-    debugLog("overlay ready received payloadType=" + typeof payload);
-    handleLookupPopupOverlayReady(payload);
-    postToOverlay("config", overlayConfig());
-    postToOverlay("enabled", { enabled });
-    replayActiveOverlayTask();
-    if (enabled) pollSubtitle();
-  });
-  overlay.onMessage("lookup-at", payload => { handleLookupAt(payload); });
-	  overlay.onMessage("lookup-at-lite", payload => { handleLookupAt(payload); });
-	  overlay.onMessage("lookup-popup-visibility", payload => { handleLookupPopupVisibility(payload); });
-	  overlay.onMessage("lookup-popup-visible", payload => { handleLookupPopupVisibility(payload); });
-	  overlay.onMessage("open-external-url", payload => { openExternalUrlFromOverlay(payload && payload.url !== undefined ? payload.url : payload); });
-	}
+  try {
+    loadOverlayDocument("initial");
+    overlay.setOpacity(1);
+    overlay.setClickable(true);
+    overlay.show();
+  } catch (error) {
+    initialized = false;
+    throw error;
+  }
+}
 function prepareRuntimeAfterProfileChange() {
   lookupBackendReadyForNativeHide = false;
   lookupInFlight = Object.create(null);
@@ -28,6 +60,8 @@ function prepareRuntimeAfterProfileChange() {
   pendingHoverLookup = null;
   hoverLookupActiveKey = "";
   lastSubtitle = null;
+  subtitleEmptySince = 0;
+  lastSubtitlePublishedAt = 0;
   resetLookupPopupPause();
 }
 function warmActiveProfileBackend() {
@@ -38,7 +72,7 @@ function warmActiveProfileBackend() {
     if (!enabled) return;
     lookupBackendReadyForNativeHide = true;
     syncNativeSubtitleVisibility();
-    setOverlayStatus("Dictionary lookup ready for " + language.label + ".", "info", 3500);
+    setOverlayStatus(t("lookup.ready", { language: languageLabelForUi(language) }), "info", 3500);
   }).catch(error => {
     lookupBackendReadyForNativeHide = false;
     debugError("Dictionary lookup startup failed after profile change language=" + language.id + ": " + compactError(error));
@@ -62,6 +96,24 @@ function videoWindowAvailableForOverlayLoad() {
   try { return !!(core && core.window && core.window.loaded); }
   catch (_) { return false; }
 }
+function refreshOverlayForTextSubtitleActivation() {
+  if (!videoWindowAvailableForOverlayLoad()) return false;
+  try {
+    debugLog("refreshing overlay for first text subtitle in current media");
+    if (!initialized) {
+      initializeOverlay();
+    } else {
+      loadOverlayDocument("text-subtitle-activation");
+      overlay.setOpacity(1);
+      overlay.setClickable(enabled);
+      overlay.show();
+    }
+    return true;
+  } catch (error) {
+    debugWarn("overlay refresh for text subtitle activation failed: " + compactError(error));
+    return false;
+  }
+}
 function reloadOverlayForProfileChange() {
   prepareRuntimeAfterProfileChange();
   if (!videoWindowAvailableForOverlayLoad()) {
@@ -73,7 +125,7 @@ function reloadOverlayForProfileChange() {
   } else {
     try {
       debugLog("reloading overlay for active profile language=" + selectedLanguageModule().id);
-      overlay.loadFile("overlay.html");
+      loadOverlayDocument("profile-change");
       overlay.setOpacity(1);
       overlay.setClickable(enabled);
       if (enabled) overlay.show();
@@ -120,6 +172,9 @@ function stopPolling() {
   pollTimer = null;
   activeSubtitlePollMs = 0;
   lastSubtitle = null;
+  subtitleEmptySince = 0;
+  lastSubtitlePublishedAt = 0;
+  textSubtitleOverlayPrimed = false;
   lookupInFlight = Object.create(null);
 }
 async function prepareLookupBackendForEnabledOverlay(language, dicts) {
@@ -150,12 +205,12 @@ function setEnabled(next) {
     } catch (error) { console.warn("Could not update native subtitle visibility: " + compactError(error)); }
     overlay.show();
     startPolling();
-    showOSD("iinatan: On");
+    showOSD(t("state.on"));
     prepareLookupBackendForEnabledOverlay(language, dicts).then(() => {
       if (!enabled) return;
       lookupBackendReadyForNativeHide = true;
       syncNativeSubtitleVisibility();
-      setOverlayStatus("Dictionary lookup ready for " + language.label + ".", "info", 3500);
+      setOverlayStatus(t("lookup.ready", { language: languageLabelForUi(language) }), "info", 3500);
     }).catch(error => {
       lookupBackendReadyForNativeHide = false;
       debugError("Dictionary lookup startup failed language=" + language.id + ": " + compactError(error));
@@ -168,7 +223,7 @@ function setEnabled(next) {
     stopPolling();
     publishSubtitle("");
     try { if (nativeSubVisibilityBeforeEnable !== null) mpv.set("sub-visibility", nativeSubVisibilityBeforeEnable); } catch (_) {}
-    showOSD("iinatan: Off");
+    showOSD(t("state.off"));
   }
 }
 function toggleFromShortcut(data) {

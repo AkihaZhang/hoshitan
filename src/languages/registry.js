@@ -1,11 +1,11 @@
-const IINATAN_LANGUAGE_REGISTRY = (() => {
+const HOSHITAN_LANGUAGE_REGISTRY = (() => {
   const languages = [
-    IINATAN_JAPANESE_LANGUAGE,
-    IINATAN_ENGLISH_LANGUAGE,
-    IINATAN_FRENCH_LANGUAGE,
-    IINATAN_GERMAN_LANGUAGE,
-    IINATAN_CHINESE_LANGUAGE,
-    IINATAN_KOREAN_LANGUAGE
+    HOSHITAN_JAPANESE_LANGUAGE,
+    HOSHITAN_ENGLISH_LANGUAGE,
+    HOSHITAN_FRENCH_LANGUAGE,
+    HOSHITAN_GERMAN_LANGUAGE,
+    HOSHITAN_CHINESE_LANGUAGE,
+    HOSHITAN_KOREAN_LANGUAGE
   ];
   const byId = Object.create(null);
   languages.forEach(language => { byId[language.id] = language; });
@@ -42,13 +42,13 @@ const IINATAN_LANGUAGE_REGISTRY = (() => {
 })();
 
 function languageModuleById(id) {
-  return IINATAN_LANGUAGE_REGISTRY.get(id);
+  return HOSHITAN_LANGUAGE_REGISTRY.get(id);
 }
 
 function selectedLanguageModule() {
-  return IINATAN_LANGUAGE_REGISTRY.selected();
+  return HOSHITAN_LANGUAGE_REGISTRY.selected();
 }
 
 function selectedLanguageOverlayConfig() {
-  return IINATAN_LANGUAGE_REGISTRY.overlayConfig(selectedLanguageModule());
+  return HOSHITAN_LANGUAGE_REGISTRY.overlayConfig(selectedLanguageModule());
 }

@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>iinatan Settings</title>
+  <title>Hoshitan Settings</title>
   <style>
     :root {
       color-scheme: light dark;
@@ -86,7 +86,7 @@
       padding: 5px 26px 5px 10px;
       min-width: 170px;
     }
-    input[type="number"], input[type="text"] {
+    input[type="number"], input[type="text"], input[type="url"] {
       width: 100%;
       padding: 5px 7px;
     }
@@ -207,18 +207,46 @@
       border-color: var(--danger);
       background: var(--danger-hover);
     }
-    .dictionary-list, .recommended-list {
+    .dictionary-list, .recommended-list, .audio-source-list {
       border: 1px solid var(--border);
       border-radius: 8px;
       overflow: hidden;
       background: var(--panel);
+    }
+    .anki-field-mappings {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      background: var(--panel);
+    }
+    .anki-field-row {
+      display: grid;
+      grid-template-columns: minmax(160px, 1fr) minmax(220px, 1.3fr);
+      align-items: center;
+      gap: 12px;
+      min-height: 48px;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    .anki-field-row:last-child { border-bottom: 0; }
+    .anki-field-name {
+      min-width: 0;
+      overflow-wrap: anywhere;
+      font-weight: 600;
+    }
+    .anki-field-row select {
+      width: 100%;
+      appearance: menulist;
+      -webkit-appearance: menulist;
+      padding-right: 8px;
+      cursor: pointer;
     }
     .empty {
       padding: 22px 16px;
       color: var(--muted);
       text-align: center;
     }
-    .dictionary-row, .recommended-row {
+    .dictionary-row, .recommended-row, .audio-source-row {
       display: grid;
       align-items: center;
       gap: 8px;
@@ -229,12 +257,15 @@
     .dictionary-row {
       grid-template-columns: 34px 26px minmax(0, 1fr) auto;
     }
+    .audio-source-row {
+      grid-template-columns: 34px minmax(0, 1fr) auto;
+    }
     .recommended-row {
       grid-template-columns: minmax(0, 1fr) auto;
     }
-    .dictionary-row:last-child, .recommended-row:last-child { border-bottom: 0; }
-    .dictionary-row.drag-over { background: var(--row-hover); }
-    .dictionary-row.dragging { opacity: 0.46; }
+    .dictionary-row:last-child, .recommended-row:last-child, .audio-source-row:last-child { border-bottom: 0; }
+    .dictionary-row.drag-over, .audio-source-row.drag-over { background: var(--row-hover); }
+    .dictionary-row.dragging, .audio-source-row.dragging { opacity: 0.46; }
     .drag-handle {
       width: 28px;
       min-height: 28px;
@@ -266,12 +297,20 @@
       }
       .profile-controls { justify-content: flex-start; }
       .form-grid { grid-template-columns: minmax(0, 1fr); }
+      .anki-field-row { grid-template-columns: minmax(0, 1fr); }
       .tabs { overflow-x: auto; }
       .dictionary-row {
         grid-template-columns: 34px 24px minmax(0, 1fr);
       }
+      .audio-source-row {
+        grid-template-columns: 34px minmax(0, 1fr);
+      }
       .dictionary-row .row-actions {
         grid-column: 3;
+        justify-content: flex-start;
+      }
+      .audio-source-row .row-actions {
+        grid-column: 2;
         justify-content: flex-start;
       }
     }
@@ -280,7 +319,7 @@
 <body>
   <header>
     <div>
-      <h1>iinatan Settings</h1>
+      <h1>Hoshitan Settings</h1>
       <div id="activeProfileLabel" class="active-profile"></div>
     </div>
     <div class="profile-controls">
@@ -295,6 +334,8 @@
       <button class="tab active" type="button" data-tab="profile">Profile</button>
       <button class="tab" type="button" data-tab="popup">Popup</button>
       <button class="tab" type="button" data-tab="dictionaries">Dictionaries</button>
+      <button class="tab" type="button" data-tab="anki">Anki</button>
+      <button class="tab" type="button" data-tab="audio">Audio</button>
       <button class="tab" type="button" data-tab="advanced">Advanced</button>
     </nav>
     <div id="status" class="status"></div>
@@ -302,7 +343,16 @@
     <section class="panel active" data-panel="profile">
       <h2>Profile Settings</h2>
       <h3>Language</h3>
-      <div class="form-grid single">
+      <div class="form-grid">
+        <div class="field">
+          <label for="uiLanguage">Interface language</label>
+          <select id="uiLanguage" data-global-setting="uiLanguage">
+            <option value="auto">Automatic</option>
+            <option value="en">English</option>
+            <option value="zh-CN">简体中文</option>
+          </select>
+          <small>Automatic follows the macOS or WebView language.</small>
+        </div>
         <div class="field">
           <label for="lookupLanguage">Lookup language</label>
           <select id="lookupLanguage" data-profile-pref="lookupLanguage">
@@ -320,9 +370,10 @@
       <h3>Playback</h3>
       <div class="form-grid">
         <label class="check-field"><input data-profile-pref="enabledByDefault" type="checkbox"><span>Turn on automatically for new windows</span></label>
-        <label class="check-field"><input data-profile-pref="hideNativeSubtitles" type="checkbox"><span>Hide IINA subtitles while iinatan is on</span></label>
+        <label class="check-field"><input data-profile-pref="hideNativeSubtitles" type="checkbox"><span>Hide IINA subtitles while Hoshitan is on</span></label>
         <label class="check-field"><input data-profile-pref="pauseWhilePopupVisible" type="checkbox"><span>Pause while a popup is visible</span></label>
       </div>
+
     </section>
 
     <section class="panel" data-panel="popup">
@@ -434,6 +485,90 @@
       </div>
     </section>
 
+    <section class="panel" data-panel="anki">
+      <h2>Anki Card Export</h2>
+      <div class="toolbar">
+        <button id="ankiRefresh" class="primary" type="button">Test Connection And Load Fields</button>
+        <span id="ankiConnectionLabel" class="hint">Anki Desktop and AnkiConnect must be running.</span>
+      </div>
+
+      <h3>Connection</h3>
+      <div class="form-grid">
+        <div class="field">
+          <label for="ankiConnectUrl">AnkiConnect URL</label>
+          <input id="ankiConnectUrl" data-global-setting="ankiConnectUrl" type="text" spellcheck="false">
+        </div>
+        <div class="field">
+          <label for="ankiApiKey">API key</label>
+          <input id="ankiApiKey" data-global-setting="ankiApiKey" type="text" spellcheck="false">
+          <small>Leave empty unless AnkiConnect requires an API key.</small>
+        </div>
+        <div class="field">
+          <label for="ankiDeckName">Deck</label>
+          <select id="ankiDeckName" data-global-setting="ankiDeckName" data-no-i18n></select>
+        </div>
+        <div class="field">
+          <label for="ankiModelName">Note type</label>
+          <select id="ankiModelName" data-global-setting="ankiModelName" data-no-i18n></select>
+        </div>
+      </div>
+
+      <h3>Fields</h3>
+      <div class="toolbar">
+        <button id="ankiAutoMap" type="button">Auto-map fields</button>
+        <span class="hint">Fields are loaded from the selected Anki note type. Field names and mapping values always remain in English.</span>
+      </div>
+      <section id="ankiFieldMappings" class="anki-field-mappings" data-no-i18n></section>
+      <div class="form-grid" style="margin-top: 12px;">
+        <div class="field"><label for="ankiTags">Tags</label><input id="ankiTags" data-global-setting="ankiTags" type="text" spellcheck="false"><small>Separate tags with spaces or commas.</small></div>
+      </div>
+
+      <h3>Media</h3>
+      <div class="form-grid">
+        <label class="check-field"><input data-global-setting="ankiIncludeScreenshot" type="checkbox"><span>Attach current video frame</span></label>
+        <label class="check-field"><input data-global-setting="ankiIncludeAudio" type="checkbox"><span>Attach current subtitle audio</span></label>
+        <label class="check-field"><input data-global-setting="ankiAllowDuplicate" type="checkbox"><span>Allow duplicate notes</span></label>
+        <div class="field">
+          <label for="ankiAudioPaddingMs">Audio padding (ms)</label>
+          <input id="ankiAudioPaddingMs" data-global-setting="ankiAudioPaddingMs" type="number" min="0" max="5000" step="10">
+        </div>
+        <div class="field">
+          <label for="ankiFfmpegPath">FFmpeg path</label>
+          <input id="ankiFfmpegPath" data-global-setting="ankiFfmpegPath" type="text" spellcheck="false">
+        </div>
+      </div>
+      <p class="hint">Screenshot, word audio, and sentence audio are generated only when a note field maps to their corresponding English placeholder.</p>
+    </section>
+
+    <section class="panel" data-panel="audio">
+      <h2>Audio</h2>
+      <h3>Playback</h3>
+      <div class="form-grid">
+        <label class="check-field"><input data-profile-pref="audioAutoPlay" type="checkbox"><span>Play first result audio automatically</span></label>
+      </div>
+
+      <h3>Online Audio Sources</h3>
+      <p class="hint">Yomitan audio source endpoints and direct audio URL templates are supported.</p>
+      <div class="toolbar">
+        <span class="spacer"></span>
+        <button id="addAudioSource" type="button">Add source</button>
+      </div>
+      <section id="audioSourceList" class="audio-source-list"></section>
+
+      <h3>Local Audio</h3>
+      <div class="form-grid">
+        <label class="check-field"><input data-global-setting="localAudioEnabled" type="checkbox"><span>Use local audio database</span></label>
+        <div class="field">
+          <label for="localAudioDatabasePath">android.db path</label>
+          <div class="toolbar">
+            <input id="localAudioDatabasePath" data-global-setting="localAudioDatabasePath" type="text" spellcheck="false">
+            <button id="chooseLocalAudioDatabase" type="button">Choose Database...</button>
+          </div>
+          <small>Compatible with Hoshi Reader local audio databases.</small>
+        </div>
+      </div>
+    </section>
+
     <section class="panel" data-panel="advanced">
       <h2>Advanced</h2>
       <h3>Timeouts</h3>
@@ -470,21 +605,231 @@
     </section>
   </main>
   <script>
+    const DEFAULT_AUDIO_SOURCE_URL = 'https://hoshi-reader.manhhaoo-do.workers.dev/?term={term}&reading={reading}';
+    const UI_MESSAGES = {
+      'zh-CN': {
+        'Profile': '配置方案',
+        'Hoshitan Settings': 'Hoshitan 设置',
+        'Settings sections': '设置分类',
+        'New': '新建',
+        'Rename': '重命名',
+        'Delete': '删除',
+        'Popup': '弹窗',
+        'Dictionaries': '词典',
+        'Audio': '音频',
+        'Advanced': '高级',
+        'Profile Settings': '配置方案设置',
+        'Language': '语言',
+        'Interface language': '界面语言',
+        'Automatic': '自动',
+        'Automatic follows the macOS or WebView language.': '自动模式跟随 macOS 或 WebView 语言。',
+        'Lookup language': '查词语言',
+        'Japanese': '日语',
+        'English': '英语',
+        'French': '法语',
+        'German': '德语',
+        'Chinese': '中文',
+        'Korean': '韩语',
+        'Switching languages reloads the overlay and lookup worker.': '切换语言会重新加载字幕弹层和查词进程。',
+        'Playback': '播放',
+        'Turn on automatically for new windows': '在新窗口中自动开启',
+        'Hide IINA subtitles while Hoshitan is on': 'Hoshitan 开启时隐藏 IINA 原生字幕',
+        'Pause while a popup is visible': '词典弹窗显示时暂停播放',
+        'Popup Settings': '弹窗设置',
+        'Lookup And Results': '查词与结果',
+        'Characters to scan': '扫描字符数',
+        'Maximum entries': '最大词条数',
+        'Definitions per entry': '每个词条的释义数',
+        'Lookup timeout (ms)': '查词超时（毫秒）',
+        'Appearance': '外观',
+        'Color mode': '配色模式',
+        'Inherit IINA preference': '跟随 IINA 设置',
+        'Dark': '深色',
+        'Light': '浅色',
+        'Subtitle size': '字幕大小',
+        'Popup size': '弹窗大小',
+        'Popup maximum width': '弹窗最大宽度',
+        'Popup maximum height (% of window)': '弹窗最大高度（窗口百分比）',
+        'Gap above subtitles (px)': '字幕上方间距（像素）',
+        'Subtitle refresh interval (ms)': '字幕刷新间隔（毫秒）',
+        'Entry Sections': '词条分区',
+        'Etymology sections': '词源分区',
+        'Collapsed by default': '默认折叠',
+        'Expanded by default': '默认展开',
+        'Wiktionary/Kaikki etymology': 'Wiktionary/Kaikki 词源',
+        'Always collapsed': '始终折叠',
+        'Always expanded': '始终展开',
+        'Use global setting': '使用全局设置',
+        'Custom CSS': '自定义 CSS',
+        'Custom popup CSS': '自定义弹窗 CSS',
+        'Recommended Downloads': '推荐下载',
+        'Installed Dictionaries': '已安装词典',
+        'Import ZIP...': '导入 ZIP...',
+        'Refresh': '刷新',
+        'Dictionary Import': '词典导入',
+        'Use lower-memory dictionary import': '使用低内存模式导入词典',
+        'Dictionary import timeout (ms)': '词典导入超时（毫秒）',
+        'Anki Card Export': 'Anki 制卡',
+        'Test Connection And Load Fields': '测试连接并加载字段',
+        'Anki Desktop and AnkiConnect must be running.': '必须先启动 Anki 桌面版和 AnkiConnect。',
+        'Connection': '连接',
+        'API key': 'API 密钥',
+        'Leave empty unless AnkiConnect requires an API key.': '除非 AnkiConnect 要求 API 密钥，否则留空。',
+        'Deck': '牌组',
+        'Note type': '笔记类型',
+        'Fields': '字段',
+        'Auto-map fields': '自动映射字段',
+        'Fields are loaded from the selected Anki note type. Field names and mapping values always remain in English.': '字段会从所选 Anki 笔记类型自动加载。字段名和映射值始终保持英文。',
+        'Tags': '标签',
+        'Separate tags with spaces or commas.': '使用空格或逗号分隔标签。',
+        'Media': '媒体',
+        'Attach current video frame': '附加当前视频画面',
+        'Attach current subtitle audio': '附加当前字幕音频',
+        'Allow duplicate notes': '允许重复笔记',
+        'Audio padding (ms)': '音频前后留白（毫秒）',
+        'FFmpeg path': 'FFmpeg 路径',
+        'Screenshot, word audio, and sentence audio are generated only when a note field maps to their corresponding English placeholder.': '仅当笔记字段映射到相应英文占位符时，才会生成截图、单词音频和句子音频。',
+        'Playback': '播放',
+        'Play first result audio automatically': '自动播放第一条结果的音频',
+        'Online Audio Sources': '在线音频源',
+        'Yomitan audio source endpoints and direct audio URL templates are supported.': '支持 Yomitan 音频源端点和直接音频 URL 模板。',
+        'Add source': '添加音频源',
+        'No audio sources configured.': '尚未配置在线音频源。',
+        'Audio source URL': '音频源 URL',
+        'Local Audio': '本地音频',
+        'Use local audio database': '使用本地音频数据库',
+        'android.db path': 'android.db 路径',
+        'Choose Database...': '选择数据库...',
+        'Compatible with Hoshi Reader local audio databases.': '兼容 Hoshi Reader 的本地音频数据库。',
+        'Choosing local audio database...': '正在选择本地音频数据库...',
+        'Timeouts': '超时',
+        'Overlay request timeout (ms)': '字幕弹层请求超时（毫秒）',
+        'Backend startup timeout (ms)': '后端启动超时（毫秒）',
+        'Worker': '工作进程',
+        'Use direct worker IPC': '使用工作进程直接通信',
+        'Fall back to client executable lookup': '失败时回退到客户端进程查词',
+        'Direct IPC poll interval (ms)': '直接通信轮询间隔（毫秒）',
+        'Worker idle sleep interval (ms)': '工作进程空闲休眠间隔（毫秒）',
+        'Diagnostics': '诊断',
+        'Save diagnostic logs': '保存诊断日志',
+        'Include detailed diagnostic logs': '记录详细诊断信息',
+        'No recommended downloads are configured.': '未配置推荐下载。',
+        'Reinstall': '重新安装',
+        'Download': '下载',
+        'No dictionaries installed.': '尚未安装词典。',
+        'Drag': '拖动',
+        'Up': '上移',
+        'Down': '下移',
+        'Could not send command: {error}': '无法发送命令：{error}',
+        'IINA message bridge is unavailable in this window.': '此窗口中的 IINA 消息桥不可用。',
+        'No response from the plugin script yet. Try closing and reopening settings.': '插件脚本尚未响应，请关闭并重新打开设置窗口。',
+        'Saving dictionary order...': '正在保存词典顺序...',
+        'Delete "{name}" from Hoshitan? This removes the installed dictionary files.': '从 Hoshitan 删除“{name}”？这会移除已安装的词典文件。',
+        'Requesting dictionary deletion...': '正在请求删除词典...',
+        'Saving profile settings...': '正在保存配置方案...',
+        'Saving global settings...': '正在保存全局设置...',
+        'Active profile: {name}': '当前配置方案：{name}',
+        'Connected. Loaded {decks} decks, {models} note types, and {fields} fields.': '连接成功。已加载 {decks} 个牌组、{models} 种笔记类型和 {fields} 个字段。',
+        'Anki fields mapped from note type {model}.': '已根据笔记类型 {model} 自动映射 Anki 字段。',
+        'Connect to AnkiConnect to load fields.': '连接 AnkiConnect 以加载字段。',
+        'No fields returned by AnkiConnect.': 'AnkiConnect 未返回字段。',
+        'Starting recommended dictionary download...': '正在下载推荐词典...',
+        'Saving dictionary selection...': '正在保存词典选择...',
+        'Opening ZIP picker...': '正在打开 ZIP 选择器...',
+        'Refreshing dictionary list...': '正在刷新词典列表...',
+        'Connecting to AnkiConnect...': '正在连接 AnkiConnect...',
+        'Loading Anki note fields...': '正在加载 Anki 笔记字段...',
+        'Switching profile...': '正在切换配置方案...',
+        'New profile name': '新配置方案名称',
+        'Creating profile...': '正在创建配置方案...',
+        'Rename profile': '重命名配置方案',
+        'Renaming profile...': '正在重命名配置方案...',
+        'Delete profile "{name}"?': '删除配置方案“{name}”？',
+        'Deleting profile...': '正在删除配置方案...',
+        '{count} terms': '{count} 个词条',
+        '{count} frequency': '{count} 条词频',
+        '{count} pitch': '{count} 条音调',
+        'language: {language}': '语言：{language}'
+      }
+    };
+    function normalizedUiLanguage(value) {
+      const raw = String(value || '').trim().toLowerCase().replace(/_/g, '-');
+      if (raw === 'zh-cn' || raw === 'zh-hans' || raw.indexOf('zh-hans-') === 0 || raw.indexOf('zh-cn-') === 0) return 'zh-CN';
+      return raw === 'en' ? 'en' : (raw === 'auto' || !raw ? 'auto' : 'en');
+    }
+    function browserUiLanguage() {
+      try {
+        const languages = (navigator.languages || [navigator.language || 'en']).join(' ');
+        return /zh[-_](?:Hans|CN)|\bzh\b/i.test(languages) ? 'zh-CN' : 'en';
+      } catch (_) {
+        return 'en';
+      }
+    }
+    function currentUiLanguage() {
+      const configured = normalizedUiLanguage(
+        state && state.globalSettings && state.globalSettings.uiLanguage !== undefined
+          ? state.globalSettings.uiLanguage
+          : 'auto'
+      );
+      return configured === 'auto' ? browserUiLanguage() : configured;
+    }
+    function tr(key, values) {
+      const table = UI_MESSAGES[currentUiLanguage()] || {};
+      let text = table[key] || String(key || '');
+      Object.keys(values || {}).forEach(name => {
+        text = text.split('{' + name + '}').join(String(values[name]));
+      });
+      return text;
+    }
+    function translateStaticDocument() {
+      document.documentElement.lang = currentUiLanguage() === 'zh-CN' ? 'zh-Hans' : 'en';
+      document.title = currentUiLanguage() === 'zh-CN' ? 'Hoshitan 设置' : 'Hoshitan Settings';
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      let node;
+      while ((node = walker.nextNode())) {
+        if (node.parentNode && (/^(SCRIPT|STYLE)$/i.test(node.parentNode.nodeName || '') || node.parentNode.closest('[data-no-i18n]'))) continue;
+        const raw = String(node.nodeValue || '');
+        const key = node.__hoshitanI18nKey || raw.trim();
+        if (!key) continue;
+        node.__hoshitanI18nKey = key;
+        const translated = tr(key);
+        node.nodeValue = raw.replace(raw.trim(), translated);
+      }
+      Array.from(document.querySelectorAll('[aria-label], [title]')).forEach(element => {
+        ['aria-label', 'title'].forEach(attribute => {
+          if (!element.hasAttribute(attribute)) return;
+          const dataKey = 'hoshitanI18n' + attribute.replace(/[^a-z]/gi, '');
+          const key = element.dataset[dataKey] || element.getAttribute(attribute);
+          element.dataset[dataKey] = key;
+          element.setAttribute(attribute, tr(key));
+        });
+      });
+    }
     const state = {
       dictionaries: [],
       profiles: [],
       recommendedDictionaries: [],
+      audioSources: [],
       profilePreferences: {},
       profilePreferenceDefaults: {},
       globalSettings: {},
       globalSettingDefaults: {},
+      ankiDeckNames: [],
+      ankiModelNames: [],
+      ankiFieldNames: [],
+      ankiLoadedModel: '',
+      ankiFieldMappings: {},
+      ankiConnected: false,
+      uiLanguage: 'auto',
       activeProfileId: 'default',
       activeProfileName: 'Profile 1',
       busy: false,
       draggingName: '',
+      draggingAudioSourceId: '',
       commandSerial: 0,
       activeTab: 'profile',
-      rendering: false
+      rendering: false,
+      audioSourceSerial: 0
     };
 
     const els = {
@@ -495,9 +840,18 @@
       deleteProfile: document.getElementById('deleteProfile'),
       importZip: document.getElementById('importZip'),
       refresh: document.getElementById('refresh'),
+      addAudioSource: document.getElementById('addAudioSource'),
       status: document.getElementById('status'),
       dictionaryList: document.getElementById('dictionaryList'),
-      recommendedList: document.getElementById('recommendedList')
+      audioSourceList: document.getElementById('audioSourceList'),
+      recommendedList: document.getElementById('recommendedList'),
+      ankiRefresh: document.getElementById('ankiRefresh'),
+      ankiAutoMap: document.getElementById('ankiAutoMap'),
+      ankiConnectionLabel: document.getElementById('ankiConnectionLabel'),
+      ankiDeckName: document.getElementById('ankiDeckName'),
+      ankiModelName: document.getElementById('ankiModelName'),
+      ankiFieldMappings: document.getElementById('ankiFieldMappings'),
+      chooseLocalAudioDatabase: document.getElementById('chooseLocalAudioDatabase')
     };
 
     function iinaBridge() {
@@ -514,10 +868,10 @@
           return true;
         }
       } catch (error) {
-        setStatus('Could not send command: ' + String(error && error.message ? error.message : error), 'error', false);
+        setStatus(tr('Could not send command: {error}', { error: String(error && error.message ? error.message : error) }), 'error', false);
         return false;
       }
-      setStatus('IINA message bridge is unavailable in this window.', 'error', false);
+      setStatus(tr('IINA message bridge is unavailable in this window.'), 'error', false);
       return false;
     }
     function command(name, payload, message, options) {
@@ -529,7 +883,7 @@
         if (shouldDisable) {
           setTimeout(() => {
             if (state.busy && state.commandSerial === serial && els.status.textContent === message) {
-              setStatus('No response from the plugin script yet. Try closing and reopening settings.', 'error', false);
+              setStatus(tr('No response from the plugin script yet. Try closing and reopening settings.'), 'error', false);
             }
           }, 3500);
         } else if (clearAfterMs > 0) {
@@ -558,7 +912,7 @@
     }
     function updateBusyState() {
       const disabled = !!state.busy;
-      [els.importZip, els.refresh, els.newProfile, els.renameProfile].forEach(button => {
+      [els.importZip, els.refresh, els.newProfile, els.renameProfile, els.ankiRefresh, els.ankiAutoMap, els.addAudioSource, els.chooseLocalAudioDatabase].filter(Boolean).forEach(button => {
         button.disabled = disabled;
       });
       const profile = activeProfile();
@@ -573,20 +927,117 @@
       Array.from(els.dictionaryList.querySelectorAll('.dictionary-row')).forEach(row => {
         row.draggable = !disabled;
       });
+      Array.from(els.audioSourceList.querySelectorAll('.audio-source-row')).forEach(row => {
+        row.draggable = !disabled;
+      });
     }
     function dictionaryMeta(dict) {
       const parts = [];
-      if (dict.language && dict.language !== 'unknown') parts.push('language: ' + dict.language);
-      if (dict.termCount) parts.push(dict.termCount + ' terms');
-      if (dict.freqCount) parts.push(dict.freqCount + ' frequency');
-      if (dict.pitchCount) parts.push(dict.pitchCount + ' pitch');
+      if (dict.language && dict.language !== 'unknown') parts.push(tr('language: {language}', { language: dict.language }));
+      if (dict.termCount) parts.push(tr('{count} terms', { count: dict.termCount }));
+      if (dict.freqCount) parts.push(tr('{count} frequency', { count: dict.freqCount }));
+      if (dict.pitchCount) parts.push(tr('{count} pitch', { count: dict.pitchCount }));
       return parts.length ? parts.join(' | ') : dict.name;
     }
     function currentOrder() {
       return state.dictionaries.map(dict => dict.name);
     }
     function postOrder() {
-      command('dictionary-manager-set-order', { order: currentOrder() }, 'Saving dictionary order...');
+      command('dictionary-manager-set-order', { order: currentOrder() }, tr('Saving dictionary order...'));
+    }
+    function normalizeAudioSourceUrl(value) {
+      const url = String(value || '').trim();
+      if (!url || !/^https?:\/\//i.test(url)) return '';
+      return url;
+    }
+    function normalizeAudioSourceItem(source) {
+      const raw = typeof source === 'string' ? { url: source } : (source && typeof source === 'object' ? source : {});
+      const url = normalizeAudioSourceUrl(raw.url);
+      if (!url) return null;
+      const id = raw.id ? String(raw.id) : 'audio-source-' + String(++state.audioSourceSerial);
+      const name = String(raw.name || '').trim();
+      return name ? { id, name, url } : { id, url };
+    }
+    function normalizeAudioSources(value) {
+      let raw = value;
+      if (typeof raw === 'string') {
+        const text = raw.trim();
+        if (!text) return [];
+        try { raw = JSON.parse(text); } catch (_) { raw = text; }
+      }
+      if (raw && typeof raw === 'object' && Array.isArray(raw.audioSources)) raw = raw.audioSources;
+      const values = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+      const seen = Object.create(null);
+      const out = [];
+      values.forEach(item => {
+        const normalized = normalizeAudioSourceItem(item);
+        if (!normalized || seen[normalized.url]) return;
+        seen[normalized.url] = true;
+        out.push(normalized);
+      });
+      return out;
+    }
+    function serializeAudioSources(sources) {
+      const clean = [];
+      const seen = Object.create(null);
+      (Array.isArray(sources) ? sources : []).forEach(source => {
+        const url = normalizeAudioSourceUrl(source && source.url);
+        if (!url || seen[url]) return;
+        seen[url] = true;
+        const name = String((source && source.name) || '').trim();
+        clean.push(name ? { name, url } : { url });
+      });
+      return JSON.stringify(clean);
+    }
+    function syncAudioSourcesFromProfile() {
+      state.audioSources = normalizeAudioSources(profileValue('audioSourcesJson'));
+    }
+    function saveAudioSources() {
+      saveProfilePreferences();
+    }
+    function moveAudioSource(id, delta) {
+      const index = state.audioSources.findIndex(source => source.id === id);
+      const next = index + delta;
+      if (index < 0 || next < 0 || next >= state.audioSources.length) return;
+      const item = state.audioSources.splice(index, 1)[0];
+      state.audioSources.splice(next, 0, item);
+      renderAudioSources();
+      saveAudioSources();
+    }
+    function moveAudioSourceBefore(id, beforeId) {
+      if (!id || !beforeId || id === beforeId) return;
+      const from = state.audioSources.findIndex(source => source.id === id);
+      if (from < 0 || state.audioSources.findIndex(source => source.id === beforeId) < 0) return;
+      const item = state.audioSources.splice(from, 1)[0];
+      const target = state.audioSources.findIndex(source => source.id === beforeId);
+      state.audioSources.splice(Math.max(0, target), 0, item);
+      renderAudioSources();
+      saveAudioSources();
+    }
+    function deleteAudioSource(id) {
+      const before = state.audioSources.length;
+      state.audioSources = state.audioSources.filter(source => source.id !== id);
+      if (state.audioSources.length === before) return;
+      renderAudioSources();
+      saveAudioSources();
+    }
+    function addAudioSource() {
+      const firstSource = state.audioSources.length === 0;
+      const source = {
+        id: 'audio-source-' + String(++state.audioSourceSerial),
+        url: firstSource ? DEFAULT_AUDIO_SOURCE_URL : ''
+      };
+      state.audioSources.push(source);
+      renderAudioSources();
+      const input = els.audioSourceList.querySelector('[data-id="' + source.id + '"] input');
+      if (input && typeof input.focus === 'function') input.focus();
+      if (firstSource) saveAudioSources();
+    }
+    function updateAudioSourceUrl(id, value) {
+      const source = state.audioSources.find(item => item.id === id);
+      if (!source) return;
+      source.url = String(value || '').trim();
+      saveAudioSources();
     }
     function moveDictionary(name, delta) {
       const index = state.dictionaries.findIndex(dict => dict.name === name);
@@ -610,8 +1061,8 @@
     function deleteDictionary(dict) {
       if (!dict || !dict.name || state.busy) return;
       const label = dict.title || dict.name;
-      if (!confirm('Delete "' + label + '" from iinatan? This removes the installed dictionary files.')) return;
-      command('dictionary-manager-delete', { name: dict.name }, 'Requesting dictionary deletion...');
+      if (!confirm(tr('Delete "{name}" from Hoshitan? This removes the installed dictionary files.', { name: label }))) return;
+      command('dictionary-manager-delete', { name: dict.name }, tr('Requesting dictionary deletion...'));
     }
     function profileValue(key) {
       if (Object.prototype.hasOwnProperty.call(state.profilePreferences, key)) return state.profilePreferences[key];
@@ -642,6 +1093,7 @@
         const key = control.dataset.profilePref;
         prefs[key] = readControlValue(control, state.profilePreferenceDefaults[key]);
       });
+      prefs.audioSourcesJson = serializeAudioSources(state.audioSources);
       return prefs;
     }
     function collectGlobalSettings() {
@@ -650,6 +1102,7 @@
         const key = control.dataset.globalSetting;
         settings[key] = readControlValue(control, state.globalSettingDefaults[key]);
       });
+      settings.ankiFieldMappingsJson = JSON.stringify(state.ankiFieldMappings || {});
       return settings;
     }
     function saveProfilePreferences() {
@@ -657,7 +1110,7 @@
       command(
         'dictionary-manager-update-profile-preferences',
         { profileId: state.activeProfileId, preferences: collectProfilePreferences() },
-        'Saving profile settings...',
+        tr('Saving profile settings...'),
         { busy: false, clearAfterMs: 2500 }
       );
     }
@@ -666,7 +1119,16 @@
       command(
         'dictionary-manager-update-global-settings',
         { settings: collectGlobalSettings() },
-        'Saving dictionary import settings...',
+        tr('Saving global settings...'),
+        { busy: false, clearAfterMs: 2500 }
+      );
+    }
+    function saveAnkiFieldMappings() {
+      if (state.rendering) return;
+      command(
+        'dictionary-manager-update-global-settings',
+        { settings: { ankiFieldMappingsJson: JSON.stringify(state.ankiFieldMappings || {}) } },
+        tr('Saving global settings...'),
         { busy: false, clearAfterMs: 2500 }
       );
     }
@@ -681,7 +1143,7 @@
         els.profileSelect.appendChild(option);
       });
       const profile = activeProfile();
-      els.activeProfileLabel.textContent = 'Active profile: ' + (profile.name || profile.id);
+      els.activeProfileLabel.textContent = tr('Active profile: {name}', { name: profile.name || profile.id });
     }
     function renderSettingsControls() {
       state.rendering = true;
@@ -691,14 +1153,160 @@
       Array.from(document.querySelectorAll('[data-global-setting]')).forEach(control => {
         setControlValue(control, globalValue(control.dataset.globalSetting));
       });
+      syncAudioSourcesFromProfile();
       state.rendering = false;
+      translateStaticDocument();
+    }
+    function renderSelectValues(element, values, selectedValue) {
+      element.innerHTML = '';
+      const selected = String(selectedValue || '');
+      const clean = (values || []).map(value => String(value || '')).filter(Boolean);
+      if (selected && clean.indexOf(selected) < 0) clean.unshift(selected);
+      clean.forEach(value => {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = value;
+        option.selected = value === selected;
+        element.appendChild(option);
+      });
+    }
+    function parseAnkiFieldMappings(value) {
+      let parsed = value;
+      if (typeof parsed === 'string') {
+        try { parsed = JSON.parse(parsed || '{}'); } catch (_) { parsed = {}; }
+      }
+      const out = {};
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return out;
+      Object.keys(parsed).forEach(field => {
+        const name = String(field || '').trim();
+        const mapping = String(parsed[field] || '').trim();
+        if (name && mapping) out[name] = mapping;
+      });
+      return out;
+    }
+    function suggestedAnkiMapping(fieldName) {
+      const key = String(fieldName || '').replace(/[\s_-]+/g, '').toLowerCase();
+      const candidates = {
+        expression: '{expression}',
+        word: '{expression}',
+        term: '{expression}',
+        vocab: '{expression}',
+        expressionreading: '{reading}',
+        reading: '{reading}',
+        kana: '{reading}',
+        sentence: '{sentence}',
+        sentencefurigana: '{sentence}',
+        front: '{sentence}',
+        maindefinition: '{definition}',
+        definition: '{definition}',
+        glossary: '{definition}',
+        meaning: '{definition}',
+        back: '{definition}',
+        picture: '{image}',
+        definitionpicture: '{image}',
+        image: '{image}',
+        expressionaudio: '{audio}',
+        wordaudio: '{audio}',
+        sentenceaudio: '{sentence-audio}',
+        audio: '{audio}',
+        miscinfo: '{source}',
+        source: '{source}',
+        notes: '{source}',
+        dictionary: '{dictionary}'
+      };
+      return candidates[key] || '';
+    }
+    function pruneAnkiFieldMappings() {
+      const available = Object.create(null);
+      state.ankiFieldNames.forEach(name => { available[String(name)] = true; });
+      const next = {};
+      Object.keys(state.ankiFieldMappings || {}).forEach(name => {
+        if (available[name]) next[name] = state.ankiFieldMappings[name];
+      });
+      state.ankiFieldMappings = next;
+    }
+    function autoMapAnkiFields(save) {
+      const next = {};
+      state.ankiFieldNames.forEach(name => {
+        const mapping = suggestedAnkiMapping(name);
+        if (mapping) next[String(name)] = mapping;
+      });
+      state.ankiFieldMappings = next;
+      renderAnkiFieldMappings();
+      if (save !== false) saveAnkiFieldMappings();
+      setStatus(tr('Anki fields mapped from note type {model}.', { model: els.ankiModelName.value || '' }), 'info', false);
+    }
+    function renderAnkiFieldMappings() {
+      els.ankiFieldMappings.innerHTML = '';
+      if (!state.ankiFieldNames.length) {
+        const empty = document.createElement('div');
+        empty.className = 'empty';
+        empty.textContent = state.ankiConnected ? tr('No fields returned by AnkiConnect.') : tr('Connect to AnkiConnect to load fields.');
+        els.ankiFieldMappings.appendChild(empty);
+        return;
+      }
+      const options = [
+        ['', '-'],
+        ['{expression}', '{expression}'],
+        ['{reading}', '{reading}'],
+        ['{sentence}', '{sentence}'],
+        ['{definition}', '{definition}'],
+        ['{image}', '{image}'],
+        ['{audio}', '{audio}'],
+        ['{sentence-audio}', '{sentence-audio}'],
+        ['{source}', '{source}'],
+        ['{dictionary}', '{dictionary}']
+      ];
+      state.ankiFieldNames.forEach(fieldName => {
+        const name = String(fieldName);
+        const row = document.createElement('div');
+        row.className = 'anki-field-row';
+        row.dataset.noI18n = 'true';
+        const label = document.createElement('div');
+        label.className = 'anki-field-name';
+        label.textContent = name;
+        const select = document.createElement('select');
+        select.dataset.noI18n = 'true';
+        select.dataset.busyControl = 'true';
+        options.forEach(([value, text]) => {
+          const option = document.createElement('option');
+          option.value = value;
+          option.textContent = text;
+          option.selected = value === String(state.ankiFieldMappings[name] || '');
+          select.appendChild(option);
+        });
+        const commitMapping = () => {
+          const previous = String(state.ankiFieldMappings[name] || '');
+          if (previous === select.value) return;
+          if (select.value) state.ankiFieldMappings[name] = select.value;
+          else delete state.ankiFieldMappings[name];
+          saveAnkiFieldMappings();
+        };
+        select.addEventListener('input', commitMapping);
+        select.addEventListener('change', commitMapping);
+        row.appendChild(label);
+        row.appendChild(select);
+        els.ankiFieldMappings.appendChild(row);
+      });
+    }
+    function renderAnkiMetadata() {
+      renderSelectValues(els.ankiDeckName, state.ankiDeckNames, globalValue('ankiDeckName'));
+      renderSelectValues(els.ankiModelName, state.ankiModelNames, globalValue('ankiModelName'));
+      renderAnkiFieldMappings();
+      els.ankiConnectionLabel.textContent = state.ankiConnected
+        ? tr('Connected. Loaded {decks} decks, {models} note types, and {fields} fields.', {
+          decks: state.ankiDeckNames.length,
+          models: state.ankiModelNames.length,
+          fields: state.ankiFieldNames.length
+        })
+        : tr('Anki Desktop and AnkiConnect must be running.');
     }
     function renderRecommended() {
       els.recommendedList.innerHTML = '';
       if (!state.recommendedDictionaries.length) {
         const empty = document.createElement('div');
         empty.className = 'empty';
-        empty.textContent = 'No recommended downloads are configured.';
+        empty.textContent = tr('No recommended downloads are configured.');
         els.recommendedList.appendChild(empty);
         return;
       }
@@ -718,10 +1326,10 @@
         const button = document.createElement('button');
         button.type = 'button';
         button.className = item.installed ? '' : 'primary';
-        button.textContent = item.installed ? 'Reinstall' : 'Download';
+        button.textContent = item.installed ? tr('Reinstall') : tr('Download');
         button.dataset.busyControl = 'true';
         button.addEventListener('click', () => {
-          command('dictionary-manager-download-recommended', { id: item.id }, 'Starting recommended dictionary download...');
+          command('dictionary-manager-download-recommended', { id: item.id }, tr('Starting recommended dictionary download...'));
         });
         row.appendChild(button);
         els.recommendedList.appendChild(row);
@@ -732,7 +1340,7 @@
       if (!state.dictionaries.length) {
         const empty = document.createElement('div');
         empty.className = 'empty';
-        empty.textContent = 'No dictionaries installed.';
+        empty.textContent = tr('No dictionaries installed.');
         els.dictionaryList.appendChild(empty);
         return;
       }
@@ -745,7 +1353,7 @@
         const handle = document.createElement('button');
         handle.className = 'drag-handle';
         handle.type = 'button';
-        handle.title = 'Drag';
+        handle.title = tr('Drag');
         handle.textContent = '::';
         handle.dataset.busyControl = 'true';
         handle.disabled = state.busy;
@@ -758,7 +1366,7 @@
         checkbox.disabled = state.busy;
         checkbox.addEventListener('change', () => {
           dict.enabled = checkbox.checked;
-          command('dictionary-manager-set-enabled', { name: dict.name, enabled: checkbox.checked }, 'Saving dictionary selection...');
+          command('dictionary-manager-set-enabled', { name: dict.name, enabled: checkbox.checked }, tr('Saving dictionary selection...'));
         });
         row.appendChild(checkbox);
 
@@ -777,14 +1385,14 @@
         actions.className = 'row-actions';
         const up = document.createElement('button');
         up.type = 'button';
-        up.textContent = 'Up';
+        up.textContent = tr('Up');
         up.dataset.busyControl = 'true';
         up.dataset.positionDisabled = index === 0 ? 'true' : 'false';
         up.disabled = state.busy || index === 0;
         up.addEventListener('click', () => moveDictionary(dict.name, -1));
         const down = document.createElement('button');
         down.type = 'button';
-        down.textContent = 'Down';
+        down.textContent = tr('Down');
         down.dataset.busyControl = 'true';
         down.dataset.positionDisabled = index === state.dictionaries.length - 1 ? 'true' : 'false';
         down.disabled = state.busy || index === state.dictionaries.length - 1;
@@ -792,7 +1400,7 @@
         const del = document.createElement('button');
         del.type = 'button';
         del.className = 'danger';
-        del.textContent = 'Delete';
+        del.textContent = tr('Delete');
         del.dataset.busyControl = 'true';
         del.disabled = state.busy;
         del.addEventListener('click', () => deleteDictionary(dict));
@@ -828,6 +1436,95 @@
         els.dictionaryList.appendChild(row);
       });
     }
+    function renderAudioSources() {
+      els.audioSourceList.innerHTML = '';
+      if (!state.audioSources.length) {
+        const empty = document.createElement('div');
+        empty.className = 'empty';
+        empty.textContent = tr('No audio sources configured.');
+        els.audioSourceList.appendChild(empty);
+        return;
+      }
+      state.audioSources.forEach((source, index) => {
+        const row = document.createElement('div');
+        row.className = 'audio-source-row' + (state.draggingAudioSourceId === source.id ? ' dragging' : '');
+        row.draggable = !state.busy;
+        row.dataset.id = source.id;
+
+        const handle = document.createElement('button');
+        handle.className = 'drag-handle';
+        handle.type = 'button';
+        handle.title = tr('Drag');
+        handle.textContent = '::';
+        handle.dataset.busyControl = 'true';
+        handle.disabled = state.busy;
+        row.appendChild(handle);
+
+        const input = document.createElement('input');
+        input.type = 'url';
+        input.value = source.url || '';
+        input.placeholder = DEFAULT_AUDIO_SOURCE_URL;
+        input.setAttribute('aria-label', tr('Audio source URL'));
+        input.dataset.busyControl = 'true';
+        input.disabled = state.busy;
+        input.addEventListener('change', () => updateAudioSourceUrl(source.id, input.value));
+        row.appendChild(input);
+
+        const actions = document.createElement('div');
+        actions.className = 'row-actions';
+        const up = document.createElement('button');
+        up.type = 'button';
+        up.textContent = tr('Up');
+        up.dataset.busyControl = 'true';
+        up.dataset.positionDisabled = index === 0 ? 'true' : 'false';
+        up.disabled = state.busy || index === 0;
+        up.addEventListener('click', () => moveAudioSource(source.id, -1));
+        const down = document.createElement('button');
+        down.type = 'button';
+        down.textContent = tr('Down');
+        down.dataset.busyControl = 'true';
+        down.dataset.positionDisabled = index === state.audioSources.length - 1 ? 'true' : 'false';
+        down.disabled = state.busy || index === state.audioSources.length - 1;
+        down.addEventListener('click', () => moveAudioSource(source.id, 1));
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'danger';
+        del.textContent = tr('Delete');
+        del.dataset.busyControl = 'true';
+        del.disabled = state.busy;
+        del.addEventListener('click', () => deleteAudioSource(source.id));
+        actions.appendChild(up);
+        actions.appendChild(down);
+        actions.appendChild(del);
+        row.appendChild(actions);
+
+        row.addEventListener('dragstart', event => {
+          state.draggingAudioSourceId = source.id;
+          row.classList.add('dragging');
+          try { event.dataTransfer.setData('text/plain', source.id); } catch (_) {}
+          try { event.dataTransfer.effectAllowed = 'move'; } catch (_) {}
+        });
+        row.addEventListener('dragend', () => {
+          state.draggingAudioSourceId = '';
+          Array.from(document.querySelectorAll('.audio-source-row')).forEach(el => el.classList.remove('drag-over', 'dragging'));
+        });
+        row.addEventListener('dragover', event => {
+          event.preventDefault();
+          row.classList.add('drag-over');
+          try { event.dataTransfer.dropEffect = 'move'; } catch (_) {}
+        });
+        row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
+        row.addEventListener('drop', event => {
+          event.preventDefault();
+          row.classList.remove('drag-over');
+          const id = state.draggingAudioSourceId || (event.dataTransfer && event.dataTransfer.getData('text/plain'));
+          state.draggingAudioSourceId = '';
+          moveAudioSourceBefore(id, source.id);
+        });
+
+        els.audioSourceList.appendChild(row);
+      });
+    }
     function renderTabs() {
       Array.from(document.querySelectorAll('.tab')).forEach(tab => {
         tab.classList.toggle('active', tab.dataset.tab === state.activeTab);
@@ -841,6 +1538,8 @@
       renderSettingsControls();
       renderRecommended();
       renderDictionaries();
+      renderAnkiMetadata();
+      renderAudioSources();
       renderTabs();
       updateBusyState();
     }
@@ -851,33 +1550,60 @@
         renderTabs();
       });
     });
+    els.addAudioSource.addEventListener('click', addAudioSource);
     Array.from(document.querySelectorAll('[data-profile-pref]')).forEach(control => {
       control.addEventListener('change', saveProfilePreferences);
     });
     Array.from(document.querySelectorAll('[data-global-setting]')).forEach(control => {
       control.addEventListener('change', saveGlobalSettings);
     });
-    els.importZip.addEventListener('click', () => command('dictionary-manager-import-zip', {}, 'Opening ZIP picker...', { busy: false, clearAfterMs: 5000 }));
-    els.refresh.addEventListener('click', () => command('dictionary-manager-refresh', {}, 'Refreshing dictionary list...'));
+    document.getElementById('uiLanguage').addEventListener('change', () => {
+      state.globalSettings.uiLanguage = document.getElementById('uiLanguage').value;
+      setStatus('', 'info', false);
+      translateStaticDocument();
+      render();
+    });
+    els.importZip.addEventListener('click', () => command('dictionary-manager-import-zip', {}, tr('Opening ZIP picker...'), { busy: false, clearAfterMs: 5000 }));
+    els.refresh.addEventListener('click', () => command('dictionary-manager-refresh', {}, tr('Refreshing dictionary list...')));
+    els.ankiRefresh.addEventListener('click', () => command(
+      'dictionary-manager-anki-refresh',
+      { modelName: els.ankiModelName.value },
+      tr('Connecting to AnkiConnect...')
+    ));
+    els.ankiAutoMap.addEventListener('click', autoMapAnkiFields);
+    els.ankiModelName.addEventListener('change', () => {
+      state.globalSettings.ankiModelName = els.ankiModelName.value;
+      command(
+        'dictionary-manager-anki-refresh',
+        { modelName: els.ankiModelName.value },
+        tr('Loading Anki note fields...')
+      );
+    });
+    els.chooseLocalAudioDatabase.addEventListener('click', () => command(
+      'dictionary-manager-choose-local-audio-database',
+      {},
+      tr('Choosing local audio database...'),
+      { busy: false, clearAfterMs: 5000 }
+    ));
     els.profileSelect.addEventListener('change', () => {
-      command('dictionary-manager-switch-profile', { profileId: els.profileSelect.value }, 'Switching profile...');
+      command('dictionary-manager-switch-profile', { profileId: els.profileSelect.value }, tr('Switching profile...'));
     });
     els.newProfile.addEventListener('click', () => {
-      const name = prompt('New profile name', '');
+      const name = prompt(tr('New profile name'), '');
       if (name === null) return;
-      command('dictionary-manager-create-profile', { name, sourceProfileId: state.activeProfileId }, 'Creating profile...');
+      command('dictionary-manager-create-profile', { name, sourceProfileId: state.activeProfileId }, tr('Creating profile...'));
     });
     els.renameProfile.addEventListener('click', () => {
       const profile = activeProfile();
-      const name = prompt('Rename profile', profile.name || profile.id);
+      const name = prompt(tr('Rename profile'), profile.name || profile.id);
       if (name === null) return;
-      command('dictionary-manager-rename-profile', { profileId: profile.id, name }, 'Renaming profile...', { busy: false, clearAfterMs: 2500 });
+      command('dictionary-manager-rename-profile', { profileId: profile.id, name }, tr('Renaming profile...'), { busy: false, clearAfterMs: 2500 });
     });
     els.deleteProfile.addEventListener('click', () => {
       const profile = activeProfile();
       if (!profile || profile.locked) return;
-      if (!confirm('Delete profile "' + (profile.name || profile.id) + '"?')) return;
-      command('dictionary-manager-delete-profile', { profileId: profile.id }, 'Deleting profile...');
+      if (!confirm(tr('Delete profile "{name}"?', { name: profile.name || profile.id }))) return;
+      command('dictionary-manager-delete-profile', { profileId: profile.id }, tr('Deleting profile...'));
     });
 
     const bridge = iinaBridge();
@@ -889,6 +1615,7 @@
         state.profilePreferences = (payload && payload.profilePreferences && typeof payload.profilePreferences === 'object') ? Object.assign({}, payload.profilePreferences) : {};
         state.profilePreferenceDefaults = (payload && payload.profilePreferenceDefaults && typeof payload.profilePreferenceDefaults === 'object') ? Object.assign({}, payload.profilePreferenceDefaults) : {};
         state.globalSettings = (payload && payload.globalSettings && typeof payload.globalSettings === 'object') ? Object.assign({}, payload.globalSettings) : {};
+        state.ankiFieldMappings = parseAnkiFieldMappings(state.globalSettings.ankiFieldMappingsJson);
         state.globalSettingDefaults = (payload && payload.globalSettingDefaults && typeof payload.globalSettingDefaults === 'object') ? Object.assign({}, payload.globalSettingDefaults) : {};
         state.activeProfileId = String((payload && payload.activeProfileId) || 'default');
         state.activeProfileName = String((payload && payload.activeProfileName) || 'Profile 1');
@@ -900,6 +1627,27 @@
           String((payload && payload.kind) || 'info'),
           !!(payload && payload.busy)
         );
+      });
+      bridge.onMessage('dictionary-manager-anki-state', payload => {
+        state.ankiConnected = !!(payload && payload.connected);
+        state.ankiDeckNames = Array.isArray(payload && payload.deckNames) ? payload.deckNames.slice() : [];
+        state.ankiModelNames = Array.isArray(payload && payload.modelNames) ? payload.modelNames.slice() : [];
+        state.ankiFieldNames = Array.isArray(payload && payload.fieldNames) ? payload.fieldNames.slice() : [];
+        state.ankiLoadedModel = String((payload && payload.modelName) || '');
+        pruneAnkiFieldMappings();
+        if (state.ankiConnected && state.ankiFieldNames.length && !Object.keys(state.ankiFieldMappings).length) {
+          autoMapAnkiFields(false);
+          saveAnkiFieldMappings();
+        }
+        renderAnkiMetadata();
+      });
+      bridge.onMessage('dictionary-manager-local-audio-path', payload => {
+        const selectedPath = String((payload && payload.path) || '');
+        if (!selectedPath) return;
+        state.globalSettings.localAudioDatabasePath = selectedPath;
+        const control = document.getElementById('localAudioDatabasePath');
+        if (control) control.value = selectedPath;
+        saveGlobalSettings();
       });
     }
 

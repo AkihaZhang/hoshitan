@@ -23,6 +23,17 @@ const context = {
   compactError(error) {
     return error && error.message ? error.message : String(error);
   },
+  t(key, values) {
+    const table = {
+      'manager.profileSaved': 'Profile settings saved.',
+      'manager.globalSaved': 'Global settings saved.'
+    };
+    let text = table[key] || key;
+    Object.keys(values || {}).forEach(name => {
+      text = text.replace('{' + name + '}', String(values[name]));
+    });
+    return text;
+  },
   debugVerbose() {},
   debugWarn() {},
   debugError() {},

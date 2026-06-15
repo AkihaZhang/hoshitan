@@ -4,7 +4,7 @@
  * Copyright (C) 2024-2026 Yomitan Authors
  * License: GPL-3.0-or-later. See DEINFLECTION_NOTES.md for attribution notes.
  */
-const IINATAN_ENGLISH_YOMITAN_SUFFIX_RULES = [
+const HOSHITAN_ENGLISH_YOMITAN_SUFFIX_RULES = [
   ["s", "", ["np"], ["ns"], "plural"],
   ["es", "", ["np"], ["ns"], "plural"],
   ["ies", "y", ["np"], ["ns"], "plural"],
@@ -43,14 +43,14 @@ const IINATAN_ENGLISH_YOMITAN_SUFFIX_RULES = [
   ["able", "e", ["v"], ["adj"], "-able"],
   ["iable", "y", ["v"], ["adj"], "-able"]
 ];
-const IINATAN_ENGLISH_YOMITAN_PREFIX_RULES = [
+const HOSHITAN_ENGLISH_YOMITAN_PREFIX_RULES = [
   ["un", "", ["adj", "adv", "v"], ["adj", "adv", "v"], "un-"],
   ["going to ", "", ["v"], ["v"], "going-to future"],
   ["will ", "", ["v"], ["v"], "will future"],
   ["don't ", "", ["v"], ["v"], "imperative negative"],
   ["do not ", "", ["v"], ["v"], "imperative negative"]
 ];
-const IINATAN_ENGLISH_YOMITAN_DOUBLED_SUFFIX_RULES = [
+const HOSHITAN_ENGLISH_YOMITAN_DOUBLED_SUFFIX_RULES = [
   ["bdgklmnprstz", "ed", ["v"], ["v"], "past"],
   ["bdgklmnprstz", "ing", ["v"], ["v"], "ing"],
   ["bdgmnt", "er", ["adj"], ["adj"], "comparative"],

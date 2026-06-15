@@ -12,18 +12,18 @@ async function ensureBundledBackendInstalled() {
   await ensureDataDirs();
   if (!file.exists(bundledBinPath())) {
     if (backendInstalled()) return;
-    throw new Error("iinatan's lookup engine is missing. Install a packaged Apple Silicon build or run scripts/build_native_backend.sh while developing.");
+    throw new Error("Hoshitan's lookup engine is missing. Install a packaged Apple Silicon build or run scripts/build_native_backend.sh while developing.");
   }
   if (await backendBinaryMatchesBundled()) return;
   const tmpPath = binPath() + ".tmp-" + String(Date.now());
   safeDelete(tmpPath);
   const result = await utils.exec("/bin/cp", [bundledBinPath(), tmpPath], dataRoot());
-  if (!result || result.status !== 0) throw new Error("Could not install iinatan lookup engine: " + ((result && (result.stderr || result.stdout)) || "copy failed"));
+  if (!result || result.status !== 0) throw new Error("Could not install Hoshitan lookup engine: " + ((result && (result.stderr || result.stdout)) || "copy failed"));
   await execChecked("/bin/chmod", ["755", tmpPath]);
   const moved = await utils.exec("/bin/mv", ["-f", tmpPath, binPath()], dataRoot());
   if (!moved || moved.status !== 0) {
     safeDelete(tmpPath);
-    throw new Error("Could not activate iinatan lookup engine: " + ((moved && (moved.stderr || moved.stdout)) || "move failed"));
+    throw new Error("Could not activate Hoshitan lookup engine: " + ((moved && (moved.stderr || moved.stdout)) || "move failed"));
   }
 }
 async function extractFirstJsonObject(raw) {
@@ -165,8 +165,8 @@ async function importDictionaryZip(zipPath, existingTaskId) {
   const importArgs = ["import", zipPath, dictRoot(), prefBool("lowRamImport", true) ? "--low-ram" : "--normal-ram"];
   try {
     await ensureBundledBackendInstalled();
-    if (!taskId) taskId = startOverlayTask("dictionary-import", "Adding dictionary", "Preparing import...");
-    updateOverlayTask(taskId, { title: "Adding dictionary", message: "Importing dictionary...", detail: "Large dictionaries can take several minutes." });
+    if (!taskId) taskId = startOverlayTask("dictionary-import", t("dict.adding"), t("dict.preparingImport"));
+    updateOverlayTask(taskId, { title: t("dict.adding"), message: t("dict.importing"), detail: t("dict.largeImport") });
     const started = Date.now();
     const selected = selectedLanguageModule();
     debugLog("dictionary import start language=" + String(selected && selected.id || "") + " zipPath=" + JSON.stringify(String(zipPath || "")) + " zipExists=" + String(file.exists(zipPath)) + " zipFilename=" + JSON.stringify(filenameFromPath(zipPath)) + " args=" + JSON.stringify(importArgs));
@@ -176,7 +176,7 @@ async function importDictionaryZip(zipPath, existingTaskId) {
       error.importStage = "backend-import";
       throw error;
     }
-    updateOverlayTask(taskId, { title: "Adding dictionary", message: "Saving dictionary list...", detail: "Refreshing installed dictionaries." });
+    updateOverlayTask(taskId, { title: t("dict.adding"), message: t("dict.savingList"), detail: t("dict.refreshingList") });
     try {
       updateManifestAfterImport(result, zipPath);
     } catch (error) {
@@ -184,19 +184,23 @@ async function importDictionaryZip(zipPath, existingTaskId) {
       throw error;
     }
     activeWorkerFingerprint = null;
-    updateOverlayTask(taskId, { title: "Adding dictionary", message: "Refreshing lookup worker...", detail: "The new dictionary will be available for hover popups." });
+    updateOverlayTask(taskId, { title: t("dict.adding"), message: t("dict.refreshingWorker"), detail: t("dict.workerAvailable") });
     try {
       await stopBackendWorker();
     } catch (error) {
       debugWarn("dictionary imported but worker refresh failed: " + compactError(error));
-      setOverlayStatus("Dictionary imported, but worker restart failed. Restart iinatan or use Debug -> Restart Dictionary Lookup.", "error", 12000);
+      setOverlayStatus(t("dict.workerRestartFailed"), "error", 12000);
     }
     rebuildMenu();
     if (typeof postDictionaryManagerState === "function") postDictionaryManagerState();
     const elapsed = Math.round((Date.now() - started) / 1000);
-    const msg = "Added " + titleFromImportResult(result, zipPath) + " (" + numericImportField(result, "term_count", "termCount") + " terms).";
-    if (ownsTask) finishOverlayTask(taskId, true, msg, "Import took about " + elapsed + " seconds.");
-    else updateOverlayTask(taskId, { title: "Adding dictionary", message: msg, detail: "Import took about " + elapsed + " seconds." });
+    const msg = t("dict.imported", {
+      title: titleFromImportResult(result, zipPath),
+      count: numericImportField(result, "term_count", "termCount")
+    });
+    const detail = t("dict.importTime", { seconds: elapsed });
+    if (ownsTask) finishOverlayTask(taskId, true, msg, detail);
+    else updateOverlayTask(taskId, { title: t("dict.adding"), message: msg, detail });
     debugLog("dictionary import complete title=" + JSON.stringify(titleFromImportResult(result, zipPath)) + " language=" + String((readManifest().dictionaries[titleFromImportResult(result, zipPath)] || {}).language || "unknown") + " elapsedSec=" + elapsed);
     return result;
   } catch (error) {
@@ -215,10 +219,10 @@ async function importDictionaryZip(zipPath, existingTaskId) {
       " parsedJson=" + JSON.stringify((error && error.backendParsedJson) || null) +
       " postImportLookupAttempted=false" +
       " error=" + compactError(error));
-    const userStage = stage === "manifest-update" ? "Manifest update failed." :
-      String(stage).indexOf("Dictionary import command") >= 0 || stage === "backend-import" ? "Backend import command failed." :
-      "Dictionary import failed.";
-    if (ownsTask) finishOverlayTask(taskId, false, "Could not add dictionary.", userStage + " " + compactError(error));
+    const userStage = stage === "manifest-update" ? t("dict.manifestUpdateFailed") :
+      String(stage).indexOf("Dictionary import command") >= 0 || stage === "backend-import" ? t("dict.backendImportFailed") :
+      t("dict.importStageFailed");
+    if (ownsTask) finishOverlayTask(taskId, false, t("dict.couldNotAdd"), userStage + " " + compactError(error));
     throw error;
   }
 }
@@ -227,12 +231,12 @@ async function chooseAndImportDictionary() {
   try {
     const zipPaths = await chooseDictionaryZipPaths();
     if (!zipPaths.length) {
-      notify("Dictionary import cancelled.", "info", 3500);
+      notify(t("dict.importCancelled"), "info", 3500);
       return;
     }
     await validateAndImportDictionaryZips(zipPaths, "manual-picker");
   } catch (error) {
-    const msg = "Could not add dictionary: " + compactError(error);
+    const msg = t("dict.couldNotAddDetail", { error: compactError(error) });
     debugError("manual dictionary import failed: " + compactError(error));
     setOverlayStatus(msg, "error", 12000);
     alert(msg);
@@ -269,7 +273,7 @@ async function chooseDictionaryZipPaths() {
   };
   debugLog("manual dictionary import: opening file chooser with zip filter and multi-select");
   try {
-    const selected = await resolveMaybePromise(utils.chooseFile("Choose Yomitan dictionary ZIPs", options));
+    const selected = await resolveMaybePromise(utils.chooseFile(t("dict.chooseZip"), options));
     const paths = normalizeChosenFilePaths(selected);
     debugLog("manual dictionary import: filtered chooser returned count=" + paths.length + " sample=" + JSON.stringify(paths.slice(0, 5)));
     return paths;
@@ -283,7 +287,7 @@ async function chooseDictionaryZipPaths() {
 
   debugLog("manual dictionary import: opening fallback unfiltered file chooser");
   try {
-    const selected = await resolveMaybePromise(utils.chooseFile("Choose Yomitan dictionary ZIPs", { allowsMultipleSelection: true, allowMultipleSelection: true, multiple: true }));
+    const selected = await resolveMaybePromise(utils.chooseFile(t("dict.chooseZip"), { allowsMultipleSelection: true, allowMultipleSelection: true, multiple: true }));
     const paths = normalizeChosenFilePaths(selected);
     debugLog("manual dictionary import: unfiltered chooser returned count=" + paths.length + " sample=" + JSON.stringify(paths.slice(0, 5)));
     return paths;
@@ -296,12 +300,32 @@ async function chooseDictionaryZipPaths() {
   }
 }
 
+async function chooseLocalAudioDatabasePath() {
+  if (!utils || typeof utils.chooseFile !== "function") {
+    throw new Error("This IINA build does not expose utils.chooseFile.");
+  }
+  const options = {
+    allowedFileTypes: ["db", "sqlite", "sqlite3"],
+    allowsMultipleSelection: false,
+    allowMultipleSelection: false,
+    multiple: false
+  };
+  try {
+    const selected = await resolveMaybePromise(utils.chooseFile("Choose Hoshi Reader android.db", options));
+    const paths = normalizeChosenFilePaths(selected);
+    return paths.length ? paths[0] : "";
+  } catch (error) {
+    if (isFilePickerCancelError(error)) return "";
+    throw new Error("IINA file picker failed: " + compactError(error));
+  }
+}
+
 async function validateAndImportDictionaryZip(zipPath, source) {
   const validation = dictionaryZipValidation(zipPath, p => file.exists(p));
   debugLog("manual dictionary import validation source=" + String(source || "") + " ok=" + String(validation.ok) + " reason=" + String(validation.reason || "") + " path=" + JSON.stringify(String(validation.path || zipPath || "").slice(0, 260)));
   if (!validation.ok) {
     if (validation.reason === "empty") {
-      notify("Dictionary import cancelled.", "info", 3500);
+      notify(t("dict.importCancelled"), "info", 3500);
       return null;
     }
     throw new Error(validation.message);
@@ -314,7 +338,7 @@ async function validateAndImportDictionaryZips(zipPaths, source) {
   const paths = normalizeChosenFilePaths(zipPaths);
   const label = String(source || "manual-picker");
   if (!paths.length) {
-    notify("Dictionary import cancelled.", "info", 3500);
+    notify(t("dict.importCancelled"), "info", 3500);
     return [];
   }
   const imported = [];
@@ -322,7 +346,7 @@ async function validateAndImportDictionaryZips(zipPaths, source) {
     const result = await validateAndImportDictionaryZip(paths[i], label + "-" + String(i + 1));
     if (result) imported.push(result);
   }
-  if (imported.length > 1) notify("Imported " + imported.length + " dictionaries.", "info", 6500);
+  if (imported.length > 1) notify(t("dict.multipleImported", { count: imported.length }), "info", 6500);
   return imported;
 }
 
@@ -343,16 +367,16 @@ async function getRecommendedDictionaries() {
   let taskId = null;
   try {
     await ensureDataDirs();
-    taskId = startOverlayTask("recommended-dictionary", "Downloading recommended dictionaries", "Downloading dictionary...");
+    taskId = startOverlayTask("recommended-dictionary", t("dict.downloadTitle"), t("dict.downloading"));
     const dest = pathJoin(downloadRoot(), "jitendex-yomitan.zip");
-    updateOverlayTask(taskId, { title: "Downloading recommended dictionaries", message: "Downloading Jitendex...", detail: RECOMMENDED_JITENDEX_URL });
+    updateOverlayTask(taskId, { title: t("dict.downloadTitle"), message: t("dict.downloadingJitendex"), detail: RECOMMENDED_JITENDEX_URL });
     await http.download(RECOMMENDED_JITENDEX_URL, dest);
-    updateOverlayTask(taskId, { title: "Downloading recommended dictionaries", message: "Download complete. Importing...", detail: dest });
+    updateOverlayTask(taskId, { title: t("dict.downloadTitle"), message: t("dict.downloadComplete"), detail: dest });
     const result = await importDictionaryZip(dest, taskId);
-    const msg = "Added " + result.title + " (" + (result.term_count || 0) + " terms).";
-    finishOverlayTask(taskId, true, msg, "You can now hover Japanese subtitles for dictionary popups.");
+    const msg = t("dict.imported", { title: result.title, count: result.term_count || 0 });
+    finishOverlayTask(taskId, true, msg, t("dict.hoverReady"));
   } catch (error) {
-    const msg = "Could not download recommended dictionaries.";
+    const msg = t("dict.downloadFailed");
     finishOverlayTask(taskId, false, msg, compactError(error));
     alert(msg + " Details: " + compactError(error));
   }
@@ -454,7 +478,7 @@ async function waitForWorkerReady(fingerprint, timeoutMs) {
     if (ready && ready.fingerprint === fingerprint) {
       activeWorkerFingerprint = fingerprint;
       activeWorkerReady = ready;
-      setOverlayStatus("Dictionary lookup ready.", "info", 2500);
+      setOverlayStatus(t("dict.lookupReady"), "info", 2500);
       return ready;
     }
     if (ready && (!last || ready.fingerprint !== last.fingerprint)) {
@@ -485,7 +509,7 @@ async function ensureBackendWorker(dicts, language) {
   if (workerStartInFlight) return workerStartInFlight;
   workerStartInFlight = (async () => {
     await stopBackendWorker().catch(() => {});
-    setOverlayStatus("Preparing dictionary lookup...", "info", 4000);
+    setOverlayStatus(t("dict.preparingLookup"), "info", 4000);
     await startBackendWorkerProcess(dicts, lang);
     return await waitForWorkerReady(fingerprint, Math.max(8000, prefNumber("backendTimeoutMs", 30000)));
   })();

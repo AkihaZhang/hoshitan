@@ -183,6 +183,8 @@ function overlayConfig() {
   const language = selectedLanguageModule();
   scheduleIINAAppearanceHintRefresh(false);
   return {
+    uiLanguage: configuredUiLanguage(),
+    resolvedUiLanguage: resolvedUiLanguage(),
     language: selectedLanguageOverlayConfig(),
     lookupLanguage: language.id,
     fontScale: prefNumber("fontScale", 1.0),
@@ -197,6 +199,8 @@ function overlayConfig() {
     maxGlossesPerEntry: Math.max(1, prefNumber("maxGlossesPerEntry", 4)),
     scanLength: Math.max(1, prefNumber("scanLength", 24)),
     hoverRequestTimeoutMs: Math.max(1500, prefNumber("hoverRequestTimeoutMs", 15000)),
+    audioAutoPlay: prefBool("audioAutoPlay", false),
+    audioSources: activeWordAudioSources(),
     etymologyCollapseDefault: String(pref("etymologyCollapseDefault", "collapsed") || "collapsed"),
     wiktionaryEtymologyCollapseOverride: String(pref("wiktionaryEtymologyCollapseOverride", "collapsed") || "collapsed"),
     customPopupCss: String(pref("customPopupCss", "") || ""),
@@ -206,13 +210,19 @@ function overlayConfig() {
   };
 }
 function readCurrentSubtitle() {
-  let sub = "";
-  try { sub = mpv.getString("sub-text") || ""; } catch (_) { sub = ""; }
-  return cleanSubtitleText(sub);
+  const properties = ["sub-text", "secondary-sub-text"];
+  for (const property of properties) {
+    let sub = "";
+    try { sub = mpv.getString(property) || ""; } catch (_) { sub = ""; }
+    const cleaned = cleanSubtitleText(sub);
+    if (cleaned) return cleaned;
+  }
+  return "";
 }
 function publishSubtitle(text) {
   const normalized = text || "";
   currentSubtitleLineId = ++subtitleLineSerial;
+  lastSubtitlePublishedAt = Date.now();
   const language = selectedLanguageModule();
   const dicts = activeDictionaryPaths(language);
   debugVerbose("publishSubtitle lineId=" + currentSubtitleLineId + " language=" + language.id + " activeDicts=" + dicts.length + " len=" + String(normalized || "").length + " text=" + JSON.stringify(String(normalized || "").slice(0, 80)));
@@ -225,6 +235,12 @@ function publishSubtitle(text) {
       debugLog("background worker warmup failed lineId=" + currentSubtitleLineId + ": " + compactError(error));
     });
   }
+}
+function replayCurrentSubtitle() {
+  if (!lastSubtitle || !currentSubtitleLineId) return;
+  lastSubtitlePublishedAt = Date.now();
+  debugVerbose("replaySubtitle lineId=" + currentSubtitleLineId + " len=" + lastSubtitle.length);
+  postToOverlay("subtitle", { text: lastSubtitle, config: overlayConfig(), lineId: currentSubtitleLineId });
 }
 function canHideNativeSubtitlesForCurrentLanguage() {
   if (!lookupBackendReadyForNativeHide) return false;
@@ -246,12 +262,27 @@ function syncNativeSubtitleVisibility() {
     }
   } catch (error) { console.warn("Could not update native subtitle visibility: " + compactError(error)); }
 }
-function pollSubtitle() {
+function pollSubtitle(options) {
   if (!enabled) return;
   refreshPollingInterval();
   syncNativeSubtitleVisibility();
   const sub = readCurrentSubtitle();
-  if (sub === lastSubtitle) return;
+  if (sub && !textSubtitleOverlayPrimed && refreshOverlayForTextSubtitleActivation()) {
+    textSubtitleOverlayPrimed = true;
+  }
+  const now = Date.now();
+  if (!sub && lastSubtitle) {
+    if (!subtitleEmptySince) subtitleEmptySince = now;
+    if (now - subtitleEmptySince < SUBTITLE_EMPTY_GRACE_MS) return;
+  } else {
+    subtitleEmptySince = 0;
+  }
+  if (sub === lastSubtitle) {
+    if (sub && ((options && options.forceReplay) || now - lastSubtitlePublishedAt >= SUBTITLE_REPLAY_INTERVAL_MS)) {
+      replayCurrentSubtitle();
+    }
+    return;
+  }
   lastSubtitle = sub;
   publishSubtitle(sub);
 }

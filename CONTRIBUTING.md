@@ -1,8 +1,8 @@
 # Contributing
 
-This guide covers source changes, local validation, package checks, and releases for iinatan.
+This guide covers source changes, local validation, package checks, and releases for Hoshitan.
 
-iinatan is a Yomitan-style popup dictionary for IINA/mpv on macOS. It is implemented as an IINA JavaScript plugin, with HoshiDicts as the native/backend dictionary layer. Current lookup and display work spans Japanese, English, German, French, Korean, and Chinese.
+Hoshitan is a Yomitan-style popup dictionary and Anki mining tool for IINA/mpv on macOS. It is implemented as an IINA JavaScript plugin, with HoshiDicts as the native/backend dictionary layer. Current lookup and display work spans Japanese, English, German, French, Korean, and Chinese.
 
 ## Repository Shape
 
@@ -51,8 +51,8 @@ For Japanese dictionary display, keep each dictionary entry's headword prominent
 Clone with submodules:
 
 ```bash
-git clone --recurse-submodules https://github.com/afn478/iinatan.git
-cd iinatan
+git clone --recurse-submodules --branch dev https://github.com/AkihaZhang/hoshitan.git
+cd hoshitan
 ```
 
 If the clone already exists or was created without `--recurse-submodules`, initialize the submodule:
@@ -136,7 +136,7 @@ npm run pack
 
 ## Package Layout
 
-`scripts/build_plugin.py --package dist/iinatan.iinaplgz` packages only runtime files, not the whole source tree. The package validator requires:
+`scripts/build_plugin.py --package dist/hoshitan.iinaplgz` packages only runtime files, not the whole source tree. The package validator requires:
 
 - `Info.json`
 - `main.js`
@@ -158,7 +158,7 @@ The build script concatenates `src/languages/*.js`, `src/main/*.js`, `src/overla
 
 ## Diagnostics
 
-Diagnostic logs are available from **Plugins -> iinatan -> Debug**:
+Diagnostic logs are available from **Plugins -> Hoshitan -> Debug**:
 
 - JavaScript diagnostics: `Plugin Data Folder/debug.log`
 - Lookup process diagnostics: `Plugin Data Folder/worker/worker.log`
@@ -181,9 +181,9 @@ For Wiktionary/Kaikki-style dictionaries, the popup separates grammar, inflectio
 
 ## Release Workflow
 
-Release builds produce `dist/iinatan.iinaplgz`.
+Release builds produce `dist/hoshitan.iinaplgz`.
 
-The manual GitHub Actions workflow **macOS Apple Silicon build** regenerates runtime files, runs tests, compiles the bundled lookup engine, validates the installable root layout, packages `dist/iinatan.iinaplgz`, and uploads it as an artifact.
+The manual GitHub Actions workflow **macOS Apple Silicon build** regenerates runtime files, runs tests, compiles the bundled lookup engine, validates the installable root layout, packages `dist/hoshitan.iinaplgz`, and uploads it as an artifact.
 
 To publish a release package from the workflow, set `publish_release=true` and provide a `release_tag`, such as `v1.6.0`.
 

@@ -4,7 +4,7 @@
  * Copyright (C) 2024-2026 Yomitan Authors
  * License: GPL-3.0-or-later. See DEINFLECTION_NOTES.md for attribution notes.
  */
-const IINATAN_GERMAN_YOMITAN_SEPARABLE_PREFIXES = [
+const HOSHITAN_GERMAN_YOMITAN_SEPARABLE_PREFIXES = [
   "ab", "an", "auf", "aus", "auseinander", "bei", "da", "dabei", "dar", "daran",
   "dazwischen", "durch", "ein", "empor", "entgegen", "entlang", "entzwei",
   "fehl", "fern", "fest", "fort", "frei", "gegenüber", "gleich", "heim", "her",
@@ -15,8 +15,8 @@ const IINATAN_GERMAN_YOMITAN_SEPARABLE_PREFIXES = [
   "vorüber", "vorweg", "weg", "weiter", "wieder", "zu", "zurecht", "zurück",
   "zusammen"
 ];
-const IINATAN_GERMAN_LOCAL_SEPARABLE_PREFIXES = ["hinüber", "teil"];
-const IINATAN_GERMAN_YOMITAN_SUFFIX_RULES = [
+const HOSHITAN_GERMAN_LOCAL_SEPARABLE_PREFIXES = ["hinüber", "teil"];
+const HOSHITAN_GERMAN_YOMITAN_SUFFIX_RULES = [
   ["ung", "en", [], ["v"], "nominalization"],
   ["lung", "eln", [], ["v"], "nominalization"],
   ["rung", "rn", [], ["v"], "nominalization"],
@@ -25,9 +25,9 @@ const IINATAN_GERMAN_YOMITAN_SUFFIX_RULES = [
   ["heit", "", ["n"], ["adj", "n"], "-heit"],
   ["keit", "", ["n"], ["adj", "n"], "-heit"]
 ];
-const IINATAN_GERMAN_LOCAL_SUFFIX_RULES = [
+const HOSHITAN_GERMAN_LOCAL_SUFFIX_RULES = [
   ["ungen", "en", ["n"], ["v"], "local plural nominalization -ungen"]
 ];
-const IINATAN_GERMAN_YOMITAN_PREFIX_RULES = [
+const HOSHITAN_GERMAN_YOMITAN_PREFIX_RULES = [
   ["un", "", [], ["adj"], "negative"]
 ];

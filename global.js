@@ -1,1 +1,1 @@
-// iinatan does not install global menu items.
+// Hoshitan does not install global menu items.

@@ -1,4 +1,4 @@
-const IINATAN_DEINFLECTION = (() => {
+const HOSHITAN_DEINFLECTION = (() => {
   function arrayOf(value) {
     return Array.isArray(value) ? value : (value ? [value] : []);
   }
@@ -143,7 +143,7 @@ const IINATAN_DEINFLECTION = (() => {
     for (let i = 0; i < transformed.length && added < limit; i++) {
       const result = transformed[i];
       if (!result || !result.text || result.text === baseCandidate.text) continue;
-      IINATAN_LANGUAGE_COMMON.pushUniqueCandidate(list, seen, {
+      HOSHITAN_LANGUAGE_COMMON.pushUniqueCandidate(list, seen, {
         text: result.text,
         normalizedText: result.text,
         source: "deinflection",

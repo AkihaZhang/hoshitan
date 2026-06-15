@@ -1,29 +1,23 @@
 # Changelog
 
-## 1.8.1 - 2026-06-13
+## 0.1.0-dev.1 - 2026-06-15
 
-### Fixed
-
-- Playback now resumes after a hover lookup popup disappears when popup pause is enabled, while preserving manually paused playback.
-- Popup pause handling now ignores stale hide events and cancels pending resume when another popup appears.
-
-## 1.8.0 - 2026-06-12
+Initial Hoshitan testing build, based on the upstream project history.
 
 ### Added
 
-- Added a per-profile popup color mode setting with inherit, dark, and light options.
-- Added a light popup theme while keeping the existing dark popup appearance available.
-
-### Changed
-
-- Popup colors now use shared theme variables across dictionary entries, metadata chips, forms tables, status messages, and import progress UI.
-- In inherited color mode, the overlay follows IINA or system appearance hints when available.
-- Included the changelog in packaged release builds.
+- Added AnkiConnect card export from dictionary entries with configurable deck, note type, field mapping, tags, duplicate handling, screenshots, and subtitle-timed audio.
+- Added Anki connection metadata loading, automatic note-type field fetching, and raw English field mapping, including common Lapis fields.
+- Added Anki word-audio export through the `{audio}` mapping while keeping subtitle clips separate as `{sentence-audio}`.
+- Added interface localization with automatic macOS language detection and explicit English or Simplified Chinese selection.
+- Added a dedicated Audio settings panel with the Hoshi Reader online endpoint and direct Hoshi Reader `android.db` support.
 
 ### Fixed
 
-- Theme selection now resolves to concrete light or dark overlay classes instead of leaving an inherit-only theme state.
+- Kept transient empty subtitle properties from clearing lookup text and replayed active subtitles after dropped or reloaded overlay messages.
+- Restored lookup subtitles after switching from an embedded image subtitle to an external text subtitle by reattaching the overlay when the first text subtitle appears, without requiring a target-language toggle.
+- Assigned each IINA plugin instance its own local bridge port so multiple windows or processes no longer disable lookup/audio messaging with an address-in-use error.
+- Changed Anki sentence-audio clips from AAC/M4A to MP3.
 
-### Documentation
-
-- Expanded README acknowledgements for Yomitan, HoshiDicts, Chimahon, and Hoshi Reader Android.
+For history before the Hoshitan fork, see the
+[upstream changelog](https://github.com/afn478/iinatan/blob/main/CHANGELOG.md).

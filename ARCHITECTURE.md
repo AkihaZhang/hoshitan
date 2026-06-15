@@ -1,4 +1,4 @@
-# iinatan source layout
+# Hoshitan source layout
 
 The package root still contains generated runtime files (`main.js`, `overlay.html`, `dictionary-manager.html`,
 `global.js`, `preferences.html`, and `Info.json`) because that is the most conservative IINA plugin loading path.
@@ -30,7 +30,7 @@ python3 scripts/build_plugin.py
 To create an installable package:
 
 ```bash
-python3 scripts/build_plugin.py --package /tmp/iinatan.iinaplgz
+python3 scripts/build_plugin.py --package /tmp/hoshitan.iinaplgz
 ```
 
 Build the bundled Apple Silicon lookup engine before packaging a release:

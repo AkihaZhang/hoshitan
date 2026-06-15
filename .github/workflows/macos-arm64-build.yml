@@ -1,6 +1,9 @@
-name: macOS Apple Silicon build
+name: Hoshitan macOS Apple Silicon dev build
 
 on:
+  push:
+    branches:
+      - dev
   workflow_dispatch:
     inputs:
       publish_release:
@@ -9,7 +12,7 @@ on:
         type: boolean
         default: false
       release_tag:
-        description: Release tag to publish when publish_release is true, for example v1.6.0
+        description: Release tag to publish when publish_release is true, for example v0.1.0
         required: false
         type: string
 
@@ -58,16 +61,16 @@ jobs:
         run: npm run validate:release
 
       - name: Package plugin
-        run: python3 scripts/build_plugin.py --package dist/iinatan.iinaplgz
+        run: python3 scripts/build_plugin.py --package dist/hoshitan.iinaplgz
 
       - name: Validate package layout
-        run: python3 scripts/build_plugin.py --validate-package dist/iinatan.iinaplgz
+        run: python3 scripts/build_plugin.py --validate-package dist/hoshitan.iinaplgz
 
       - name: Upload plugin package
         uses: actions/upload-artifact@v4
         with:
-          name: iinatan-plugin
-          path: dist/iinatan.iinaplgz
+          name: hoshitan-plugin
+          path: dist/hoshitan.iinaplgz
 
       - name: Publish GitHub release
         if: ${{ inputs.publish_release }}
@@ -76,5 +79,5 @@ jobs:
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           test -n "$RELEASE_TAG"
-          gh release view "$RELEASE_TAG" >/dev/null 2>&1 || gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" --title "$RELEASE_TAG" --notes "iinatan $RELEASE_TAG"
-          gh release upload "$RELEASE_TAG" dist/iinatan.iinaplgz --clobber
+          gh release view "$RELEASE_TAG" >/dev/null 2>&1 || gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" --title "$RELEASE_TAG" --notes "Hoshitan $RELEASE_TAG"
+          gh release upload "$RELEASE_TAG" dist/hoshitan.iinaplgz --clobber

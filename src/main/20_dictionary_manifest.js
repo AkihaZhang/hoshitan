@@ -1,8 +1,12 @@
 const DEFAULT_PROFILE_ID = "default";
+const DEFAULT_AUDIO_SOURCE_URL = "https://hoshi-reader.manhhaoo-do.workers.dev/?term={term}&reading={reading}";
+const DEFAULT_AUDIO_SOURCES_JSON = JSON.stringify([{ name: "Hoshi Reader", url: DEFAULT_AUDIO_SOURCE_URL }]);
 const PROFILE_PREFERENCE_DEFAULTS = {
   enabledByDefault: true,
   hideNativeSubtitles: true,
   pauseWhilePopupVisible: true,
+  audioAutoPlay: false,
+  audioSourcesJson: DEFAULT_AUDIO_SOURCES_JSON,
   lookupLanguage: "ja",
   scanLength: 24,
   maxEntries: 3,
@@ -30,10 +34,80 @@ const PROFILE_PREFERENCE_DEFAULTS = {
 const PROFILE_PREFERENCE_KEYS = Object.keys(PROFILE_PREFERENCE_DEFAULTS);
 const GLOBAL_SETTINGS_DEFAULTS = {
   lowRamImport: true,
-  importTimeoutMs: 1800000
+  importTimeoutMs: 1800000,
+  uiLanguage: "auto",
+  ankiConnectUrl: "http://127.0.0.1:8765",
+  ankiApiKey: "",
+  ankiDeckName: "Default",
+  ankiModelName: "Basic",
+  ankiFieldMappingsJson: "{}",
+  ankiFieldSentence: "Front",
+  ankiFieldExpression: "",
+  ankiFieldReading: "",
+  ankiFieldDefinition: "Back",
+  ankiFieldImage: "",
+  ankiFieldAudio: "",
+  ankiFieldSource: "",
+  ankiTags: "hoshitan",
+  ankiAllowDuplicate: false,
+  ankiIncludeScreenshot: true,
+  ankiIncludeAudio: true,
+  ankiAudioPaddingMs: 120,
+  ankiFfmpegPath: "/opt/homebrew/bin/ffmpeg",
+  localAudioEnabled: false,
+  localAudioDatabasePath: ""
 };
 const GLOBAL_SETTINGS_KEYS = Object.keys(GLOBAL_SETTINGS_DEFAULTS);
 
+function normalizeAudioSourceUrl(value) {
+  const url = String(value || "").trim();
+  if (!url || !/^https?:\/\//i.test(url)) return "";
+  return url;
+}
+function normalizeAudioSourceItem(source) {
+  const raw = typeof source === "string" ? { url: source } : (source && typeof source === "object" ? source : {});
+  const url = normalizeAudioSourceUrl(raw.url);
+  if (!url) return null;
+  const name = String(raw.name || "").trim();
+  return name ? { name, url } : { url };
+}
+function normalizeAudioSources(value) {
+  let raw = value;
+  if (typeof raw === "string") {
+    const text = raw.trim();
+    if (!text) return [];
+    try { raw = JSON.parse(text); } catch (_) { raw = text; }
+  }
+  if (raw && typeof raw === "object" && Array.isArray(raw.audioSources)) raw = raw.audioSources;
+  const values = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+  const seen = Object.create(null);
+  const out = [];
+  values.forEach(item => {
+    const normalized = normalizeAudioSourceItem(item);
+    if (!normalized || seen[normalized.url]) return;
+    seen[normalized.url] = true;
+    out.push(normalized);
+  });
+  return out;
+}
+function normalizeAudioSourcesJsonPreference(value, useDefaultWhenEmpty) {
+  const sources = normalizeAudioSources(value);
+  if (!sources.length && useDefaultWhenEmpty) return DEFAULT_AUDIO_SOURCES_JSON;
+  return JSON.stringify(sources);
+}
+function normalizeProfilePreferenceBoolValue(value, fallback) {
+  if (typeof preferenceValueToBool === "function") return preferenceValueToBool(value, fallback);
+  if (value === undefined || value === null || value === "") return !!fallback;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return !!fallback;
+    if (["true", "1", "yes", "on"].indexOf(normalized) >= 0) return true;
+    if (["false", "0", "no", "off"].indexOf(normalized) >= 0) return false;
+  }
+  return !!value;
+}
 function emptyManifest() {
   return { dictionaries: {}, disabled: {}, dictionaryOrder: [], activeProfileId: DEFAULT_PROFILE_ID, profiles: {} };
 }
@@ -62,9 +136,12 @@ function normalizeProfilePreferences(prefs) {
   const out = {};
   PROFILE_PREFERENCE_KEYS.forEach(key => { out[key] = PROFILE_PREFERENCE_DEFAULTS[key]; });
   if (!prefs || typeof prefs !== "object") return out;
+  const hasAudioSources = Object.prototype.hasOwnProperty.call(prefs, "audioSourcesJson");
   PROFILE_PREFERENCE_KEYS.forEach(key => {
     if (Object.prototype.hasOwnProperty.call(prefs, key)) out[key] = prefs[key];
   });
+  out.audioAutoPlay = normalizeProfilePreferenceBoolValue(out.audioAutoPlay, PROFILE_PREFERENCE_DEFAULTS.audioAutoPlay);
+  out.audioSourcesJson = normalizeAudioSourcesJsonPreference(out.audioSourcesJson, !hasAudioSources);
   return out;
 }
 function makeDefaultProfile(id, name) {
@@ -345,10 +422,10 @@ function activeDictionaryPaths(language) {
 }
 function dictionarySetupMessage(language, dicts) {
   const lang = language || selectedLanguageModule();
-  const label = lang.label || lang.id || "selected language";
+  const label = typeof languageLabelForUi === "function" ? languageLabelForUi(lang) : (lang.label || lang.id || "selected language");
   if (dicts && dicts.length) return "";
-  if (lang.id === "ja") return "No dictionaries installed/enabled. Use Plugins -> iinatan -> Settings... to download recommended dictionaries.";
-  return "No dictionaries installed/enabled for " + label.replace(/\s*\(experimental\)\s*/i, "") + ". Import or enable a Yomitan dictionary ZIP.";
+  if (lang.id === "ja") return t("dict.noInstalled");
+  return t("dict.noInstalledForLanguage", { language: label.replace(/\s*\(experimental\)\s*/i, "") });
 }
 function dictionaryCompatibilityWarning(language, entries) {
   const lang = language || selectedLanguageModule();
@@ -356,7 +433,8 @@ function dictionaryCompatibilityWarning(language, entries) {
   if (!lang || lang.id === "ja" || !dicts.length || typeof lang.dictionaryMatches !== "function") return "";
   const details = dictionaryCompatibilityDetails(lang, dicts);
   if (details.compatible.length || details.unknown.length) return "";
-  return "No enabled dictionary is marked compatible with " + (lang.label || lang.id) + "; lookup will still try the enabled dictionaries.";
+  const label = typeof languageLabelForUi === "function" ? languageLabelForUi(lang) : (lang.label || lang.id);
+  return t("dict.compatibilityWarning", { language: label });
 }
 function workerFingerprint(dicts, language) {
   const lang = language || selectedLanguageModule();
@@ -375,7 +453,7 @@ function setDictionaryEnabled(name, enabledNow) {
   stopBackendWorker().catch(() => {});
   rebuildMenu();
   if (typeof postDictionaryManagerState === "function") postDictionaryManagerState();
-  showOSD((enabledNow ? "Enabled" : "Disabled") + " dictionary: " + name);
+  showOSD(t(enabledNow ? "dict.enabled" : "dict.disabled", { name }));
 }
 function setDictionaryOrder(names) {
   const installedNames = unorderedDictionaryDirs().map(d => d.name);
@@ -389,7 +467,7 @@ function setDictionaryOrder(names) {
   stopBackendWorker().catch(() => {});
   rebuildMenu();
   if (typeof postDictionaryManagerState === "function") postDictionaryManagerState();
-  showOSD("Updated dictionary order.");
+  showOSD(t("dict.orderUpdated"));
 }
 function dictionaryRemovalNameMap(names) {
   const out = Object.create(null);
@@ -637,6 +715,7 @@ function readGlobalSettingsSnapshot() {
 }
 function updateGlobalSettings(prefs) {
   const values = prefs && typeof prefs === "object" ? prefs : {};
+  const previousUiLanguage = configuredUiLanguage();
   GLOBAL_SETTINGS_KEYS.forEach(key => {
     try {
       if (Object.prototype.hasOwnProperty.call(values, key) && typeof preferences !== "undefined" && preferences && typeof preferences.set === "function") {
@@ -645,6 +724,11 @@ function updateGlobalSettings(prefs) {
     } catch (_) {}
   });
   try { if (typeof preferences !== "undefined" && preferences && preferences.sync) preferences.sync(); } catch (_) {}
+  if (configuredUiLanguage() !== previousUiLanguage) {
+    refreshSystemUiLanguage().catch(() => {});
+    try { rebuildMenu(); } catch (_) {}
+    try { if (initialized) postToOverlay("config", overlayConfig()); } catch (_) {}
+  }
   if (typeof postDictionaryManagerState === "function") postDictionaryManagerState();
   return readGlobalSettingsSnapshot();
 }
@@ -663,7 +747,7 @@ function setActiveDictionaryProfile(profileId) {
   refreshRuntimeAfterProfileChange(true);
   rebuildMenu();
   if (typeof postDictionaryManagerState === "function") postDictionaryManagerState();
-  showOSD("Switched iinatan profile: " + activeDictionaryProfile(normalized).name);
+  showOSD("Switched Hoshitan profile: " + activeDictionaryProfile(normalized).name);
 }
 function addSubMenuItemCompat(parent, item) {
   if (!parent) throw new Error("No parent menu item");

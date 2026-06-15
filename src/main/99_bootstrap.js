@@ -2,6 +2,7 @@
 registerShortcut();
 rebuildMenu();
 scheduleIINAAppearanceHintRefresh(true);
+refreshSystemUiLanguage().catch(() => {});
 ensureBundledBackendInstalled().catch(error => {
   debugWarn("lookup engine install check failed: " + compactError(error));
 });
@@ -12,6 +13,9 @@ event.on("iina.window-loaded", () => {
 });
 event.on("mpv.file-loaded", () => {
   lastSubtitle = null;
+  subtitleEmptySince = 0;
+  lastSubtitlePublishedAt = 0;
+  textSubtitleOverlayPrimed = false;
   lookupCache = Object.create(null);
   lookupInFlight = Object.create(null);
   if (enabled) startPolling();

@@ -57,6 +57,17 @@ const dictMeta = {
 
 const context = {
   VERSION: '1.6.0',
+  t(key, values) {
+    const table = {
+      'dict.noInstalled': 'No dictionaries installed/enabled. Open Hoshitan Settings to import a Yomitan dictionary ZIP.',
+      'dict.noInstalledForLanguage': 'No dictionaries installed/enabled for {language}. Import or enable a Yomitan dictionary ZIP.'
+    };
+    let text = table[key] || key;
+    Object.keys(values || {}).forEach(name => {
+      text = text.replace('{' + name + '}', String(values[name]));
+    });
+    return text;
+  },
   pref(key, fallback) {
     return context.selectedLanguage || fallback;
   },
@@ -190,7 +201,7 @@ assert(
 );
 assert(
   /Settings/.test(context.dictionarySetupMessage(ja, [])),
-  'Japanese setup message should point to iinatan Settings'
+  'Japanese setup message should point to Hoshitan Settings'
 );
 
 console.log('dictionary pipeline tests passed');

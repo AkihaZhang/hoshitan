@@ -1,5 +1,5 @@
 /**
- * iinatan for IINA 1.6.0+
+ * Hoshitan for IINA 1.6.0+
  *
  * v1.2.4 architecture:
  * - No Yomitan browser-extension API dependency.
@@ -10,14 +10,20 @@
 
 const { core, mpv, event, overlay, menu, input, ws, preferences, console, file, http, utils, standaloneWindow } = iina;
 
-const VERSION = "1.6.0";
+const VERSION = "0.1.0-dev.1";
 const RECOMMENDED_JITENDEX_URL = "https://github.com/stephenmk/stephenmk.github.io/releases/latest/download/jitendex-yomitan.zip";
 
 let enabled = false;
 let initialized = false;
+let overlayMessageHandlersRegistered = false;
+let overlayLoadGeneration = 0;
+let overlayReadyGeneration = 0;
+let textSubtitleOverlayPrimed = false;
 let pollTimer = null;
 let activeSubtitlePollMs = 0;
 let lastSubtitle = null;
+let subtitleEmptySince = 0;
+let lastSubtitlePublishedAt = 0;
 let nativeSubVisibilityBeforeEnable = null;
 let requestSerial = 0;
 let lookupInFlight = Object.create(null);
@@ -44,7 +50,7 @@ let lookupPopupLastHeartbeatAt = 0;
 let lookupPopupLastSeq = 0;
 let lookupPopupSessionId = "";
 let overlayBridgeStarted = false;
-let overlayBridgePort = 19741;
+let overlayBridgePort = 19741 + Math.floor(Math.random() * 20000);
 let dictionaryManagerHandlerGeneration = 0;
 let dictionaryManagerActionInFlight = false;
 let debugLogSnapshot = null;
@@ -56,6 +62,8 @@ let iinaAppearanceHintLastRefreshAt = 0;
 const DEBUG_LOG_MAX_BYTES = 1000000;
 const DEBUG_LOG_FLUSH_DELAY_MS = 750;
 const LOOKUP_POPUP_RESUME_DELAY_MS = 90;
+const SUBTITLE_EMPTY_GRACE_MS = 260;
+const SUBTITLE_REPLAY_INTERVAL_MS = 1500;
 
 function pref(key, fallback) {
   const value = preferences.get(key);
@@ -101,7 +109,7 @@ function verboseLogEnabled() {
   try { return prefBool("debugLogVerbose", false); } catch (_) { return false; }
 }
 function formatDebugMessage(message, level) {
-  return "[iinatan " + VERSION + "]" + (level ? "[" + level + "] " : " ") + String(message || "");
+  return "[hoshitan " + VERSION + "]" + (level ? "[" + level + "] " : " ") + String(message || "");
 }
 function emitToIinaLogViewer(message, level) {
   const formatted = formatDebugMessage(message, level || "debug");
@@ -311,7 +319,7 @@ function pluginRoot() {
       return cachedPluginRoot;
     }
   }
-  throw new Error("Could not locate the iinatan plugin folder.");
+  throw new Error("Could not locate the Hoshitan plugin folder.");
 }
 function dataPath() { return pathJoin.apply(null, [dataRoot()].concat(Array.prototype.slice.call(arguments))); }
 function bundledBinPath() { return pathJoin(pluginRoot(), "bin", "iina-hoshi-dicts"); }

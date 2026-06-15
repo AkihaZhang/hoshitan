@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC_DIR="$ROOT/vendor/hoshidicts"
-WRAPPER_DIR="${TMPDIR:-/tmp}/iinatan-native-cmake"
+WRAPPER_DIR="${TMPDIR:-/tmp}/hoshitan-native-cmake"
 BUILD_DIR="$ROOT/build/native-backend"
 BIN_DIR="$ROOT/bin"
 
@@ -17,7 +17,7 @@ mkdir -p "$BIN_DIR" "$WRAPPER_DIR"
 
 cat > "$WRAPPER_DIR/CMakeLists.txt" <<CMAKEEOF
 cmake_minimum_required(VERSION 3.22.1)
-project(iinatan_backend LANGUAGES C CXX)
+project(hoshitan_backend LANGUAGES C CXX)
 
 add_subdirectory("$SRC_DIR" hoshidicts-build)
 add_executable(iina-hoshi-dicts "$ROOT/src/native/iina_hoshi.cpp")

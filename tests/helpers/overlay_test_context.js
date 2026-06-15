@@ -25,10 +25,12 @@ class FakeElement {
     this.style = {};
     this.className = '';
     this.classList = new FakeClassList(this);
+    this.focused = false;
     this._textContent = '';
     this._innerHTML = '';
     this.id = '';
   }
+  focus() { this.focused = true; }
   set textContent(value) {
     this._textContent = String(value || '');
     if (this.tagName !== '#text') this.children = [];
@@ -105,6 +107,7 @@ class FakeElement {
     return out;
   }
   getBoundingClientRect() {
+    if (this._rect) return this._rect;
     const pos = Number(this.dataset.pos || 0);
     if (this.tagName === 'subtitle') return { left: 100, top: 500, right: 500, bottom: 540, width: 400, height: 40 };
     if (this.tagName === 'popup') return { left: 0, top: 0, right: 260, bottom: 120, width: 260, height: 120 };
@@ -132,6 +135,10 @@ function makeOverlayContext(options) {
   };
   elements.popup.classList.add('hidden');
   const head = new FakeElement('head');
+  const body = new FakeElement('body');
+  const rootStyle = {
+    setProperty(name, value) { this[name] = String(value); }
+  };
   const sent = [];
   const handlers = Object.create(null);
   const sockets = [];
@@ -155,8 +162,9 @@ function makeOverlayContext(options) {
     WebSocket: FakeWebSocket,
     window: { innerWidth: 1280, innerHeight: 720, addEventListener() {} },
     document: {
+      body,
       head,
-      documentElement: { style: { setProperty() {} } },
+      documentElement: { style: rootStyle },
       addEventListener() {},
       getElementById(id) { return elements[id]; },
       createElement(tag) { return new FakeElement(tag); },
@@ -168,6 +176,7 @@ function makeOverlayContext(options) {
       postMessage() {}
     },
     __elements: elements,
+    __body: body,
     __head: head,
     __sent: sent,
     __handlers: handlers,

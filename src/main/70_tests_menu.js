@@ -219,7 +219,7 @@ function logTimingSummary(summary) {
 async function runLookupPerformanceBenchmark() {
   try {
     debugLog("BENCH starting lookup performance benchmark directIpc=" + String(prefBool("directWorkerIpc", true)) + " fallback=" + String(prefBool("fallbackToClientExec", true)));
-    showOSD("iinatan lookup benchmark started");
+    showOSD("Hoshitan lookup benchmark started");
     const language = selectedLanguageModule();
     const dicts = activeDictionaryPaths(language);
     if (!dicts.length) throw new Error("No enabled dictionaries installed.");
@@ -263,7 +263,7 @@ async function runLookupPerformanceBenchmark() {
 
     const failed = seqSamples.concat(burstSamples).filter(s => !s.ok).slice(0, 5);
     if (failed.length) debugWarn("BENCH failures sample=" + JSON.stringify(failed));
-    showOSD("iinatan benchmark done: seq median " + seqSummary.median + "ms, burst p95 " + burstSummary.p95 + "ms");
+    showOSD("Hoshitan benchmark done: seq median " + seqSummary.median + "ms, burst p95 " + burstSummary.p95 + "ms");
     alert("Lookup benchmark complete.\n\nSequential median: " + seqSummary.median + " ms\nSequential p95: " + seqSummary.p95 + " ms\nBurst p95: " + burstSummary.p95 + " ms\n\nSee debug.log / IINA Log Viewer for full details.");
   } catch (error) {
     const msg = "Lookup benchmark failed: " + compactError(error);
@@ -306,10 +306,10 @@ function addDebugMenuItem(parent, title, action, options) {
 function rebuildMenu() {
   try { menu.removeAllItems(); } catch (_) {}
   try {
-    const rootMenu = menu.item("iinatan");
-    addMenuCommand(rootMenu, "Settings...", () => { openDictionaryManager(); });
+    const rootMenu = menu.item("Hoshitan");
+    addMenuCommand(rootMenu, t("menu.settings"), () => { openDictionaryManager(); });
     addSubMenuItemCompat(rootMenu, menu.separator());
-    addSubMenuItemCompat(rootMenu, menu.item("Profiles", null, { enabled: false }));
+    addSubMenuItemCompat(rootMenu, menu.item(t("menu.profiles"), null, { enabled: false }));
     const profiles = profileSummaries(readManifest());
     const inlineProfileLimit = 5;
     const addProfileMenuItem = (parent, profile) => {
@@ -319,7 +319,7 @@ function rebuildMenu() {
       addProfileMenuItem(rootMenu, profile);
     });
     if (profiles.length > inlineProfileLimit) {
-      const moreMenu = menu.item("More");
+      const moreMenu = menu.item(t("menu.more"));
       profiles.slice(inlineProfileLimit).forEach(profile => {
         addProfileMenuItem(moreMenu, profile);
       });
@@ -327,22 +327,22 @@ function rebuildMenu() {
     }
 
     addSubMenuItemCompat(rootMenu, menu.separator());
-    const debugMenu = menu.item("Debug");
-    addDebugMenuItem(debugMenu, "Run Lookup Performance Benchmark", () => runLookupPerformanceBenchmark());
-    addDebugMenuItem(debugMenu, "Run Lookup Parser Unit Tests", () => runLookupParserUnitTests());
-    addDebugMenuItem(debugMenu, "Run Language Unit Tests", () => runLanguageUnitTests());
-    addDebugMenuItem(debugMenu, "Run Settings Audit Checks", () => runSettingsAuditChecks());
-    addDebugMenuItem(debugMenu, "Test File Picker API", () => testFilePickerApiFromMenu());
-    addDebugMenuItem(debugMenu, "Test Dictionary Lookup", () => testBackendLookup());
-    addDebugMenuItem(debugMenu, "Restart Dictionary Lookup", () => restartBackendWorkerFromMenu());
-    addDebugMenuItem(debugMenu, "Stop Dictionary Lookup", () => stopBackendWorkerFromMenu());
-    addDebugMenuItem(debugMenu, "Show Task Panel Test", () => showTaskPanelTest());
-    addDebugMenuItem(debugMenu, "Emit Debug Log Test Message", () => emitDebugLogTestMessage());
-    addDebugMenuItem(debugMenu, "Reveal Debug Log File", () => revealDebugLogFile());
-    addDebugMenuItem(debugMenu, "Reveal Plugin Data Folder", () => revealPluginDataFolder());
+    const debugMenu = menu.item(t("menu.debug"));
+    addDebugMenuItem(debugMenu, t("menu.benchmark"), () => runLookupPerformanceBenchmark());
+    addDebugMenuItem(debugMenu, t("menu.parserTests"), () => runLookupParserUnitTests());
+    addDebugMenuItem(debugMenu, t("menu.languageTests"), () => runLanguageUnitTests());
+    addDebugMenuItem(debugMenu, t("menu.settingsTests"), () => runSettingsAuditChecks());
+    addDebugMenuItem(debugMenu, t("menu.filePicker"), () => testFilePickerApiFromMenu());
+    addDebugMenuItem(debugMenu, t("menu.lookupTest"), () => testBackendLookup());
+    addDebugMenuItem(debugMenu, t("menu.restartLookup"), () => restartBackendWorkerFromMenu());
+    addDebugMenuItem(debugMenu, t("menu.stopLookup"), () => stopBackendWorkerFromMenu());
+    addDebugMenuItem(debugMenu, t("menu.taskTest"), () => showTaskPanelTest());
+    addDebugMenuItem(debugMenu, t("menu.logTest"), () => emitDebugLogTestMessage());
+    addDebugMenuItem(debugMenu, t("menu.revealLog"), () => revealDebugLogFile());
+    addDebugMenuItem(debugMenu, t("menu.revealData"), () => revealPluginDataFolder());
     addSubMenuItemCompat(rootMenu, debugMenu);
     addMenuItemSafe(rootMenu);
   } catch (error) {
-    console.error("Could not rebuild iinatan menu: " + compactError(error));
+    console.error("Could not rebuild Hoshitan menu: " + compactError(error));
   }
 }

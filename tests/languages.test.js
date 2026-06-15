@@ -24,7 +24,7 @@ const context = {
   }
 };
 vm.createContext(context);
-vm.runInContext(files.map(file => fs.readFileSync(path.join(root, file), 'utf8')).join('\n') + '\nthis.registry = IINATAN_LANGUAGE_REGISTRY;', context);
+vm.runInContext(files.map(file => fs.readFileSync(path.join(root, file), 'utf8')).join('\n') + '\nthis.registry = HOSHITAN_LANGUAGE_REGISTRY;', context);
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);

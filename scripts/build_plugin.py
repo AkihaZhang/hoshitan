@@ -171,7 +171,7 @@ def validate_package(path: Path) -> None:
                 raise SystemExit("Package Info.json references missing " + field + ": " + str(info.get(field)))
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Build iinatan generated runtime files/package.")
+    parser = argparse.ArgumentParser(description="Build Hoshitan generated runtime files/package.")
     parser.add_argument("--package", type=Path, help="Optional .iinaplgz output path.")
     parser.add_argument("--validate", action="store_true", help="Validate root plugin metadata/layout after building.")
     parser.add_argument("--require-backend", action="store_true", help="Require bin/iina-hoshi-dicts during --validate.")

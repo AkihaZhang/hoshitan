@@ -1,5 +1,5 @@
 /**
- * iinatan for IINA 1.6.0+
+ * Hoshitan for IINA 1.6.0+
  *
  * v1.2.4 architecture:
  * - No Yomitan browser-extension API dependency.
@@ -10,14 +10,20 @@
 
 const { core, mpv, event, overlay, menu, input, ws, preferences, console, file, http, utils, standaloneWindow } = iina;
 
-const VERSION = "1.6.0";
+const VERSION = "0.1.0-dev.1";
 const RECOMMENDED_JITENDEX_URL = "https://github.com/stephenmk/stephenmk.github.io/releases/latest/download/jitendex-yomitan.zip";
 
 let enabled = false;
 let initialized = false;
+let overlayMessageHandlersRegistered = false;
+let overlayLoadGeneration = 0;
+let overlayReadyGeneration = 0;
+let textSubtitleOverlayPrimed = false;
 let pollTimer = null;
 let activeSubtitlePollMs = 0;
 let lastSubtitle = null;
+let subtitleEmptySince = 0;
+let lastSubtitlePublishedAt = 0;
 let nativeSubVisibilityBeforeEnable = null;
 let requestSerial = 0;
 let lookupInFlight = Object.create(null);
@@ -44,7 +50,7 @@ let lookupPopupLastHeartbeatAt = 0;
 let lookupPopupLastSeq = 0;
 let lookupPopupSessionId = "";
 let overlayBridgeStarted = false;
-let overlayBridgePort = 19741;
+let overlayBridgePort = 19741 + Math.floor(Math.random() * 20000);
 let dictionaryManagerHandlerGeneration = 0;
 let dictionaryManagerActionInFlight = false;
 let debugLogSnapshot = null;
@@ -56,6 +62,8 @@ let iinaAppearanceHintLastRefreshAt = 0;
 const DEBUG_LOG_MAX_BYTES = 1000000;
 const DEBUG_LOG_FLUSH_DELAY_MS = 750;
 const LOOKUP_POPUP_RESUME_DELAY_MS = 90;
+const SUBTITLE_EMPTY_GRACE_MS = 260;
+const SUBTITLE_REPLAY_INTERVAL_MS = 1500;
 
 function pref(key, fallback) {
   const value = preferences.get(key);
@@ -101,7 +109,7 @@ function verboseLogEnabled() {
   try { return prefBool("debugLogVerbose", false); } catch (_) { return false; }
 }
 function formatDebugMessage(message, level) {
-  return "[iinatan " + VERSION + "]" + (level ? "[" + level + "] " : " ") + String(message || "");
+  return "[hoshitan " + VERSION + "]" + (level ? "[" + level + "] " : " ") + String(message || "");
 }
 function emitToIinaLogViewer(message, level) {
   const formatted = formatDebugMessage(message, level || "debug");
@@ -311,7 +319,7 @@ function pluginRoot() {
       return cachedPluginRoot;
     }
   }
-  throw new Error("Could not locate the iinatan plugin folder.");
+  throw new Error("Could not locate the Hoshitan plugin folder.");
 }
 function dataPath() { return pathJoin.apply(null, [dataRoot()].concat(Array.prototype.slice.call(arguments))); }
 function bundledBinPath() { return pathJoin(pluginRoot(), "bin", "iina-hoshi-dicts"); }
@@ -350,7 +358,7 @@ async function clearDirFiles(dir) {
   } catch (_) {}
 }
 
-const IINATAN_LANGUAGE_COMMON = (() => {
+const HOSHITAN_LANGUAGE_COMMON = (() => {
   const JAPANESE_CHAR_RE = /[\u3040-\u30ff\u3400-\u9fff々〆ヵヶー]/;
   const CHINESE_CHAR_RE = /[\u3400-\u9fff\uf900-\ufaff]/;
   const LATIN_WORD_CHAR_RE = /[A-Za-zÀ-ÖØ-öø-ÿ0-9'’ʼ＇‘‛\-‐‑‒–—]/;
@@ -443,7 +451,7 @@ const IINATAN_LANGUAGE_COMMON = (() => {
   };
 })();
 
-const IINATAN_DEINFLECTION = (() => {
+const HOSHITAN_DEINFLECTION = (() => {
   function arrayOf(value) {
     return Array.isArray(value) ? value : (value ? [value] : []);
   }
@@ -588,7 +596,7 @@ const IINATAN_DEINFLECTION = (() => {
     for (let i = 0; i < transformed.length && added < limit; i++) {
       const result = transformed[i];
       if (!result || !result.text || result.text === baseCandidate.text) continue;
-      IINATAN_LANGUAGE_COMMON.pushUniqueCandidate(list, seen, {
+      HOSHITAN_LANGUAGE_COMMON.pushUniqueCandidate(list, seen, {
         text: result.text,
         normalizedText: result.text,
         source: "deinflection",
@@ -613,8 +621,8 @@ const IINATAN_DEINFLECTION = (() => {
   };
 })();
 
-const IINATAN_JAPANESE_LANGUAGE = (() => {
-  const common = IINATAN_LANGUAGE_COMMON;
+const HOSHITAN_JAPANESE_LANGUAGE = (() => {
+  const common = HOSHITAN_LANGUAGE_COMMON;
 
   function isHoverableChar(ch) {
     return common.JAPANESE_CHAR_RE.test(String(ch || ""));
@@ -669,7 +677,7 @@ const IINATAN_JAPANESE_LANGUAGE = (() => {
  * Copyright (C) 2024-2026 Yomitan Authors
  * License: GPL-3.0-or-later. See DEINFLECTION_NOTES.md for attribution notes.
  */
-const IINATAN_ENGLISH_YOMITAN_SUFFIX_RULES = [
+const HOSHITAN_ENGLISH_YOMITAN_SUFFIX_RULES = [
   ["s", "", ["np"], ["ns"], "plural"],
   ["es", "", ["np"], ["ns"], "plural"],
   ["ies", "y", ["np"], ["ns"], "plural"],
@@ -708,14 +716,14 @@ const IINATAN_ENGLISH_YOMITAN_SUFFIX_RULES = [
   ["able", "e", ["v"], ["adj"], "-able"],
   ["iable", "y", ["v"], ["adj"], "-able"]
 ];
-const IINATAN_ENGLISH_YOMITAN_PREFIX_RULES = [
+const HOSHITAN_ENGLISH_YOMITAN_PREFIX_RULES = [
   ["un", "", ["adj", "adv", "v"], ["adj", "adv", "v"], "un-"],
   ["going to ", "", ["v"], ["v"], "going-to future"],
   ["will ", "", ["v"], ["v"], "will future"],
   ["don't ", "", ["v"], ["v"], "imperative negative"],
   ["do not ", "", ["v"], ["v"], "imperative negative"]
 ];
-const IINATAN_ENGLISH_YOMITAN_DOUBLED_SUFFIX_RULES = [
+const HOSHITAN_ENGLISH_YOMITAN_DOUBLED_SUFFIX_RULES = [
   ["bdgklmnprstz", "ed", ["v"], ["v"], "past"],
   ["bdgklmnprstz", "ing", ["v"], ["v"], "ing"],
   ["bdgmnt", "er", ["adj"], ["adj"], "comparative"],
@@ -724,12 +732,12 @@ const IINATAN_ENGLISH_YOMITAN_DOUBLED_SUFFIX_RULES = [
   ["bdgklmnprstz", "able", ["v"], ["adj"], "-able"]
 ];
 
-const IINATAN_ENGLISH_LANGUAGE = (() => {
-  const common = IINATAN_LANGUAGE_COMMON;
-  const deinflect = IINATAN_DEINFLECTION;
-  const YOMITAN_SUFFIX_RULES = typeof IINATAN_ENGLISH_YOMITAN_SUFFIX_RULES !== "undefined" ? IINATAN_ENGLISH_YOMITAN_SUFFIX_RULES : [];
-  const YOMITAN_PREFIX_RULES = typeof IINATAN_ENGLISH_YOMITAN_PREFIX_RULES !== "undefined" ? IINATAN_ENGLISH_YOMITAN_PREFIX_RULES : [];
-  const YOMITAN_DOUBLED_SUFFIX_RULES = typeof IINATAN_ENGLISH_YOMITAN_DOUBLED_SUFFIX_RULES !== "undefined" ? IINATAN_ENGLISH_YOMITAN_DOUBLED_SUFFIX_RULES : [];
+const HOSHITAN_ENGLISH_LANGUAGE = (() => {
+  const common = HOSHITAN_LANGUAGE_COMMON;
+  const deinflect = HOSHITAN_DEINFLECTION;
+  const YOMITAN_SUFFIX_RULES = typeof HOSHITAN_ENGLISH_YOMITAN_SUFFIX_RULES !== "undefined" ? HOSHITAN_ENGLISH_YOMITAN_SUFFIX_RULES : [];
+  const YOMITAN_PREFIX_RULES = typeof HOSHITAN_ENGLISH_YOMITAN_PREFIX_RULES !== "undefined" ? HOSHITAN_ENGLISH_YOMITAN_PREFIX_RULES : [];
+  const YOMITAN_DOUBLED_SUFFIX_RULES = typeof HOSHITAN_ENGLISH_YOMITAN_DOUBLED_SUFFIX_RULES !== "undefined" ? HOSHITAN_ENGLISH_YOMITAN_DOUBLED_SUFFIX_RULES : [];
 
   function yomitanEnglishRules() {
     const rules = [];
@@ -866,12 +874,12 @@ const IINATAN_ENGLISH_LANGUAGE = (() => {
  * Copyright (C) 2024-2026 Yomitan Authors
  * License: GPL-3.0-or-later. See DEINFLECTION_NOTES.md for attribution notes.
  */
-const IINATAN_FRENCH_YOMITAN_SUFFIX_RULES = [["suis","être",["aux"],["v"],"present indicative"],["es","être",["aux"],["v"],"present indicative"],["est","être",["aux"],["v"],"present indicative"],["sommes","être",["aux"],["v"],"present indicative"],["êtes","être",["aux"],["v"],"present indicative"],["sont","être",["aux"],["v"],"present indicative"],["ai","avoir",["aux"],["v"],"present indicative"],["as","avoir",["aux"],["v"],"present indicative"],["a","avoir",["aux"],["v"],"present indicative"],["avons","avoir",["aux"],["v"],"present indicative"],["avez","avoir",["aux"],["v"],"present indicative"],["ont","avoir",["aux"],["v"],"present indicative"],["e","er",["v"],["v"],"present indicative"],["es","er",["v"],["v"],"present indicative"],["ons","er",["v"],["v"],"present indicative"],["ez","er",["v"],["v"],"present indicative"],["ent","er",["v"],["v"],"present indicative"],["çons","cer",["v"],["v"],"present indicative"],["geons","ger",["v"],["v"],"present indicative"],["èce","ecer",["v"],["v"],"present indicative"],["ève","ever",["v"],["v"],"present indicative"],["ène","ener",["v"],["v"],"present indicative"],["èpe","eper",["v"],["v"],"present indicative"],["ère","erer",["v"],["v"],"present indicative"],["ème","emer",["v"],["v"],"present indicative"],["èvre","evrer",["v"],["v"],"present indicative"],["èse","eser",["v"],["v"],"present indicative"],["ède","éder",["v"],["v"],"present indicative"],["èdes","éder",["v"],["v"],"present indicative"],["èdent","éder",["v"],["v"],"present indicative"],["èbre","ébrer",["v"],["v"],"present indicative"],["èbres","ébrer",["v"],["v"],"present indicative"],["èbrent","ébrer",["v"],["v"],"present indicative"],["èce","écer",["v"],["v"],"present indicative"],["èces","écer",["v"],["v"],"present indicative"],["ècent","écer",["v"],["v"],"present indicative"],["èche","écher",["v"],["v"],"present indicative"],["èches","écher",["v"],["v"],"present indicative"],["èchent","écher",["v"],["v"],"present indicative"],["ècre","écrer",["v"],["v"],"present indicative"],["ècres","écrer",["v"],["v"],"present indicative"],["ècrent","écrer",["v"],["v"],"present indicative"],["ègle","égler",["v"],["v"],"present indicative"],["ègles","égler",["v"],["v"],"present indicative"],["èglent","égler",["v"],["v"],"present indicative"],["ègne","égner",["v"],["v"],"present indicative"],["ègnes","égner",["v"],["v"],"present indicative"],["ègnent","égner",["v"],["v"],"present indicative"],["ègre","égrer",["v"],["v"],"present indicative"],["ègres","égrer",["v"],["v"],"present indicative"],["ègrent","égrer",["v"],["v"],"present indicative"],["ègue","éguer",["v"],["v"],"present indicative"],["ègues","éguer",["v"],["v"],"present indicative"],["èguent","éguer",["v"],["v"],"present indicative"],["èle","éler",["v"],["v"],"present indicative"],["èles","éler",["v"],["v"],"present indicative"],["èlent","éler",["v"],["v"],"present indicative"],["ème","émer",["v"],["v"],"present indicative"],["èmes","émer",["v"],["v"],"present indicative"],["èment","émer",["v"],["v"],"present indicative"],["ène","éner",["v"],["v"],"present indicative"],["ènes","éner",["v"],["v"],"present indicative"],["ènent","éner",["v"],["v"],"present indicative"],["èpe","éper",["v"],["v"],"present indicative"],["èpes","éper",["v"],["v"],"present indicative"],["èpent","éper",["v"],["v"],"present indicative"],["èque","équer",["v"],["v"],"present indicative"],["èques","équer",["v"],["v"],"present indicative"],["èquent","équer",["v"],["v"],"present indicative"],["ère","érer",["v"],["v"],"present indicative"],["ères","érer",["v"],["v"],"present indicative"],["èrent","érer",["v"],["v"],"present indicative"],["èse","éser",["v"],["v"],"present indicative"],["èses","éser",["v"],["v"],"present indicative"],["èsent","éser",["v"],["v"],"present indicative"],["ète","éter",["v"],["v"],"present indicative"],["ètes","éter",["v"],["v"],"present indicative"],["ètent","éter",["v"],["v"],"present indicative"],["ètre","étrer",["v"],["v"],"present indicative"],["ètres","étrer",["v"],["v"],"present indicative"],["ètrent","étrer",["v"],["v"],"present indicative"],["èye","éyer",["v"],["v"],"present indicative"],["èyes","éyer",["v"],["v"],"present indicative"],["èyent","éyer",["v"],["v"],"present indicative"],["elle","eler",["v"],["v"],"present indicative"],["elles","eler",["v"],["v"],"present indicative"],["ellent","eler",["v"],["v"],"present indicative"],["ette","eter",["v"],["v"],"present indicative"],["ettes","eter",["v"],["v"],"present indicative"],["ettent","eter",["v"],["v"],"present indicative"],["èle","eler",["v"],["v"],"present indicative"],["èles","eler",["v"],["v"],"present indicative"],["èlent","eler",["v"],["v"],"present indicative"],["ète","eter",["v"],["v"],"present indicative"],["ètes","eter",["v"],["v"],"present indicative"],["ètent","eter",["v"],["v"],"present indicative"],["ège","éger",["v"],["v"],"present indicative"],["èges","éger",["v"],["v"],"present indicative"],["ègent","éger",["v"],["v"],"present indicative"],["aie","ayer",["v"],["v"],"present indicative"],["aies","ayer",["v"],["v"],"present indicative"],["aient","ayer",["v"],["v"],"present indicative"],["oie","oyer",["v"],["v"],"present indicative"],["oies","oyer",["v"],["v"],"present indicative"],["oient","oyer",["v"],["v"],"present indicative"],["uie","uyer",["v"],["v"],"present indicative"],["uies","uyer",["v"],["v"],"present indicative"],["uient","uyer",["v"],["v"],"present indicative"],["is","ir",["v"],["v"],"present indicative"],["it","ir",["v"],["v"],"present indicative"],["issons","ir",["v"],["v"],"present indicative"],["issez","ir",["v"],["v"],"present indicative"],["issent","ir",["v"],["v"],"present indicative"],["hais","haïr",["v"],["v"],"present indicative"],["hait","haïr",["v"],["v"],"present indicative"],["vais","aller",["v"],["v"],"present indicative"],["vas","aller",["v"],["v"],"present indicative"],["va","aller",["v"],["v"],"present indicative"],["vont","aller",["v"],["v"],"present indicative"],["iens","enir",["v"],["v"],"present indicative"],["ient","enir",["v"],["v"],"present indicative"],["enons","enir",["v"],["v"],"present indicative"],["enez","enir",["v"],["v"],"present indicative"],["iennent","enir",["v"],["v"],"present indicative"],["iers","érir",["v"],["v"],"present indicative"],["iert","érir",["v"],["v"],"present indicative"],["érons","érir",["v"],["v"],"present indicative"],["érez","érir",["v"],["v"],"present indicative"],["ièrent","érir",["v"],["v"],"present indicative"],["s","tir",["v"],["v"],"present indicative"],["t","tir",["v"],["v"],"present indicative"],["tons","tir",["v"],["v"],"present indicative"],["tez","tir",["v"],["v"],"present indicative"],["tent","tir",["v"],["v"],"present indicative"],["êts","êtir",["v"],["v"],"present indicative"],["êt","êtir",["v"],["v"],"present indicative"],["êtons","êtir",["v"],["v"],"present indicative"],["êtez","êtir",["v"],["v"],"present indicative"],["êtent","êtir",["v"],["v"],"present indicative"],["vre","vrir",["v"],["v"],"present indicative"],["vres","vrir",["v"],["v"],"present indicative"],["vrons","vrir",["v"],["v"],"present indicative"],["vrez","vrir",["v"],["v"],"present indicative"],["vrent","vrir",["v"],["v"],"present indicative"],["fre","frir",["v"],["v"],"present indicative"],["fres","frir",["v"],["v"],"present indicative"],["frons","frir",["v"],["v"],"present indicative"],["frez","frir",["v"],["v"],"present indicative"],["frent","frir",["v"],["v"],"present indicative"],["ueille","ueillir",["v"],["v"],"present indicative"],["ueilles","ueillir",["v"],["v"],"present indicative"],["ueillons","ueillir",["v"],["v"],"present indicative"],["ueillez","ueillir",["v"],["v"],"present indicative"],["ueillent","ueillir",["v"],["v"],"present indicative"],["aille","aillir",["v"],["v"],"present indicative"],["ailles","aillir",["v"],["v"],"present indicative"],["aillons","aillir",["v"],["v"],"present indicative"],["aillez","aillir",["v"],["v"],"present indicative"],["aillent","aillir",["v"],["v"],"present indicative"],["faux","aillir",["v"],["v"],"present indicative"],["faut","aillir",["v"],["v"],"present indicative"],["bous","bouillir",["v"],["v"],"present indicative"],["bout","bouillir",["v"],["v"],"present indicative"],["bouillons","bouillir",["v"],["v"],"present indicative"],["bouillez","bouillir",["v"],["v"],"present indicative"],["bouillent","bouillir",["v"],["v"],"present indicative"],["dors","dormir",["v"],["v"],"present indicative"],["dort","dormir",["v"],["v"],"present indicative"],["dormons","dormir",["v"],["v"],"present indicative"],["dormez","dormir",["v"],["v"],"present indicative"],["dorment","dormir",["v"],["v"],"present indicative"],["cours","dormir",["v"],["v"],"present indicative"],["court","dormir",["v"],["v"],"present indicative"],["courons","dormir",["v"],["v"],"present indicative"],["courez","dormir",["v"],["v"],"present indicative"],["courent","dormir",["v"],["v"],"present indicative"],["meurs","mourir",["v"],["v"],"present indicative"],["meurt","mourir",["v"],["v"],"present indicative"],["mourons","mourir",["v"],["v"],"present indicative"],["mourez","mourir",["v"],["v"],"present indicative"],["meurent","mourir",["v"],["v"],"present indicative"],["sers","servir",["v"],["v"],"present indicative"],["sert","servir",["v"],["v"],"present indicative"],["servons","servir",["v"],["v"],"present indicative"],["servez","servir",["v"],["v"],"present indicative"],["servent","servir",["v"],["v"],"present indicative"],["fuis","fuir",["v"],["v"],"present indicative"],["fuit","fuir",["v"],["v"],"present indicative"],["fuyons","fuir",["v"],["v"],"present indicative"],["fuyez","fuir",["v"],["v"],"present indicative"],["fuient","fuir",["v"],["v"],"present indicative"],["ois","ouïr",["v"],["v"],"present indicative"],["oit","ouïr",["v"],["v"],"present indicative"],["oyons","ouïr",["v"],["v"],"present indicative"],["oyez","ouïr",["v"],["v"],"present indicative"],["oient","ouïr",["v"],["v"],"present indicative"],["gis","gésir",["v"],["v"],"present indicative"],["git","gésir",["v"],["v"],"present indicative"],["gisons","gésir",["v"],["v"],"present indicative"],["gisez","gésir",["v"],["v"],"present indicative"],["gisent","gésir",["v"],["v"],"present indicative"],["çois","cevoir",["v"],["v"],"present indicative"],["çoit","cevoir",["v"],["v"],"present indicative"],["cevons","cevoir",["v"],["v"],"present indicative"],["cevez","cevoir",["v"],["v"],"present indicative"],["çoivent","cevoir",["v"],["v"],"present indicative"],["vois","voir",["v"],["v"],"present indicative"],["voit","voir",["v"],["v"],"present indicative"],["voyons","voir",["v"],["v"],"present indicative"],["voyez","voir",["v"],["v"],"present indicative"],["voient","voir",["v"],["v"],"present indicative"],["sais","savoir",["v"],["v"],"present indicative"],["sait","savoir",["v"],["v"],"present indicative"],["savons","savoir",["v"],["v"],"present indicative"],["savez","savoir",["v"],["v"],"present indicative"],["savent","savoir",["v"],["v"],"present indicative"],["dois","devoir",["v"],["v"],"present indicative"],["doit","devoir",["v"],["v"],"present indicative"],["devons","devoir",["v"],["v"],"present indicative"],["devez","devoir",["v"],["v"],"present indicative"],["doivent","devoir",["v"],["v"],"present indicative"],["puis","pouvoir",["v"],["v"],"present indicative"],["peux","pouvoir",["v"],["v"],"present indicative"],["peut","pouvoir",["v"],["v"],"present indicative"],["pouvons","pouvoir",["v"],["v"],"present indicative"],["pouvez","pouvoir",["v"],["v"],"present indicative"],["peuvent","pouvoir",["v"],["v"],"present indicative"],["meus","mouvoir",["v"],["v"],"present indicative"],["meut","mouvoir",["v"],["v"],"present indicative"],["mouvons","mouvoir",["v"],["v"],"present indicative"],["mouvez","mouvoir",["v"],["v"],"present indicative"],["meuvent","mouvoir",["v"],["v"],"present indicative"],["pleut","pleuvoir",["v"],["v"],"present indicative"],["faut","falloir",["v"],["v"],"present indicative"],["vaux","valoir",["v"],["v"],"present indicative"],["vaut","valoir",["v"],["v"],"present indicative"],["valons","valoir",["v"],["v"],"present indicative"],["valez","valoir",["v"],["v"],"present indicative"],["valent","valoir",["v"],["v"],"present indicative"],["veux","vouloir",["v"],["v"],"present indicative"],["veut","vouloir",["v"],["v"],"present indicative"],["voulons","vouloir",["v"],["v"],"present indicative"],["voulez","vouloir",["v"],["v"],"present indicative"],["veulent","vouloir",["v"],["v"],"present indicative"],["sois","seoir",["v"],["v"],"present indicative"],["soit","seoir",["v"],["v"],"present indicative"],["soyons","seoir",["v"],["v"],"present indicative"],["soyez","seoir",["v"],["v"],"present indicative"],["soient","seoir",["v"],["v"],"present indicative"],["assied","asseoir",["v"],["v"],"present indicative"],["assieds","asseoir",["v"],["v"],"present indicative"],["asseyons","asseoir",["v"],["v"],"present indicative"],["asseyez","asseoir",["v"],["v"],"present indicative"],["asseyent","asseoir",["v"],["v"],"present indicative"],["sied","seoir",["v"],["v"],"present indicative"],["chois","choir",["v"],["v"],"present indicative"],["choit","choir",["v"],["v"],"present indicative"],["choyons","choir",["v"],["v"],"present indicative"],["choyez","choir",["v"],["v"],"present indicative"],["choient","choir",["v"],["v"],"present indicative"],["échoit","échoir",["v"],["v"],"present indicative"],["échet","échoir",["v"],["v"],"present indicative"],["échoient","échoir",["v"],["v"],"present indicative"],["échéent","échoir",["v"],["v"],"present indicative"],["and","andre",["v"],["v"],"present indicative"],["ands","andre",["v"],["v"],"present indicative"],["andons","andre",["v"],["v"],"present indicative"],["andez","andre",["v"],["v"],"present indicative"],["andent","andre",["v"],["v"],"present indicative"],["end","endre",["v"],["v"],"present indicative"],["ends","endre",["v"],["v"],"present indicative"],["endons","endre",["v"],["v"],"present indicative"],["endez","endre",["v"],["v"],"present indicative"],["endent","endre",["v"],["v"],"present indicative"],["ond","ondre",["v"],["v"],"present indicative"],["onds","ondre",["v"],["v"],"present indicative"],["ondons","ondre",["v"],["v"],"present indicative"],["ondez","ondre",["v"],["v"],"present indicative"],["ondent","ondre",["v"],["v"],"present indicative"],["erd","erdre",["v"],["v"],"present indicative"],["erds","erdre",["v"],["v"],"present indicative"],["erdons","erdre",["v"],["v"],"present indicative"],["erdez","erdre",["v"],["v"],"present indicative"],["erdent","erdre",["v"],["v"],"present indicative"],["ord","ordre",["v"],["v"],"present indicative"],["ords","ordre",["v"],["v"],"present indicative"],["ordons","ordre",["v"],["v"],"present indicative"],["ordez","ordre",["v"],["v"],"present indicative"],["ordent","ordre",["v"],["v"],"present indicative"],["prenons","prendre",["v"],["v"],"present indicative"],["prenez","prendre",["v"],["v"],"present indicative"],["prenent","prendre",["v"],["v"],"present indicative"],["bats","battre",["v"],["v"],"present indicative"],["bat","battre",["v"],["v"],"present indicative"],["battons","battre",["v"],["v"],"present indicative"],["battez","battre",["v"],["v"],"present indicative"],["battent","battre",["v"],["v"],"present indicative"],["mets","mettre",["v"],["v"],"present indicative"],["met","mettre",["v"],["v"],"present indicative"],["mettons","mettre",["v"],["v"],"present indicative"],["mettez","mettre",["v"],["v"],"present indicative"],["mettent","mettre",["v"],["v"],"present indicative"],["eins","eindre",["v"],["v"],"present indicative"],["eint","eindre",["v"],["v"],"present indicative"],["eignons","eindre",["v"],["v"],"present indicative"],["eignez","eindre",["v"],["v"],"present indicative"],["eignent","eindre",["v"],["v"],"present indicative"],["oins","oindre",["v"],["v"],"present indicative"],["oint","oindre",["v"],["v"],"present indicative"],["oignons","oindre",["v"],["v"],"present indicative"],["oignez","oindre",["v"],["v"],"present indicative"],["oignent","oindre",["v"],["v"],"present indicative"],["ains","aindre",["v"],["v"],"present indicative"],["aint","aindre",["v"],["v"],"present indicative"],["aignons","aindre",["v"],["v"],"present indicative"],["aignez","aindre",["v"],["v"],"present indicative"],["aignent","aindre",["v"],["v"],"present indicative"],["vaincs","vaincre",["v"],["v"],"present indicative"],["vainc","vaincre",["v"],["v"],"present indicative"],["vainquons","vaincre",["v"],["v"],"present indicative"],["vainquez","vaincre",["v"],["v"],"present indicative"],["vainquent","vaincre",["v"],["v"],"present indicative"],["rais","raire",["v"],["v"],"present indicative"],["rait","raire",["v"],["v"],"present indicative"],["rayons","raire",["v"],["v"],"present indicative"],["rayez","raire",["v"],["v"],"present indicative"],["raient","raire",["v"],["v"],"present indicative"],["fais","faire",["v"],["v"],"present indicative"],["fait","faire",["v"],["v"],"present indicative"],["faisons","faire",["v"],["v"],"present indicative"],["faites","faire",["v"],["v"],"present indicative"],["font","faire",["v"],["v"],"present indicative"],["plais","faire",["v"],["v"],"present indicative"],["plait","faire",["v"],["v"],"present indicative"],["plaisons","faire",["v"],["v"],"present indicative"],["plaisez","faire",["v"],["v"],"present indicative"],["plaisent","faire",["v"],["v"],"present indicative"],["ais","aître",["v"],["v"],"present indicative"],["aît","aître",["v"],["v"],"present indicative"],["ait","aître",["v"],["v"],"present indicative"],["aissons","aître",["v"],["v"],"present indicative"],["aissez","aître",["v"],["v"],"present indicative"],["aissent","aître",["v"],["v"],"present indicative"],["ois","oître",["v"],["v"],"present indicative"],["oît","oître",["v"],["v"],"present indicative"],["oit","oître",["v"],["v"],"present indicative"],["oissons","oître",["v"],["v"],"present indicative"],["oissez","oître",["v"],["v"],"present indicative"],["oissent","oître",["v"],["v"],"present indicative"],["crois","croire",["v"],["v"],"present indicative"],["croît","croire",["v"],["v"],"present indicative"],["croit","croire",["v"],["v"],"present indicative"],["croyons","croire",["v"],["v"],"present indicative"],["croyez","croire",["v"],["v"],"present indicative"],["croient","croire",["v"],["v"],"present indicative"],["bois","boire",["v"],["v"],"present indicative"],["boît","boire",["v"],["v"],"present indicative"],["boit","boire",["v"],["v"],"present indicative"],["buvons","boire",["v"],["v"],"present indicative"],["buvez","boire",["v"],["v"],"present indicative"],["boivent","boire",["v"],["v"],"present indicative"],["clos","clore",["v"],["v"],"present indicative"],["clôt","clore",["v"],["v"],"present indicative"],["closent","croire",["v"],["v"],"present indicative"],["clus","clure",["v"],["v"],"present indicative"],["clut","clure",["v"],["v"],"present indicative"],["cluons","clure",["v"],["v"],"present indicative"],["cluez","clure",["v"],["v"],"present indicative"],["cluent","clure",["v"],["v"],"present indicative"],["sous","soudre",["v"],["v"],"present indicative"],["sout","soudre",["v"],["v"],"present indicative"],["solvons","soudre",["v"],["v"],"present indicative"],["solvez","soudre",["v"],["v"],"present indicative"],["solvent","soudre",["v"],["v"],"present indicative"],["coud","coudre",["v"],["v"],"present indicative"],["couds","coudre",["v"],["v"],"present indicative"],["cousons","coudre",["v"],["v"],"present indicative"],["cousez","coudre",["v"],["v"],"present indicative"],["cousent","coudre",["v"],["v"],"present indicative"],["moud","moudre",["v"],["v"],"present indicative"],["mouds","moudre",["v"],["v"],"present indicative"],["moulons","moudre",["v"],["v"],"present indicative"],["moulez","moudre",["v"],["v"],"present indicative"],["moulent","moudre",["v"],["v"],"present indicative"],["is","vivre",["v"],["v"],"present indicative"],["it","vivre",["v"],["v"],"present indicative"],["ivons","vivre",["v"],["v"],"present indicative"],["ivez","vivre",["v"],["v"],"present indicative"],["ivent","vivre",["v"],["v"],"present indicative"],["lis","lire",["v"],["v"],"present indicative"],["lit","lire",["v"],["v"],"present indicative"],["lisons","lire",["v"],["v"],"present indicative"],["lisez","lire",["v"],["v"],"present indicative"],["lisent","lire",["v"],["v"],"present indicative"],["dis","dire",["v"],["v"],"present indicative"],["dit","dire",["v"],["v"],"present indicative"],["disons","dire",["v"],["v"],"present indicative"],["disez","dire",["v"],["v"],"present indicative"],["disent","dire",["v"],["v"],"present indicative"],["ris","rire",["v"],["v"],"present indicative"],["rit","rire",["v"],["v"],"present indicative"],["rions","rire",["v"],["v"],"present indicative"],["riez","rire",["v"],["v"],"present indicative"],["rient","rire",["v"],["v"],"present indicative"],["maudissons","maudire",["v"],["v"],"present indicative"],["maudissez","maudire",["v"],["v"],"present indicative"],["maudissent","maudire",["v"],["v"],"present indicative"],["cris","crire",["v"],["v"],"present indicative"],["crit","crire",["v"],["v"],"present indicative"],["crivons","crire",["v"],["v"],"present indicative"],["crivez","crire",["v"],["v"],"present indicative"],["crivent","crire",["v"],["v"],"present indicative"],["fis","fire",["v"],["v"],"present indicative"],["fit","fire",["v"],["v"],"present indicative"],["fisons","fire",["v"],["v"],"present indicative"],["fisez","fire",["v"],["v"],"present indicative"],["fisent","fire",["v"],["v"],"present indicative"],["cis","cire",["v"],["v"],"present indicative"],["cit","cire",["v"],["v"],"present indicative"],["cisons","cire",["v"],["v"],"present indicative"],["cisez","cire",["v"],["v"],"present indicative"],["cisent","cire",["v"],["v"],"present indicative"],["fris","frire",["v"],["v"],"present indicative"],["frit","frire",["v"],["v"],"present indicative"],["frisons","frire",["v"],["v"],"present indicative"],["frisez","frire",["v"],["v"],"present indicative"],["frisent","frire",["v"],["v"],"present indicative"],["uis","uire",["v"],["v"],"present indicative"],["uit","uire",["v"],["v"],"present indicative"],["uisons","uire",["v"],["v"],"present indicative"],["uisez","uire",["v"],["v"],"present indicative"],["uisent","uire",["v"],["v"],"present indicative"],["étais","être",["v"],["v"],"imperfect indicative"],["était","être",["v"],["v"],"imperfect indicative"],["étions","être",["v"],["v"],"imperfect indicative"],["étiez","être",["v"],["v"],"imperfect indicative"],["étaient","être",["v"],["v"],"imperfect indicative"],["avais","avoir",["v"],["v"],"imperfect indicative"],["avait","avoir",["v"],["v"],"imperfect indicative"],["avions","avoir",["v"],["v"],"imperfect indicative"],["aviez","avoir",["v"],["v"],"imperfect indicative"],["avaient","avoir",["v"],["v"],"imperfect indicative"],["ais","er",["v"],["v"],"imperfect indicative"],["ait","er",["v"],["v"],"imperfect indicative"],["ions","er",["v"],["v"],"imperfect indicative"],["iez","er",["v"],["v"],"imperfect indicative"],["aient","er",["v"],["v"],"imperfect indicative"],["çais","cer",["v"],["v"],"imperfect indicative"],["çait","cer",["v"],["v"],"imperfect indicative"],["çions","cer",["v"],["v"],"imperfect indicative"],["çiez","cer",["v"],["v"],"imperfect indicative"],["çaient","cer",["v"],["v"],"imperfect indicative"],["geais","ger",["v"],["v"],"imperfect indicative"],["geait","ger",["v"],["v"],"imperfect indicative"],["geaient","ger",["v"],["v"],"imperfect indicative"],["issais","ir",["v"],["v"],"imperfect indicative"],["issait","ir",["v"],["v"],"imperfect indicative"],["issions","ir",["v"],["v"],"imperfect indicative"],["issiez","ir",["v"],["v"],"imperfect indicative"],["issaient","ir",["v"],["v"],"imperfect indicative"],["haïssais","haïr",["v"],["v"],"imperfect indicative"],["haïssait","haïr",["v"],["v"],"imperfect indicative"],["haïssions","haïr",["v"],["v"],"imperfect indicative"],["haïssaient","haïr",["v"],["v"],"imperfect indicative"],["haissais","haïr",["v"],["v"],"imperfect indicative"],["haissait","haïr",["v"],["v"],"imperfect indicative"],["haissions","haïr",["v"],["v"],"imperfect indicative"],["haissaient","haïr",["v"],["v"],"imperfect indicative"],["allais","aller",["v"],["v"],"imperfect indicative"],["allait","aller",["v"],["v"],"imperfect indicative"],["allions","aller",["v"],["v"],"imperfect indicative"],["alliez","aller",["v"],["v"],"imperfect indicative"],["allaient","aller",["v"],["v"],"imperfect indicative"],["enais","enir",["v"],["v"],"imperfect indicative"],["enait","enir",["v"],["v"],"imperfect indicative"],["enions","enir",["v"],["v"],"imperfect indicative"],["eniez","enir",["v"],["v"],"imperfect indicative"],["enaient","enir",["v"],["v"],"imperfect indicative"],["érais","érir",["v"],["v"],"imperfect indicative"],["érait","érir",["v"],["v"],"imperfect indicative"],["érions","érir",["v"],["v"],"imperfect indicative"],["ériez","érir",["v"],["v"],"imperfect indicative"],["éraient","érir",["v"],["v"],"imperfect indicative"],["tais","tir",["v"],["v"],"imperfect indicative"],["tait","tir",["v"],["v"],"imperfect indicative"],["tions","tir",["v"],["v"],"imperfect indicative"],["tiez","tir",["v"],["v"],"imperfect indicative"],["taient","tir",["v"],["v"],"imperfect indicative"],["êtais","êtir",["v"],["v"],"imperfect indicative"],["êtait","êtir",["v"],["v"],"imperfect indicative"],["êtions","êtir",["v"],["v"],"imperfect indicative"],["êtiez","êtir",["v"],["v"],"imperfect indicative"],["êtaient","êtir",["v"],["v"],"imperfect indicative"],["vrais","vrir",["v"],["v"],"imperfect indicative"],["vrait","vrir",["v"],["v"],"imperfect indicative"],["vrions","vrir",["v"],["v"],"imperfect indicative"],["vriez","vrir",["v"],["v"],"imperfect indicative"],["vraient","vrir",["v"],["v"],"imperfect indicative"],["frais","frir",["v"],["v"],"imperfect indicative"],["frait","frir",["v"],["v"],"imperfect indicative"],["frions","frir",["v"],["v"],"imperfect indicative"],["friez","frir",["v"],["v"],"imperfect indicative"],["fraient","frir",["v"],["v"],"imperfect indicative"],["ueillais","ueillir",["v"],["v"],"imperfect indicative"],["ueillait","ueillir",["v"],["v"],"imperfect indicative"],["ueillions","ueillir",["v"],["v"],"imperfect indicative"],["ueilliez","ueillir",["v"],["v"],"imperfect indicative"],["ueillaient","ueillir",["v"],["v"],"imperfect indicative"],["aillais","aillir",["v"],["v"],"imperfect indicative"],["aillait","aillir",["v"],["v"],"imperfect indicative"],["aillions","aillir",["v"],["v"],"imperfect indicative"],["ailliez","aillir",["v"],["v"],"imperfect indicative"],["aillaient","aillir",["v"],["v"],"imperfect indicative"],["bouilliais","bouillir",["v"],["v"],"imperfect indicative"],["bouilliait","bouillir",["v"],["v"],"imperfect indicative"],["bouillions","bouillir",["v"],["v"],"imperfect indicative"],["bouilliez","bouillir",["v"],["v"],"imperfect indicative"],["bouillaient","bouillir",["v"],["v"],"imperfect indicative"],["dormais","dormir",["v"],["v"],"imperfect indicative"],["dormait","dormir",["v"],["v"],"imperfect indicative"],["dormions","dormir",["v"],["v"],"imperfect indicative"],["dormiez","dormir",["v"],["v"],"imperfect indicative"],["dormaient","dormir",["v"],["v"],"imperfect indicative"],["courais","dormir",["v"],["v"],"imperfect indicative"],["courait","dormir",["v"],["v"],"imperfect indicative"],["courions","dormir",["v"],["v"],"imperfect indicative"],["couriez","dormir",["v"],["v"],"imperfect indicative"],["couraient","dormir",["v"],["v"],"imperfect indicative"],["mourais","mourir",["v"],["v"],"imperfect indicative"],["mourait","mourir",["v"],["v"],"imperfect indicative"],["mourions","mourir",["v"],["v"],"imperfect indicative"],["mouriez","mourir",["v"],["v"],"imperfect indicative"],["mouraient","mourir",["v"],["v"],"imperfect indicative"],["servais","servir",["v"],["v"],"imperfect indicative"],["servait","servir",["v"],["v"],"imperfect indicative"],["servions","servir",["v"],["v"],"imperfect indicative"],["serviez","servir",["v"],["v"],"imperfect indicative"],["servaient","servir",["v"],["v"],"imperfect indicative"],["fuyais","fuir",["v"],["v"],"imperfect indicative"],["fuyait","fuir",["v"],["v"],"imperfect indicative"],["fuyions","fuir",["v"],["v"],"imperfect indicative"],["fuyiez","fuir",["v"],["v"],"imperfect indicative"],["fuyaient","fuir",["v"],["v"],"imperfect indicative"],["oyais","ouïr",["v"],["v"],"imperfect indicative"],["oyait","ouïr",["v"],["v"],"imperfect indicative"],["oyions","ouïr",["v"],["v"],"imperfect indicative"],["oyiez","ouïr",["v"],["v"],"imperfect indicative"],["oyaient","ouïr",["v"],["v"],"imperfect indicative"],["gisais","gésir",["v"],["v"],"imperfect indicative"],["gisait","gésir",["v"],["v"],"imperfect indicative"],["gisions","gésir",["v"],["v"],"imperfect indicative"],["gisiez","gésir",["v"],["v"],"imperfect indicative"],["gisaient","gésir",["v"],["v"],"imperfect indicative"],["cevais","cevoir",["v"],["v"],"imperfect indicative"],["cevait","cevoir",["v"],["v"],"imperfect indicative"],["cevions","cevoir",["v"],["v"],"imperfect indicative"],["ceviez","cevoir",["v"],["v"],"imperfect indicative"],["cevaient","cevoir",["v"],["v"],"imperfect indicative"],["voyais","voir",["v"],["v"],"imperfect indicative"],["voyait","voir",["v"],["v"],"imperfect indicative"],["voyions","voir",["v"],["v"],"imperfect indicative"],["voyiez","voir",["v"],["v"],"imperfect indicative"],["voyaient","voir",["v"],["v"],"imperfect indicative"],["savais","savoir",["v"],["v"],"imperfect indicative"],["savait","savoir",["v"],["v"],"imperfect indicative"],["savions","savoir",["v"],["v"],"imperfect indicative"],["saviez","savoir",["v"],["v"],"imperfect indicative"],["savaient","savoir",["v"],["v"],"imperfect indicative"],["devais","devoir",["v"],["v"],"imperfect indicative"],["devait","devoir",["v"],["v"],"imperfect indicative"],["devions","devoir",["v"],["v"],"imperfect indicative"],["deviez","devoir",["v"],["v"],"imperfect indicative"],["devaient","devoir",["v"],["v"],"imperfect indicative"],["pouvais","pouvoir",["v"],["v"],"imperfect indicative"],["pouvait","pouvoir",["v"],["v"],"imperfect indicative"],["pouvions","pouvoir",["v"],["v"],"imperfect indicative"],["pouviez","pouvoir",["v"],["v"],"imperfect indicative"],["pouvaient","pouvoir",["v"],["v"],"imperfect indicative"],["mouvais","mouvoir",["v"],["v"],"imperfect indicative"],["mouvait","mouvoir",["v"],["v"],"imperfect indicative"],["mouvions","mouvoir",["v"],["v"],"imperfect indicative"],["mouviez","mouvoir",["v"],["v"],"imperfect indicative"],["mouvaient","mouvoir",["v"],["v"],"imperfect indicative"],["pleuvait","pleuvoir",["v"],["v"],"imperfect indicative"],["fallait","falloir",["v"],["v"],"imperfect indicative"],["valais","vouloir",["v"],["v"],"imperfect indicative"],["valait","vouloir",["v"],["v"],"imperfect indicative"],["valions","vouloir",["v"],["v"],"imperfect indicative"],["valiez","vouloir",["v"],["v"],"imperfect indicative"],["valaient","vouloir",["v"],["v"],"imperfect indicative"],["voulais","vouloir",["v"],["v"],"imperfect indicative"],["voulait","vouloir",["v"],["v"],"imperfect indicative"],["voulions","vouloir",["v"],["v"],"imperfect indicative"],["vouliez","vouloir",["v"],["v"],"imperfect indicative"],["voulaient","vouloir",["v"],["v"],"imperfect indicative"],["seyais","seoir",["v"],["v"],"imperfect indicative"],["seyait","seoir",["v"],["v"],"imperfect indicative"],["seyions","seoir",["v"],["v"],"imperfect indicative"],["seyiez","seoir",["v"],["v"],"imperfect indicative"],["seyaient","seoir",["v"],["v"],"imperfect indicative"],["soyais","seoir",["v"],["v"],"imperfect indicative"],["soyait","seoir",["v"],["v"],"imperfect indicative"],["soyions","seoir",["v"],["v"],"imperfect indicative"],["soyiez","seoir",["v"],["v"],"imperfect indicative"],["soyaient","seoir",["v"],["v"],"imperfect indicative"],["assoyais","asseoir",["v"],["v"],"imperfect indicative"],["assoyait","asseoir",["v"],["v"],"imperfect indicative"],["assoyions","asseoir",["v"],["v"],"imperfect indicative"],["assoyiez","asseoir",["v"],["v"],"imperfect indicative"],["assoyaient","asseoir",["v"],["v"],"imperfect indicative"],["sied","seoir",["v"],["v"],"imperfect indicative"],["siéent","seoir",["v"],["v"],"imperfect indicative"],["échoyait","échoir",["v"],["v"],"imperfect indicative"],["échoyaient","échoir",["v"],["v"],"imperfect indicative"],["andais","andre",["v"],["v"],"imperfect indicative"],["andais","andre",["v"],["v"],"imperfect indicative"],["andions","andre",["v"],["v"],"imperfect indicative"],["andiez","andre",["v"],["v"],"imperfect indicative"],["andaient","andre",["v"],["v"],"imperfect indicative"],["endais","endre",["v"],["v"],"imperfect indicative"],["endait","endre",["v"],["v"],"imperfect indicative"],["endions","endre",["v"],["v"],"imperfect indicative"],["endiez","endre",["v"],["v"],"imperfect indicative"],["endaient","endre",["v"],["v"],"imperfect indicative"],["ondais","ondre",["v"],["v"],"imperfect indicative"],["ondait","ondre",["v"],["v"],"imperfect indicative"],["ondions","ondre",["v"],["v"],"imperfect indicative"],["ondiez","ondre",["v"],["v"],"imperfect indicative"],["ondaient","ondre",["v"],["v"],"imperfect indicative"],["erdais","erdre",["v"],["v"],"imperfect indicative"],["erdait","erdre",["v"],["v"],"imperfect indicative"],["erdions","erdre",["v"],["v"],"imperfect indicative"],["erdiez","erdre",["v"],["v"],"imperfect indicative"],["erdaient","erdre",["v"],["v"],"imperfect indicative"],["ordais","ordre",["v"],["v"],"imperfect indicative"],["ordait","ordre",["v"],["v"],"imperfect indicative"],["ordions","ordre",["v"],["v"],"imperfect indicative"],["ordiez","ordre",["v"],["v"],"imperfect indicative"],["ordaient","ordre",["v"],["v"],"imperfect indicative"],["prenais","prendre",["v"],["v"],"imperfect indicative"],["prenait","prendre",["v"],["v"],"imperfect indicative"],["prenions","prendre",["v"],["v"],"imperfect indicative"],["preniez","prendre",["v"],["v"],"imperfect indicative"],["prenaient","prendre",["v"],["v"],"imperfect indicative"],["battais","battre",["v"],["v"],"imperfect indicative"],["battait","battre",["v"],["v"],"imperfect indicative"],["battions","battre",["v"],["v"],"imperfect indicative"],["battiez","battre",["v"],["v"],"imperfect indicative"],["battaient","battre",["v"],["v"],"imperfect indicative"],["mettais","mettre",["v"],["v"],"imperfect indicative"],["mettait","mettre",["v"],["v"],"imperfect indicative"],["mettions","mettre",["v"],["v"],"imperfect indicative"],["mettiez","mettre",["v"],["v"],"imperfect indicative"],["mettaient","mettre",["v"],["v"],"imperfect indicative"],["eignais","eindre",["v"],["v"],"imperfect indicative"],["eignait","eindre",["v"],["v"],"imperfect indicative"],["eiginons","eindre",["v"],["v"],"imperfect indicative"],["eiginez","eindre",["v"],["v"],"imperfect indicative"],["eignaient","eindre",["v"],["v"],"imperfect indicative"],["oignais","oindre",["v"],["v"],"imperfect indicative"],["oignait","oindre",["v"],["v"],"imperfect indicative"],["oignions","oindre",["v"],["v"],"imperfect indicative"],["oigniez","oindre",["v"],["v"],"imperfect indicative"],["oignaient","oindre",["v"],["v"],"imperfect indicative"],["aignais","aindre",["v"],["v"],"imperfect indicative"],["aignait","aindre",["v"],["v"],"imperfect indicative"],["aignions","aindre",["v"],["v"],"imperfect indicative"],["aigniez","aindre",["v"],["v"],"imperfect indicative"],["aignaient","aindre",["v"],["v"],"imperfect indicative"],["vainquas","vaincre",["v"],["v"],"imperfect indicative"],["vainquait","vaincre",["v"],["v"],"imperfect indicative"],["vainquions","vaincre",["v"],["v"],"imperfect indicative"],["vainquiez","vaincre",["v"],["v"],"imperfect indicative"],["vainquaient","vaincre",["v"],["v"],"imperfect indicative"],["rayais","raire",["v"],["v"],"imperfect indicative"],["raiyat","raire",["v"],["v"],"imperfect indicative"],["rayions","raire",["v"],["v"],"imperfect indicative"],["rayiez","raire",["v"],["v"],"imperfect indicative"],["rayaient","raire",["v"],["v"],"imperfect indicative"],["faisais","faire",["v"],["v"],"imperfect indicative"],["faisait","faire",["v"],["v"],"imperfect indicative"],["faisions","faire",["v"],["v"],"imperfect indicative"],["faisiez","faire",["v"],["v"],"imperfect indicative"],["faisaient","faire",["v"],["v"],"imperfect indicative"],["plaisais","faire",["v"],["v"],"imperfect indicative"],["plaisait","faire",["v"],["v"],"imperfect indicative"],["plaisions","faire",["v"],["v"],"imperfect indicative"],["plaisiez","faire",["v"],["v"],"imperfect indicative"],["plaisaient","faire",["v"],["v"],"imperfect indicative"],["aissais","aître",["v"],["v"],"imperfect indicative"],["aissait","aître",["v"],["v"],"imperfect indicative"],["aissions","aître",["v"],["v"],"imperfect indicative"],["aissiez","aître",["v"],["v"],"imperfect indicative"],["aissaient","aître",["v"],["v"],"imperfect indicative"],["oissais","oître",["v"],["v"],"imperfect indicative"],["oissait","oître",["v"],["v"],"imperfect indicative"],["oissions","oître",["v"],["v"],"imperfect indicative"],["oissiez","oître",["v"],["v"],"imperfect indicative"],["oissaient","oître",["v"],["v"],"imperfect indicative"],["croyais","croire",["v"],["v"],"imperfect indicative"],["croyait","croire",["v"],["v"],"imperfect indicative"],["croyions","croire",["v"],["v"],"imperfect indicative"],["croyiez","croire",["v"],["v"],"imperfect indicative"],["croyaient","croire",["v"],["v"],"imperfect indicative"],["buvais","boire",["v"],["v"],"imperfect indicative"],["buvait","boire",["v"],["v"],"imperfect indicative"],["buvions","boire",["v"],["v"],"imperfect indicative"],["buviez","boire",["v"],["v"],"imperfect indicative"],["buvaient","boire",["v"],["v"],"imperfect indicative"],["cluais","clure",["v"],["v"],"imperfect indicative"],["cluait","clure",["v"],["v"],"imperfect indicative"],["cluions","clure",["v"],["v"],"imperfect indicative"],["cluiez","clure",["v"],["v"],"imperfect indicative"],["cluaient","clure",["v"],["v"],"imperfect indicative"],["solvais","soudre",["v"],["v"],"imperfect indicative"],["solvait","soudre",["v"],["v"],"imperfect indicative"],["solvions","soudre",["v"],["v"],"imperfect indicative"],["solviez","soudre",["v"],["v"],"imperfect indicative"],["solvaient","soudre",["v"],["v"],"imperfect indicative"],["cousais","coudre",["v"],["v"],"imperfect indicative"],["cousait","coudre",["v"],["v"],"imperfect indicative"],["cousions","coudre",["v"],["v"],"imperfect indicative"],["cousiez","coudre",["v"],["v"],"imperfect indicative"],["cousaient","coudre",["v"],["v"],"imperfect indicative"],["moulais","moudre",["v"],["v"],"imperfect indicative"],["moulait","moudre",["v"],["v"],"imperfect indicative"],["moulions","moudre",["v"],["v"],"imperfect indicative"],["mouliez","moudre",["v"],["v"],"imperfect indicative"],["moulaient","moudre",["v"],["v"],"imperfect indicative"],["ivais","vivre",["v"],["v"],"imperfect indicative"],["ivait","vivre",["v"],["v"],"imperfect indicative"],["ivions","vivre",["v"],["v"],"imperfect indicative"],["iviez","vivre",["v"],["v"],"imperfect indicative"],["ivaient","vivre",["v"],["v"],"imperfect indicative"],["lisais","lire",["v"],["v"],"imperfect indicative"],["lisait","lire",["v"],["v"],"imperfect indicative"],["lisions","lire",["v"],["v"],"imperfect indicative"],["lisiez","lire",["v"],["v"],"imperfect indicative"],["lisaient","lire",["v"],["v"],"imperfect indicative"],["disais","dire",["v"],["v"],"imperfect indicative"],["disait","dire",["v"],["v"],"imperfect indicative"],["disions","dire",["v"],["v"],"imperfect indicative"],["disiez","dire",["v"],["v"],"imperfect indicative"],["disaient","dire",["v"],["v"],"imperfect indicative"],["riais","rire",["v"],["v"],"imperfect indicative"],["riait","rire",["v"],["v"],"imperfect indicative"],["riions","rire",["v"],["v"],"imperfect indicative"],["riiez","rire",["v"],["v"],"imperfect indicative"],["riaient","rire",["v"],["v"],"imperfect indicative"],["maudissais","maudire",["v"],["v"],"imperfect indicative"],["maudissait","maudire",["v"],["v"],"imperfect indicative"],["maudissions","maudire",["v"],["v"],"imperfect indicative"],["maudissiez","maudire",["v"],["v"],"imperfect indicative"],["maudissaient","maudire",["v"],["v"],"imperfect indicative"],["crivais","crire",["v"],["v"],"imperfect indicative"],["crivait","crire",["v"],["v"],"imperfect indicative"],["crivions","crire",["v"],["v"],"imperfect indicative"],["criviez","crire",["v"],["v"],"imperfect indicative"],["crivaient","crire",["v"],["v"],"imperfect indicative"],["fisais","fire",["v"],["v"],"imperfect indicative"],["fisait","fire",["v"],["v"],"imperfect indicative"],["fisions","fire",["v"],["v"],"imperfect indicative"],["fisiez","fire",["v"],["v"],"imperfect indicative"],["fisaient","fire",["v"],["v"],"imperfect indicative"],["cisais","cire",["v"],["v"],"imperfect indicative"],["cisait","cire",["v"],["v"],"imperfect indicative"],["cisions","cire",["v"],["v"],"imperfect indicative"],["cisiez","cire",["v"],["v"],"imperfect indicative"],["cisaient","cire",["v"],["v"],"imperfect indicative"],["frisais","frire",["v"],["v"],"imperfect indicative"],["frisait","frire",["v"],["v"],"imperfect indicative"],["frisions","frire",["v"],["v"],"imperfect indicative"],["frisiez","frire",["v"],["v"],"imperfect indicative"],["frisaient","frire",["v"],["v"],"imperfect indicative"],["uisais","uire",["v"],["v"],"imperfect indicative"],["uisait","uire",["v"],["v"],"imperfect indicative"],["uisions","uire",["v"],["v"],"imperfect indicative"],["uisiez","uire",["v"],["v"],"imperfect indicative"],["uisaient","uire",["v"],["v"],"imperfect indicative"],["serai","être",["aux"],["v"],"future"],["seras","être",["aux"],["v"],"future"],["sera","être",["aux"],["v"],"future"],["serons,","être",["aux"],["v"],"future"],["serez","être",["aux"],["v"],"future"],["seront","être",["aux"],["v"],"future"],["aurai","avoir",["aux"],["v"],"future"],["auras","avoir",["aux"],["v"],"future"],["aura","avoir",["aux"],["v"],"future"],["aurons","avoir",["aux"],["v"],"future"],["aurez","avoir",["aux"],["v"],"future"],["auront","avoir",["aux"],["v"],"future"],["erai","er",["v"],["v"],"future"],["eras","er",["v"],["v"],"future"],["era","er",["v"],["v"],"future"],["erons","er",["v"],["v"],"future"],["erez","er",["v"],["v"],"future"],["eront","er",["v"],["v"],"future"],["ècerai","ecer",["v"],["v"],"future"],["èverai","ever",["v"],["v"],"future"],["ènerai","ener",["v"],["v"],"future"],["èperai","eper",["v"],["v"],"future"],["èrerai","erer",["v"],["v"],"future"],["èmerai","emer",["v"],["v"],"future"],["èvrerai","evrer",["v"],["v"],"future"],["èserai","eser",["v"],["v"],"future"],["èceras","ecer",["v"],["v"],"future"],["èveras","ever",["v"],["v"],"future"],["èneras","ener",["v"],["v"],"future"],["èperas","eper",["v"],["v"],"future"],["èreras","erer",["v"],["v"],"future"],["èmeras","emer",["v"],["v"],"future"],["èvreras","evrer",["v"],["v"],"future"],["èseras","eser",["v"],["v"],"future"],["ècera","ecer",["v"],["v"],"future"],["èvera","ever",["v"],["v"],"future"],["ènera","ener",["v"],["v"],"future"],["èpera","eper",["v"],["v"],"future"],["èrera","erer",["v"],["v"],"future"],["èmera","emer",["v"],["v"],"future"],["èvrera","evrer",["v"],["v"],"future"],["èsera","eser",["v"],["v"],"future"],["ècerons","ecer",["v"],["v"],"future"],["èverons","ever",["v"],["v"],"future"],["ènerons","ener",["v"],["v"],"future"],["èperons","eper",["v"],["v"],"future"],["èrerons","erer",["v"],["v"],"future"],["èmerons","emer",["v"],["v"],"future"],["èvrerons","evrer",["v"],["v"],"future"],["èserons","eser",["v"],["v"],"future"],["ècerez","ecer",["v"],["v"],"future"],["èverez","ever",["v"],["v"],"future"],["ènerez","ener",["v"],["v"],"future"],["èperez","eper",["v"],["v"],"future"],["èrerez","erer",["v"],["v"],"future"],["èmerez","emer",["v"],["v"],"future"],["èvrerez","evrer",["v"],["v"],"future"],["èserez","eser",["v"],["v"],"future"],["èceront","ecer",["v"],["v"],"future"],["èveront","ever",["v"],["v"],"future"],["èneront","ener",["v"],["v"],"future"],["èperontz","eper",["v"],["v"],"future"],["èreront","erer",["v"],["v"],"future"],["èmeront","emer",["v"],["v"],"future"],["èvreront","evrer",["v"],["v"],"future"],["èseront","eser",["v"],["v"],"future"],["ellerai","eler",["v"],["v"],"future"],["elleras","eler",["v"],["v"],"future"],["ellera","eler",["v"],["v"],"future"],["ellerons","eler",["v"],["v"],"future"],["ellerez","eler",["v"],["v"],"future"],["elleront","eler",["v"],["v"],"future"],["etterais","eter",["v"],["v"],"future"],["etteras","eter",["v"],["v"],"future"],["ettera","eter",["v"],["v"],"future"],["etterons","eter",["v"],["v"],"future"],["etterez","eter",["v"],["v"],"future"],["etteront","eter",["v"],["v"],"future"],["èlerai","eler",["v"],["v"],"future"],["èleras","eler",["v"],["v"],"future"],["èlera","eler",["v"],["v"],"future"],["èlerons","eler",["v"],["v"],"future"],["èlerez","eler",["v"],["v"],"future"],["èleront","eler",["v"],["v"],"future"],["èterai","eter",["v"],["v"],"future"],["èteras","eter",["v"],["v"],"future"],["ètera","eter",["v"],["v"],"future"],["èterons","eter",["v"],["v"],"future"],["èterez","eter",["v"],["v"],"future"],["èteront","eter",["v"],["v"],"future"],["ègerai","éger",["v"],["v"],"future"],["ègeras","éger",["v"],["v"],"future"],["ègera","éger",["v"],["v"],"future"],["ègerons","éger",["v"],["v"],"future"],["ègerez","éger",["v"],["v"],"future"],["ègeront","éger",["v"],["v"],"future"],["aierai","ayer",["v"],["v"],"future"],["aieras","ayer",["v"],["v"],"future"],["aiera","ayer",["v"],["v"],"future"],["aierons","ayer",["v"],["v"],"future"],["aierez","ayer",["v"],["v"],"future"],["aieront","ayer",["v"],["v"],"future"],["ayerai","ayer",["v"],["v"],"future"],["ayeras","ayer",["v"],["v"],"future"],["ayera","ayer",["v"],["v"],"future"],["ayerons","ayer",["v"],["v"],"future"],["ayerez","ayer",["v"],["v"],"future"],["ayeront","ayer",["v"],["v"],"future"],["oierai","oyer",["v"],["v"],"future"],["oieras","oyer",["v"],["v"],"future"],["oiera","oyer",["v"],["v"],"future"],["oierons","oyer",["v"],["v"],"future"],["oierez","oyer",["v"],["v"],"future"],["oieront","oyer",["v"],["v"],"future"],["uierai","uyer",["v"],["v"],"future"],["uieras","uyer",["v"],["v"],"future"],["uiera","uyer",["v"],["v"],"future"],["uierons","uyer",["v"],["v"],"future"],["uierez","uyer",["v"],["v"],"future"],["uieront","uyer",["v"],["v"],"future"],["enverrai","envoyer",["v"],["v"],"future"],["enverras","envoyer",["v"],["v"],"future"],["enverra","envoyer",["v"],["v"],"future"],["enverrons","envoyer",["v"],["v"],"future"],["enverrez","envoyer",["v"],["v"],"future"],["enverront","envoyer",["v"],["v"],"future"],["irai","ir",["v"],["v"],"future"],["iras","ir",["v"],["v"],"future"],["ira","ir",["v"],["v"],"future"],["irons","ir",["v"],["v"],"future"],["irez","ir",["v"],["v"],"future"],["iront","ir",["v"],["v"],"future"],["ïrai","ïr",["v"],["v"],"future"],["ïras","ïr",["v"],["v"],"future"],["ïra","ïr",["v"],["v"],"future"],["ïrons","ïr",["v"],["v"],"future"],["ïrez","ïr",["v"],["v"],"future"],["ïront","ïr",["v"],["v"],"future"],["irai","aller",["v"],["v"],"future"],["iras","aller",["v"],["v"],"future"],["ira","aller",["v"],["v"],"future"],["irons","aller",["v"],["v"],"future"],["irez","aller",["v"],["v"],"future"],["iront","aller",["v"],["v"],"future"],["iendrai","enir",["v"],["v"],"future"],["iendras","enir",["v"],["v"],"future"],["iendrons","enir",["v"],["v"],"future"],["iendrez","enir",["v"],["v"],"future"],["iendront","enir",["v"],["v"],"future"],["errai","érir",["v"],["v"],"future"],["erras","érir",["v"],["v"],"future"],["erra","érir",["v"],["v"],"future"],["errons","érir",["v"],["v"],"future"],["errez","érir",["v"],["v"],"future"],["erront","érir",["v"],["v"],"future"],["tirai","tir",["v"],["v"],"future"],["tiras","tir",["v"],["v"],"future"],["tira","tir",["v"],["v"],"future"],["tirons","tir",["v"],["v"],"future"],["tirez","tir",["v"],["v"],"future"],["tiront","tir",["v"],["v"],"future"],["êtirai","êtir",["v"],["v"],"future"],["êtiras","êtir",["v"],["v"],"future"],["êtira","êtir",["v"],["v"],"future"],["êtirons","êtir",["v"],["v"],"future"],["êtirez","êtir",["v"],["v"],"future"],["êtiront","êtir",["v"],["v"],"future"],["vrirai","vrir",["v"],["v"],"future"],["vriras","vrir",["v"],["v"],"future"],["vrira","vrir",["v"],["v"],"future"],["vrirons","vrir",["v"],["v"],"future"],["vrirez","vrir",["v"],["v"],"future"],["vriront","vrir",["v"],["v"],"future"],["frirai","frir",["v"],["v"],"future"],["frira","frir",["v"],["v"],"future"],["frira","frir",["v"],["v"],"future"],["frirons","frir",["v"],["v"],"future"],["frirez","frir",["v"],["v"],"future"],["friront","frir",["v"],["v"],"future"],["ueillerai","ueillir",["v"],["v"],"future"],["ueilleras","ueillir",["v"],["v"],"future"],["ueillera","ueillir",["v"],["v"],"future"],["ueillerons","ueillir",["v"],["v"],"future"],["ueillerez","ueillir",["v"],["v"],"future"],["ueilleront","ueillir",["v"],["v"],"future"],["aillirai","aillir",["v"],["v"],"future"],["ailliras","aillir",["v"],["v"],"future"],["aillira","aillir",["v"],["v"],"future"],["aillirons","aillir",["v"],["v"],"future"],["aillirez","aillir",["v"],["v"],"future"],["ailliront","aillir",["v"],["v"],"future"],["bouillirai","bouillir",["v"],["v"],"future"],["bouilliras","bouillir",["v"],["v"],"future"],["bouillira","bouillir",["v"],["v"],"future"],["bouillirons","bouillir",["v"],["v"],"future"],["bouillirez","bouillir",["v"],["v"],"future"],["bouilliront","bouillir",["v"],["v"],"future"],["dormirai","dormir",["v"],["v"],"future"],["dormiras","dormir",["v"],["v"],"future"],["dormira","dormir",["v"],["v"],"future"],["dormirons","dormir",["v"],["v"],"future"],["dormirez","dormir",["v"],["v"],"future"],["dormiront","dormir",["v"],["v"],"future"],["courrai","dormir",["v"],["v"],"future"],["courras","dormir",["v"],["v"],"future"],["courra","dormir",["v"],["v"],"future"],["courrons","dormir",["v"],["v"],"future"],["courrez","dormir",["v"],["v"],"future"],["courront","dormir",["v"],["v"],"future"],["mourrai","mourir",["v"],["v"],"future"],["mourras","mourir",["v"],["v"],"future"],["mourra","mourir",["v"],["v"],"future"],["mourrons","mourir",["v"],["v"],"future"],["mourrez","mourir",["v"],["v"],"future"],["mourront","mourir",["v"],["v"],"future"],["orrai","ouïr",["v"],["v"],"future"],["oirai","ouïr",["v"],["v"],"future"],["orras","ouïr",["v"],["v"],"future"],["orra","ouïr",["v"],["v"],"future"],["orrons","ouïr",["v"],["v"],"future"],["orrez","ouïr",["v"],["v"],"future"],["orront","ouïr",["v"],["v"],"future"],["cevrai","cevoir",["v"],["v"],"future"],["cevras","cevoir",["v"],["v"],"future"],["cevra","cevoir",["v"],["v"],"future"],["cevrons","cevoir",["v"],["v"],"future"],["cevrez","cevoir",["v"],["v"],"future"],["cevront","cevoir",["v"],["v"],"future"],["verrai","voir",["v"],["v"],"future"],["verras","voir",["v"],["v"],"future"],["verra","voir",["v"],["v"],"future"],["verrons","voir",["v"],["v"],"future"],["verrez","voir",["v"],["v"],"future"],["verront","voir",["v"],["v"],"future"],["pourvoirai","pourvoir",["v"],["v"],"future"],["pourvoiras","pourvoir",["v"],["v"],"future"],["pourvoira","pourvoir",["v"],["v"],"future"],["pourvoirons","pourvoir",["v"],["v"],"future"],["pourvoirez","pourvoir",["v"],["v"],"future"],["pourvoiront","pourvoir",["v"],["v"],"future"],["saurai","savoir",["v"],["v"],"future"],["sauras","savoir",["v"],["v"],"future"],["saura","savoir",["v"],["v"],"future"],["saurons","savoir",["v"],["v"],"future"],["saurez","savoir",["v"],["v"],"future"],["sauront","savoir",["v"],["v"],"future"],["devrai","devoir",["v"],["v"],"future"],["devras","devoir",["v"],["v"],"future"],["devra","devoir",["v"],["v"],"future"],["devrons","devoir",["v"],["v"],"future"],["devrez","devoir",["v"],["v"],"future"],["devront","devoir",["v"],["v"],"future"],["pourrai","pouvoir",["v"],["v"],"future"],["pourras","pouvoir",["v"],["v"],"future"],["pourra","pouvoir",["v"],["v"],"future"],["pourrons","pouvoir",["v"],["v"],"future"],["pourrez","pouvoir",["v"],["v"],"future"],["pourront","pouvoir",["v"],["v"],"future"],["mouvrai","mouvoir",["v"],["v"],"future"],["mouvras","mouvoir",["v"],["v"],"future"],["mouvra","mouvoir",["v"],["v"],"future"],["mouvrons","mouvoir",["v"],["v"],"future"],["mouvrez","mouvoir",["v"],["v"],"future"],["mouvront","mouvoir",["v"],["v"],"future"],["pleuvra","pleuvoir",["v"],["v"],"future"],["pleuvront","pleuvoir",["v"],["v"],"future"],["faudra","falloir",["v"],["v"],"future"],["vaudrai","valoir",["v"],["v"],"future"],["vaudras","valoir",["v"],["v"],"future"],["vaudra","valoir",["v"],["v"],"future"],["vaudrons","valoir",["v"],["v"],"future"],["vaudrez","valoir",["v"],["v"],"future"],["vaudront","valoir",["v"],["v"],"future"],["voudrai","vouloir",["v"],["v"],"future"],["voudras","vouloir",["v"],["v"],"future"],["voudra","vouloir",["v"],["v"],"future"],["voudrons","vouloir",["v"],["v"],"future"],["voudrez","vouloir",["v"],["v"],"future"],["voudront","vouloir",["v"],["v"],"future"],["soirai","seoir",["v"],["v"],"future"],["soiras","seoir",["v"],["v"],"future"],["soira","seoir",["v"],["v"],"future"],["soirons","seoir",["v"],["v"],"future"],["soirez","seoir",["v"],["v"],"future"],["soiront","seoir",["v"],["v"],"future"],["assiérai","asseoir",["v"],["v"],"future"],["assiéras","asseoir",["v"],["v"],"future"],["assiéra","asseoir",["v"],["v"],"future"],["assiérons","asseoir",["v"],["v"],"future"],["assiérez","asseoir",["v"],["v"],"future"],["assiéront","asseoir",["v"],["v"],"future"],["siéra","seoir",["v"],["v"],"future"],["siéront","seoir",["v"],["v"],"future"],["choirai","choir",["v"],["v"],"future"],["choiras","choir",["v"],["v"],"future"],["choira","choir",["v"],["v"],"future"],["choirons","choir",["v"],["v"],"future"],["choirez","choir",["v"],["v"],"future"],["choiront","choir",["v"],["v"],"future"],["cherrai","choir",["v"],["v"],"future"],["cherras","choir",["v"],["v"],"future"],["cherra","choir",["v"],["v"],"future"],["cherrosn","choir",["v"],["v"],"future"],["cherrez","choir",["v"],["v"],"future"],["cherront","choir",["v"],["v"],"future"],["andrai","andre",["v"],["v"],"future"],["andras","andre",["v"],["v"],"future"],["andra","andre",["v"],["v"],"future"],["androns","andre",["v"],["v"],"future"],["andrez","andre",["v"],["v"],"future"],["andront","andre",["v"],["v"],"future"],["endrai","endre",["v"],["v"],"future"],["endras","endre",["v"],["v"],"future"],["endra","endre",["v"],["v"],"future"],["endrons","endre",["v"],["v"],"future"],["endrez","endre",["v"],["v"],"future"],["endront","endre",["v"],["v"],"future"],["ondrai","ondre",["v"],["v"],"future"],["ondras","ondre",["v"],["v"],"future"],["ondra","ondre",["v"],["v"],"future"],["ondrons","ondre",["v"],["v"],"future"],["ondrez","ondre",["v"],["v"],"future"],["ondront","ondre",["v"],["v"],"future"],["erdrai","erdre",["v"],["v"],"future"],["erdras","erdre",["v"],["v"],"future"],["erdra","erdre",["v"],["v"],"future"],["erdrons","erdre",["v"],["v"],"future"],["erdrez","erdre",["v"],["v"],"future"],["erdront","erdre",["v"],["v"],"future"],["ordrai","ordre",["v"],["v"],"future"],["ordras","ordre",["v"],["v"],"future"],["ordra","ordre",["v"],["v"],"future"],["ordrons","ordre",["v"],["v"],"future"],["ordrez","ordre",["v"],["v"],"future"],["ordront","ordre",["v"],["v"],"future"],["battrai","battre",["v"],["v"],"future"],["battras","battre",["v"],["v"],"future"],["battra","battre",["v"],["v"],"future"],["battrons","battre",["v"],["v"],"future"],["battrez","battre",["v"],["v"],"future"],["battront","battre",["v"],["v"],"future"],["mettrai","mettre",["v"],["v"],"future"],["mettras","mettre",["v"],["v"],"future"],["mettra","mettre",["v"],["v"],"future"],["mettrons","mettre",["v"],["v"],"future"],["mettrez","mettre",["v"],["v"],"future"],["mettront","mettre",["v"],["v"],"future"],["eindrai","eindre",["v"],["v"],"future"],["eindras","eindre",["v"],["v"],"future"],["eindra","eindre",["v"],["v"],"future"],["eindrons","eindre",["v"],["v"],"future"],["eindrez","eindre",["v"],["v"],"future"],["eindront","eindre",["v"],["v"],"future"],["oindrai","oindre",["v"],["v"],"future"],["oindras","oindre",["v"],["v"],"future"],["oindra","oindre",["v"],["v"],"future"],["oindrons","oindre",["v"],["v"],"future"],["oindrez","oindre",["v"],["v"],"future"],["oindront","oindre",["v"],["v"],"future"],["aindrai","aindre",["v"],["v"],"future"],["aindras","aindre",["v"],["v"],"future"],["aindra","aindre",["v"],["v"],"future"],["aindrons","aindre",["v"],["v"],"future"],["aindrez","aindre",["v"],["v"],"future"],["aindront","aindre",["v"],["v"],"future"],["vaincrai","vaincre",["v"],["v"],"future"],["vaincras","vaincre",["v"],["v"],"future"],["vaincra","vaincre",["v"],["v"],"future"],["vaincrons","vaincre",["v"],["v"],"future"],["vaincrez","vaincre",["v"],["v"],"future"],["vaincront","vaincre",["v"],["v"],"future"],["rairai","raire",["v"],["v"],"future"],["rairas","raire",["v"],["v"],"future"],["raira","raire",["v"],["v"],"future"],["rairons","raire",["v"],["v"],"future"],["rairez","raire",["v"],["v"],"future"],["rairont","raire",["v"],["v"],"future"],["ferai","faire",["v"],["v"],"future"],["feras","faire",["v"],["v"],"future"],["fera","faire",["v"],["v"],"future"],["ferons","faire",["v"],["v"],"future"],["ferez","faire",["v"],["v"],"future"],["feront","faire",["v"],["v"],"future"],["plairai","plaire",["v"],["v"],"future"],["plairas","plaire",["v"],["v"],"future"],["plaira","plaire",["v"],["v"],"future"],["plairons","plaire",["v"],["v"],"future"],["plairez","plaire",["v"],["v"],"future"],["plairont","plaire",["v"],["v"],"future"],["aîtrai","aître",["v"],["v"],"future"],["aîtras","aître",["v"],["v"],"future"],["aîtra","aître",["v"],["v"],"future"],["aîtrons","aître",["v"],["v"],"future"],["aîtrez","aître",["v"],["v"],"future"],["aîtront","aître",["v"],["v"],"future"],["oîtrai","oître",["v"],["v"],"future"],["oîtras","oître",["v"],["v"],"future"],["oîtra","oître",["v"],["v"],"future"],["oîtrons","oître",["v"],["v"],"future"],["oîtrez","oître",["v"],["v"],"future"],["oîtront","oître",["v"],["v"],"future"],["croirai","croire",["v"],["v"],"future"],["croiras","croire",["v"],["v"],"future"],["croira","croire",["v"],["v"],"future"],["croirons","croire",["v"],["v"],"future"],["croirez","croire",["v"],["v"],"future"],["croiront","croire",["v"],["v"],"future"],["boirai","boire",["v"],["v"],"future"],["boiras","boire",["v"],["v"],"future"],["boira","boire",["v"],["v"],"future"],["boirons","boire",["v"],["v"],"future"],["boirez","boire",["v"],["v"],"future"],["boiront","boire",["v"],["v"],"future"],["clorai","clore",["v"],["v"],"future"],["cloras","clore",["v"],["v"],"future"],["clora","clore",["v"],["v"],"future"],["clorons","clore",["v"],["v"],"future"],["clorez","clore",["v"],["v"],"future"],["cloront","clore",["v"],["v"],"future"],["clurai","clure",["v"],["v"],"future"],["cluras","clure",["v"],["v"],"future"],["clura","clure",["v"],["v"],"future"],["clurons","clure",["v"],["v"],"future"],["clurez","clure",["v"],["v"],"future"],["cluront","clure",["v"],["v"],"future"],["soudrai","soudre",["v"],["v"],"future"],["soudras","soudre",["v"],["v"],"future"],["soudra","soudre",["v"],["v"],"future"],["soudrons","soudre",["v"],["v"],"future"],["soudrez","soudre",["v"],["v"],"future"],["soudront","soudre",["v"],["v"],"future"],["coudrai","coudre",["v"],["v"],"future"],["coudras","coudre",["v"],["v"],"future"],["coudra","coudre",["v"],["v"],"future"],["coudrons","coudre",["v"],["v"],"future"],["coudrez","coudre",["v"],["v"],"future"],["coudront","coudre",["v"],["v"],"future"],["moudrai","moudre",["v"],["v"],"future"],["moudras","moudre",["v"],["v"],"future"],["moudra","moudre",["v"],["v"],"future"],["moudrons","moudre",["v"],["v"],"future"],["moudrez","moudre",["v"],["v"],"future"],["moudront","moudre",["v"],["v"],"future"],["ivrai","vivre",["v"],["v"],"future"],["ivras","vivre",["v"],["v"],"future"],["ivra","vivre",["v"],["v"],"future"],["ivrons","vivre",["v"],["v"],"future"],["ivrez","vivre",["v"],["v"],"future"],["ivront","vivre",["v"],["v"],"future"],["lirai","lire",["v"],["v"],"future"],["liras","lire",["v"],["v"],"future"],["lira","lire",["v"],["v"],"future"],["lirons","lire",["v"],["v"],"future"],["lirez","lire",["v"],["v"],"future"],["liront","lire",["v"],["v"],"future"],["dirai","dire",["v"],["v"],"future"],["diras","dire",["v"],["v"],"future"],["dira","dire",["v"],["v"],"future"],["dirons","dire",["v"],["v"],"future"],["direz","dire",["v"],["v"],"future"],["diront","dire",["v"],["v"],"future"],["rirai","rire",["v"],["v"],"future"],["riras","rire",["v"],["v"],"future"],["rira","rire",["v"],["v"],"future"],["rirons","rire",["v"],["v"],"future"],["rirez","rire",["v"],["v"],"future"],["riront","rire",["v"],["v"],"future"],["maudirai","maudire",["v"],["v"],"future"],["maudiras","maudire",["v"],["v"],"future"],["maudira","maudire",["v"],["v"],"future"],["maudirons","maudire",["v"],["v"],"future"],["maudirez","maudire",["v"],["v"],"future"],["maudiront","maudire",["v"],["v"],"future"],["crirai","crire",["v"],["v"],"future"],["criras","crire",["v"],["v"],"future"],["crira","crire",["v"],["v"],"future"],["crirons","crire",["v"],["v"],"future"],["crirez","crire",["v"],["v"],"future"],["criront","crire",["v"],["v"],"future"],["firai","fire",["v"],["v"],"future"],["firas","fire",["v"],["v"],"future"],["fira","fire",["v"],["v"],"future"],["firons","fire",["v"],["v"],"future"],["firez","fire",["v"],["v"],"future"],["firont","fire",["v"],["v"],"future"],["cirai","cire",["v"],["v"],"future"],["ciras","cire",["v"],["v"],"future"],["cira","cire",["v"],["v"],"future"],["cirons","cire",["v"],["v"],"future"],["cirez","cire",["v"],["v"],"future"],["ciront","cire",["v"],["v"],"future"],["frirai","frire",["v"],["v"],"future"],["friras","frire",["v"],["v"],"future"],["frira","frire",["v"],["v"],"future"],["frirons","frire",["v"],["v"],"future"],["frirez","frire",["v"],["v"],"future"],["friront","frire",["v"],["v"],"future"],["uirai","uire",["v"],["v"],"future"],["uiras","uire",["v"],["v"],"future"],["uira","uire",["v"],["v"],"future"],["uirons","uire",["v"],["v"],"future"],["uirez","uire",["v"],["v"],"future"],["uiront","uire",["v"],["v"],"future"],["sois","être",["aux"],["v"],"imperative present"],["soyons","être",["aux"],["v"],"imperative present"],["soyez","être",["aux"],["v"],"imperative present"],["aie","avoir",["aux"],["v"],"imperative present"],["ayons","avoir",["aux"],["v"],"imperative present"],["ayez","avoir",["aux"],["v"],"imperative present"],["e","er",["v"],["v"],"imperative present"],["ons","er",["v"],["v"],"imperative present"],["ez","er",["v"],["v"],"imperative present"],["ce","er",["v"],["v"],"imperative present"],["çons","er",["v"],["v"],"imperative present"],["cez","er",["v"],["v"],"imperative present"],["ge","ger",["v"],["v"],"imperative present"],["geons","ger",["v"],["v"],"imperative present"],["gez","ger",["v"],["v"],"imperative present"],["èce","ecer",["v"],["v"],"imperative present"],["eçons","ecer",["v"],["v"],"imperative present"],["ecez","ecer",["v"],["v"],"imperative present"],["ève","ever",["v"],["v"],"imperative present"],["evons","ever",["v"],["v"],"imperative present"],["evez","ever",["v"],["v"],"imperative present"],["ène","ener",["v"],["v"],"imperative present"],["enons","ener",["v"],["v"],"imperative present"],["enez","ener",["v"],["v"],"imperative present"],["èpe","eper",["v"],["v"],"imperative present"],["epons","eper",["v"],["v"],"imperative present"],["epez","eper",["v"],["v"],"imperative present"],["ère","erer",["v"],["v"],"imperative present"],["erons","erer",["v"],["v"],"imperative present"],["erez","erer",["v"],["v"],"imperative present"],["ème","emer",["v"],["v"],"imperative present"],["emons","emer",["v"],["v"],"imperative present"],["emez","emer",["v"],["v"],"imperative present"],["èvre","evrer",["v"],["v"],"imperative present"],["evrons","evrer",["v"],["v"],"imperative present"],["evrez","evrer",["v"],["v"],"imperative present"],["èse","eser",["v"],["v"],"imperative present"],["èsons","eser",["v"],["v"],"imperative present"],["esez","eser",["v"],["v"],"imperative present"],["ède","éder",["v"],["v"],"imperative present"],["édons","éder",["v"],["v"],"imperative present"],["édez","éder",["v"],["v"],"imperative present"],["èbre","ébrer",["v"],["v"],"imperative present"],["ébrons","ébrer",["v"],["v"],"imperative present"],["ébrez","ébrer",["v"],["v"],"imperative present"],["èce","écer",["v"],["v"],"imperative present"],["éçons","écer",["v"],["v"],"imperative present"],["écez","écer",["v"],["v"],"imperative present"],["èche","écher",["v"],["v"],"imperative present"],["échons","écher",["v"],["v"],"imperative present"],["échez","écher",["v"],["v"],"imperative present"],["ècre","écrer",["v"],["v"],"imperative present"],["écrons","écrer",["v"],["v"],"imperative present"],["écrez","écrer",["v"],["v"],"imperative present"],["ègle","égler",["v"],["v"],"imperative present"],["églons","égler",["v"],["v"],"imperative present"],["églez","égler",["v"],["v"],"imperative present"],["ègne","égner",["v"],["v"],"imperative present"],["égnons","égner",["v"],["v"],"imperative present"],["égnez","égner",["v"],["v"],"imperative present"],["ègre","égrer",["v"],["v"],"imperative present"],["égrons","égrer",["v"],["v"],"imperative present"],["égrez","égrer",["v"],["v"],"imperative present"],["ègue","éguer",["v"],["v"],"imperative present"],["éguons","éguer",["v"],["v"],"imperative present"],["éguez","éguer",["v"],["v"],"imperative present"],["èle","éler",["v"],["v"],"imperative present"],["élons","éler",["v"],["v"],"imperative present"],["élez","éler",["v"],["v"],"imperative present"],["ème","émer",["v"],["v"],"imperative present"],["émons","émer",["v"],["v"],"imperative present"],["émez","émer",["v"],["v"],"imperative present"],["ène","éner",["v"],["v"],"imperative present"],["énons","éner",["v"],["v"],"imperative present"],["énez","éner",["v"],["v"],"imperative present"],["èpe","éper",["v"],["v"],"imperative present"],["épons","éper",["v"],["v"],"imperative present"],["épez","éper",["v"],["v"],"imperative present"],["èque","équer",["v"],["v"],"imperative present"],["équons","équer",["v"],["v"],"imperative present"],["équez","équer",["v"],["v"],"imperative present"],["ère","érer",["v"],["v"],"imperative present"],["érons","érer",["v"],["v"],"imperative present"],["érez","érer",["v"],["v"],"imperative present"],["èse","éser",["v"],["v"],"imperative present"],["ésons","éser",["v"],["v"],"imperative present"],["ésez","éser",["v"],["v"],"imperative present"],["ète","éter",["v"],["v"],"imperative present"],["étons","éter",["v"],["v"],"imperative present"],["étez","éter",["v"],["v"],"imperative present"],["ètre","étrer",["v"],["v"],"imperative present"],["étrons","étrer",["v"],["v"],"imperative present"],["étrez","étrer",["v"],["v"],"imperative present"],["èye","éyer",["v"],["v"],"imperative present"],["éyons","éyer",["v"],["v"],"imperative present"],["éyez","éyer",["v"],["v"],"imperative present"],["elle","eler",["v"],["v"],"imperative present"],["ellons","eler",["v"],["v"],"imperative present"],["ellez","eler",["v"],["v"],"imperative present"],["ette","eter",["v"],["v"],"imperative present"],["ettons","eter",["v"],["v"],"imperative present"],["ettez","eter",["v"],["v"],"imperative present"],["èle","eler",["v"],["v"],"imperative present"],["élons","eler",["v"],["v"],"imperative present"],["élez","eler",["v"],["v"],"imperative present"],["ète","eter",["v"],["v"],"imperative present"],["étons","eter",["v"],["v"],"imperative present"],["étez","eter",["v"],["v"],"imperative present"],["ège","éger",["v"],["v"],"imperative present"],["égeons","éger",["v"],["v"],"imperative present"],["égez","éger",["v"],["v"],"imperative present"],["aie","ayer",["v"],["v"],"imperative present"],["ayons","ayer",["v"],["v"],"imperative present"],["ayez","ayer",["v"],["v"],"imperative present"],["oie","oyer",["v"],["v"],"imperative present"],["oyons","oyer",["v"],["v"],"imperative present"],["oyez","oyer",["v"],["v"],"imperative present"],["uie","uyer",["v"],["v"],"imperative present"],["uyons","uyer",["v"],["v"],"imperative present"],["uyez","uyer",["v"],["v"],"imperative present"],["is","ir",["v"],["v"],"imperative present"],["issons","ir",["v"],["v"],"imperative present"],["issez","ir",["v"],["v"],"imperative present"],["ïs","ïr",["v"],["v"],"imperative present"],["ïssons","ïr",["v"],["v"],"imperative present"],["ïssez","ïr",["v"],["v"],"imperative present"],["hais","haïr",["v"],["v"],"imperative present"],["haïssons","haïr",["v"],["v"],"imperative present"],["haïssez","haïr",["v"],["v"],"imperative present"],["va","aller",["v"],["v"],"imperative present"],["allons","aller",["v"],["v"],"imperative present"],["allez","aller",["v"],["v"],"imperative present"],["iens","enir",["v"],["v"],"imperative present"],["enons","enir",["v"],["v"],"imperative present"],["enez","enir",["v"],["v"],"imperative present"],["iers","érir",["v"],["v"],"imperative present"],["érons","érir",["v"],["v"],"imperative present"],["érez","érir",["v"],["v"],"imperative present"],["s","tir",["v"],["v"],"imperative present"],["tons","tir",["v"],["v"],"imperative present"],["tez","tir",["v"],["v"],"imperative present"],["êts","êtir",["v"],["v"],"imperative present"],["êtons","êtir",["v"],["v"],"imperative present"],["êtez","êtir",["v"],["v"],"imperative present"],["vre","vrir",["v"],["v"],"imperative present"],["vrons","vrir",["v"],["v"],"imperative present"],["vrez","vrir",["v"],["v"],"imperative present"],["fre","frir",["v"],["v"],"imperative present"],["frons","frir",["v"],["v"],"imperative present"],["frez","frir",["v"],["v"],"imperative present"],["ueille","ueillir",["v"],["v"],"imperative present"],["ueillons","ueillir",["v"],["v"],"imperative present"],["ueillez","ueillir",["v"],["v"],"imperative present"],["aille","aillir",["v"],["v"],"imperative present"],["aillons","aillir",["v"],["v"],"imperative present"],["aillez","aillir",["v"],["v"],"imperative present"],["bous","bouillir",["v"],["v"],"imperative present"],["bouillons","bouillir",["v"],["v"],"imperative present"],["bouillez","bouillir",["v"],["v"],"imperative present"],["dors","dormir",["v"],["v"],"imperative present"],["dormons","dormir",["v"],["v"],"imperative present"],["dormez","dormir",["v"],["v"],"imperative present"],["cours","dormir",["v"],["v"],"imperative present"],["courons","dormir",["v"],["v"],"imperative present"],["courez","dormir",["v"],["v"],"imperative present"],["meurs","mourir",["v"],["v"],"imperative present"],["mourons","mourir",["v"],["v"],"imperative present"],["mourez","mourir",["v"],["v"],"imperative present"],["sers","servir",["v"],["v"],"imperative present"],["servons","servir",["v"],["v"],"imperative present"],["servez","servir",["v"],["v"],"imperative present"],["fuis","fuir",["v"],["v"],"imperative present"],["fuyons","fuir",["v"],["v"],"imperative present"],["fuyez","fuir",["v"],["v"],"imperative present"],["ois","ouïr",["v"],["v"],"imperative present"],["oyons","ouïr",["v"],["v"],"imperative present"],["oyez","ouïr",["v"],["v"],"imperative present"],["çois","cevoir",["v"],["v"],"imperative present"],["cevons","cevoir",["v"],["v"],"imperative present"],["cevez","cevoir",["v"],["v"],"imperative present"],["vois","voir",["v"],["v"],"imperative present"],["voyons","voir",["v"],["v"],"imperative present"],["voyez","voir",["v"],["v"],"imperative present"],["sais","savoir",["v"],["v"],"imperative present"],["savons","savoir",["v"],["v"],"imperative present"],["savez","savoir",["v"],["v"],"imperative present"],["dois","devoir",["v"],["v"],"imperative present"],["devons","devoir",["v"],["v"],"imperative present"],["devez","devoir",["v"],["v"],"imperative present"],["meus","mouvoir",["v"],["v"],"imperative present"],["mouvons","mouvoir",["v"],["v"],"imperative present"],["mouvez","mouvoir",["v"],["v"],"imperative present"],["vaux","valoir",["v"],["v"],"imperative present"],["valons","valoir",["v"],["v"],"imperative present"],["valez","valoir",["v"],["v"],"imperative present"],["veux","vouloir",["v"],["v"],"imperative present"],["veuille","vouloir",["v"],["v"],"imperative present"],["voulons","vouloir",["v"],["v"],"imperative present"],["voulez","vouloir",["v"],["v"],"imperative present"],["veuillez","vouloir",["v"],["v"],"imperative present"],["sois","seoir",["v"],["v"],"imperative present"],["soyons","seoir",["v"],["v"],"imperative present"],["soyez","seoir",["v"],["v"],"imperative present"],["assieds","asseoir",["v"],["v"],"imperative present"],["asseyons","asseoir",["v"],["v"],"imperative present"],["asseyez","asseoir",["v"],["v"],"imperative present"],["ands","andre",["v"],["v"],"imperative present"],["andons","andre",["v"],["v"],"imperative present"],["andez","andre",["v"],["v"],"imperative present"],["ends","endre",["v"],["v"],"imperative present"],["endons","endre",["v"],["v"],"imperative present"],["endez","endre",["v"],["v"],"imperative present"],["onds","ondre",["v"],["v"],"imperative present"],["ondons","ondre",["v"],["v"],"imperative present"],["ondez","ondre",["v"],["v"],"imperative present"],["erds","erdre",["v"],["v"],"imperative present"],["erdons","erdre",["v"],["v"],"imperative present"],["erdez","erdre",["v"],["v"],"imperative present"],["ords","ordre",["v"],["v"],"imperative present"],["ordons","ordre",["v"],["v"],"imperative present"],["ordez","ordre",["v"],["v"],"imperative present"],["prends","prendre",["v"],["v"],"imperative present"],["prenons","prendre",["v"],["v"],"imperative present"],["prenez","prendre",["v"],["v"],"imperative present"],["bats","battre",["v"],["v"],"imperative present"],["battons","battre",["v"],["v"],"imperative present"],["battez","battre",["v"],["v"],"imperative present"],["mets","mettre",["v"],["v"],"imperative present"],["mettons","mettre",["v"],["v"],"imperative present"],["mettez","mettre",["v"],["v"],"imperative present"],["eins","eindre",["v"],["v"],"imperative present"],["eignons","eindre",["v"],["v"],"imperative present"],["eignez","eindre",["v"],["v"],"imperative present"],["oins","oindre",["v"],["v"],"imperative present"],["oignons","oindre",["v"],["v"],"imperative present"],["oignez","oindre",["v"],["v"],"imperative present"],["ains","aindre",["v"],["v"],"imperative present"],["aignons","aindre",["v"],["v"],"imperative present"],["aignez","aindre",["v"],["v"],"imperative present"],["vaincs","vaincre",["v"],["v"],"imperative present"],["vainquons","vaincre",["v"],["v"],"imperative present"],["vainquez","vaincre",["v"],["v"],"imperative present"],["rais","raire",["v"],["v"],"imperative present"],["rayons","raire",["v"],["v"],"imperative present"],["rayez","raire",["v"],["v"],"imperative present"],["fais","faire",["v"],["v"],"imperative present"],["faisons","faire",["v"],["v"],"imperative present"],["faites","faire",["v"],["v"],"imperative present"],["plais","faire",["v"],["v"],"imperative present"],["plaisons","faire",["v"],["v"],"imperative present"],["plaisez","faire",["v"],["v"],"imperative present"],["ais","aître",["v"],["v"],"imperative present"],["aissons","aître",["v"],["v"],"imperative present"],["aissez","aître",["v"],["v"],"imperative present"],["ois","oître",["v"],["v"],"imperative present"],["oissons","oître",["v"],["v"],"imperative present"],["oissez","oître",["v"],["v"],"imperative present"],["crois","croire",["v"],["v"],"imperative present"],["croyons","croire",["v"],["v"],"imperative present"],["croyez","croire",["v"],["v"],"imperative present"],["bois","boire",["v"],["v"],"imperative present"],["buvons","boire",["v"],["v"],"imperative present"],["buvez","boire",["v"],["v"],"imperative present"],["clos","clore",["v"],["v"],"imperative present"],["clus","clure",["v"],["v"],"imperative present"],["cluons","clure",["v"],["v"],"imperative present"],["cluez","clure",["v"],["v"],"imperative present"],["sous","soudre",["v"],["v"],"imperative present"],["solvons","soudre",["v"],["v"],"imperative present"],["solvez","soudre",["v"],["v"],"imperative present"],["couds","coudre",["v"],["v"],"imperative present"],["cousons","coudre",["v"],["v"],"imperative present"],["cousez","coudre",["v"],["v"],"imperative present"],["mouds","moudre",["v"],["v"],"imperative present"],["moulons","moudre",["v"],["v"],"imperative present"],["moulez","moudre",["v"],["v"],"imperative present"],["is","vivre",["v"],["v"],"imperative present"],["ivons","vivre",["v"],["v"],"imperative present"],["ivez","vivre",["v"],["v"],"imperative present"],["lis","lire",["v"],["v"],"imperative present"],["lisons","lire",["v"],["v"],"imperative present"],["lisez","lire",["v"],["v"],"imperative present"],["dis","dire",["v"],["v"],"imperative present"],["disons","dire",["v"],["v"],"imperative present"],["disez","dire",["v"],["v"],"imperative present"],["ris","rire",["v"],["v"],"imperative present"],["rions","rire",["v"],["v"],"imperative present"],["riez","rire",["v"],["v"],"imperative present"],["maudis","maudire",["v"],["v"],"imperative present"],["maudissons","maudire",["v"],["v"],"imperative present"],["maudissez","maudire",["v"],["v"],"imperative present"],["cris","crire",["v"],["v"],"imperative present"],["crivons","crire",["v"],["v"],"imperative present"],["crivez","crire",["v"],["v"],"imperative present"],["fis","fire",["v"],["v"],"imperative present"],["fisons","fire",["v"],["v"],"imperative present"],["fisez","fire",["v"],["v"],"imperative present"],["cis","cire",["v"],["v"],"imperative present"],["cisons","cire",["v"],["v"],"imperative present"],["cisez","cire",["v"],["v"],"imperative present"],["fris","frire",["v"],["v"],"imperative present"],["frisons","frire",["v"],["v"],"imperative present"],["frisez","frire",["v"],["v"],"imperative present"],["uis","uire",["v"],["v"],"imperative present"],["uisons","uire",["v"],["v"],"imperative present"],["uisez","uire",["v"],["v"],"imperative present"],["serais","être",["aux"],["v"],"Conditional"],["serais","être",["aux"],["v"],"Conditional"],["serait","être",["aux"],["v"],"Conditional"],["serions","être",["aux"],["v"],"Conditional"],["seriez","être",["aux"],["v"],"Conditional"],["seraient","être",["aux"],["v"],"Conditional"],["aurais","avoir",["aux"],["v"],"Conditional"],["aurais","avoir",["aux"],["v"],"Conditional"],["aurait","avoir",["aux"],["v"],"Conditional"],["aurions","avoir",["aux"],["v"],"Conditional"],["auriez","avoir",["aux"],["v"],"Conditional"],["auraient","avoir",["aux"],["v"],"Conditional"],["erais","er",["v"],["v"],"Conditional"],["erait","er",["v"],["v"],"Conditional"],["erions","er",["v"],["v"],"Conditional"],["eriez","er",["v"],["v"],"Conditional"],["eraient","er",["v"],["v"],"Conditional"],["cerais","cer",["v"],["v"],"Conditional"],["cerait","cer",["v"],["v"],"Conditional"],["cerions","cer",["v"],["v"],"Conditional"],["ceriez","cer",["v"],["v"],"Conditional"],["ceraient","cer",["v"],["v"],"Conditional"],["gerais","ger",["v"],["v"],"Conditional"],["gerait","ger",["v"],["v"],"Conditional"],["gerions","ger",["v"],["v"],"Conditional"],["geriez","ger",["v"],["v"],"Conditional"],["géraient","ger",["v"],["v"],"Conditional"],["ècerais","ecer",["v"],["v"],"Conditional"],["ècerait","ecer",["v"],["v"],"Conditional"],["ècerions","ecer",["v"],["v"],"Conditional"],["èceriez","ecer",["v"],["v"],"Conditional"],["èceraient","ecer",["v"],["v"],"Conditional"],["èverais","ever",["v"],["v"],"Conditional"],["èverait","ever",["v"],["v"],"Conditional"],["èverions","ever",["v"],["v"],"Conditional"],["èveriez","ever",["v"],["v"],"Conditional"],["èveraient","ever",["v"],["v"],"Conditional"],["ènerais","ener",["v"],["v"],"Conditional"],["ènerait","ener",["v"],["v"],"Conditional"],["ènerions","ener",["v"],["v"],"Conditional"],["èneriez","ener",["v"],["v"],"Conditional"],["èneraient","ener",["v"],["v"],"Conditional"],["èperais","eper",["v"],["v"],"Conditional"],["èperait","eper",["v"],["v"],"Conditional"],["èperions","eper",["v"],["v"],"Conditional"],["èperiez","eper",["v"],["v"],"Conditional"],["èperaient","eper",["v"],["v"],"Conditional"],["èrerais","erer",["v"],["v"],"Conditional"],["èrerait","erer",["v"],["v"],"Conditional"],["èrerions","erer",["v"],["v"],"Conditional"],["èreriez","erer",["v"],["v"],"Conditional"],["èraient","erer",["v"],["v"],"Conditional"],["èmerais","emer",["v"],["v"],"Conditional"],["èmerait","emer",["v"],["v"],"Conditional"],["èmerions","emer",["v"],["v"],"Conditional"],["èmeriez","emer",["v"],["v"],"Conditional"],["èmeraient","emer",["v"],["v"],"Conditional"],["èvrerais","evrer",["v"],["v"],"Conditional"],["èvrerait","evrer",["v"],["v"],"Conditional"],["èvrerions","evrer",["v"],["v"],"Conditional"],["èvreriez","evrer",["v"],["v"],"Conditional"],["èvreraient","evrer",["v"],["v"],"Conditional"],["èserais","eser",["v"],["v"],"Conditional"],["èserait","eser",["v"],["v"],"Conditional"],["èserions","eser",["v"],["v"],"Conditional"],["èseriez","eser",["v"],["v"],"Conditional"],["èseraient","eser",["v"],["v"],"Conditional"],["éderais","éder",["v"],["v"],"Conditional"],["éderait","éder",["v"],["v"],"Conditional"],["éderions","éder",["v"],["v"],"Conditional"],["éderiez","éder",["v"],["v"],"Conditional"],["éderaient","éder",["v"],["v"],"Conditional"],["ébrerais","ébrer",["v"],["v"],"Conditional"],["ébrerait","ébrer",["v"],["v"],"Conditional"],["ébrerions","ébrer",["v"],["v"],"Conditional"],["ébreriez","ébrer",["v"],["v"],"Conditional"],["ébreraient","ébrer",["v"],["v"],"Conditional"],["écerais","écer",["v"],["v"],"Conditional"],["écerait","écer",["v"],["v"],"Conditional"],["écerions","écer",["v"],["v"],"Conditional"],["éceriez","écer",["v"],["v"],"Conditional"],["éceraient","écer",["v"],["v"],"Conditional"],["écherais","écher",["v"],["v"],"Conditional"],["écherait","écher",["v"],["v"],"Conditional"],["écherions","écher",["v"],["v"],"Conditional"],["écheriez","écher",["v"],["v"],"Conditional"],["écheraient","écher",["v"],["v"],"Conditional"],["écrerais","écrer",["v"],["v"],"Conditional"],["écrerait","écrer",["v"],["v"],"Conditional"],["écrerions","écrer",["v"],["v"],"Conditional"],["écreriez","écrer",["v"],["v"],"Conditional"],["écreraient","écrer",["v"],["v"],"Conditional"],["églerais","égler",["v"],["v"],"Conditional"],["églerait","égler",["v"],["v"],"Conditional"],["églerions","égler",["v"],["v"],"Conditional"],["égleriez","égler",["v"],["v"],"Conditional"],["égleraient","égler",["v"],["v"],"Conditional"],["égnerais","égner",["v"],["v"],"Conditional"],["égnerait","égner",["v"],["v"],"Conditional"],["égnerions","égner",["v"],["v"],"Conditional"],["égneriez","égner",["v"],["v"],"Conditional"],["égneraient","égner",["v"],["v"],"Conditional"],["égrerais","égrer",["v"],["v"],"Conditional"],["égrerait","égrer",["v"],["v"],"Conditional"],["égrerions","égrer",["v"],["v"],"Conditional"],["égreriez","égrer",["v"],["v"],"Conditional"],["égréraient","égrer",["v"],["v"],"Conditional"],["éguerais","éguer",["v"],["v"],"Conditional"],["éguerait","éguer",["v"],["v"],"Conditional"],["éguerions","éguer",["v"],["v"],"Conditional"],["égueriez","éguer",["v"],["v"],"Conditional"],["égueraient","éguer",["v"],["v"],"Conditional"],["élerais","éler",["v"],["v"],"Conditional"],["élerait","éler",["v"],["v"],"Conditional"],["élerions","éler",["v"],["v"],"Conditional"],["éleriez","éler",["v"],["v"],"Conditional"],["éleraient","éler",["v"],["v"],"Conditional"],["émerais","émer",["v"],["v"],"Conditional"],["émerait","émer",["v"],["v"],"Conditional"],["émerions","émer",["v"],["v"],"Conditional"],["émeriez","émer",["v"],["v"],"Conditional"],["émeraient","émer",["v"],["v"],"Conditional"],["énerais","éner",["v"],["v"],"Conditional"],["énerait","éner",["v"],["v"],"Conditional"],["énerions","éner",["v"],["v"],"Conditional"],["éneriez","éner",["v"],["v"],"Conditional"],["éneraient","éner",["v"],["v"],"Conditional"],["éperais","éper",["v"],["v"],"Conditional"],["éperait","éper",["v"],["v"],"Conditional"],["éperions","éper",["v"],["v"],"Conditional"],["éperiez","éper",["v"],["v"],"Conditional"],["éperaient","éper",["v"],["v"],"Conditional"],["équerais","équer",["v"],["v"],"Conditional"],["équerait","équer",["v"],["v"],"Conditional"],["équerions","équer",["v"],["v"],"Conditional"],["équeriez","équer",["v"],["v"],"Conditional"],["équeraient","équer",["v"],["v"],"Conditional"],["érerais","érer",["v"],["v"],"Conditional"],["érerait","érer",["v"],["v"],"Conditional"],["érerions","érer",["v"],["v"],"Conditional"],["éreriez","érer",["v"],["v"],"Conditional"],["éraient","érer",["v"],["v"],"Conditional"],["éserais","éser",["v"],["v"],"Conditional"],["éserait","éser",["v"],["v"],"Conditional"],["éserions","éser",["v"],["v"],"Conditional"],["éseriez","éser",["v"],["v"],"Conditional"],["ésaient","éser",["v"],["v"],"Conditional"],["éterais","éter",["v"],["v"],"Conditional"],["éterait","éter",["v"],["v"],"Conditional"],["éterions","éter",["v"],["v"],"Conditional"],["éteriez","éter",["v"],["v"],"Conditional"],["éteraient","éter",["v"],["v"],"Conditional"],["étrerais","étrer",["v"],["v"],"Conditional"],["étrerait","étrer",["v"],["v"],"Conditional"],["étrerions","étrer",["v"],["v"],"Conditional"],["étreriez","étrer",["v"],["v"],"Conditional"],["étraient","étrer",["v"],["v"],"Conditional"],["éyerais","éyer",["v"],["v"],"Conditional"],["éyerait","éyer",["v"],["v"],"Conditional"],["éyerions","éyer",["v"],["v"],"Conditional"],["éyeriez","éyer",["v"],["v"],"Conditional"],["éyeraient","éyer",["v"],["v"],"Conditional"],["ellerais","eler",["v"],["v"],"Conditional"],["ellerait","eler",["v"],["v"],"Conditional"],["ellerions","eler",["v"],["v"],"Conditional"],["elleriez","eler",["v"],["v"],"Conditional"],["elleraient","eler",["v"],["v"],"Conditional"],["etterais","eter",["v"],["v"],"Conditional"],["etterait","eter",["v"],["v"],"Conditional"],["etterions","eter",["v"],["v"],"Conditional"],["etteriez","eter",["v"],["v"],"Conditional"],["etteraient","eter",["v"],["v"],"Conditional"],["èlerais","eler",["v"],["v"],"Conditional"],["èlerait","eler",["v"],["v"],"Conditional"],["èlerions","eler",["v"],["v"],"Conditional"],["èleriez","eler",["v"],["v"],"Conditional"],["èleraient","eler",["v"],["v"],"Conditional"],["èterais","eter",["v"],["v"],"Conditional"],["èterait","eter",["v"],["v"],"Conditional"],["èterions","eter",["v"],["v"],"Conditional"],["èteriez","eter",["v"],["v"],"Conditional"],["èteraient","eter",["v"],["v"],"Conditional"],["égerais","éger",["v"],["v"],"Conditional"],["égerait","éger",["v"],["v"],"Conditional"],["égerions","éger",["v"],["v"],"Conditional"],["égeriez","éger",["v"],["v"],"Conditional"],["égeraient","éger",["v"],["v"],"Conditional"],["ayerais","ayer",["v"],["v"],"Conditional"],["ayerait","ayer",["v"],["v"],"Conditional"],["ayerions","ayer",["v"],["v"],"Conditional"],["ayeriez","ayer",["v"],["v"],"Conditional"],["ayeraient","ayer",["v"],["v"],"Conditional"],["aierais","ayer",["v"],["v"],"Conditional"],["aierait","ayer",["v"],["v"],"Conditional"],["aierions","ayer",["v"],["v"],"Conditional"],["aieriez","ayer",["v"],["v"],"Conditional"],["aieraient","ayer",["v"],["v"],"Conditional"],["oierais","oyer",["v"],["v"],"Conditional"],["oierait","oyer",["v"],["v"],"Conditional"],["oierions","oyer",["v"],["v"],"Conditional"],["oieriez","oyer",["v"],["v"],"Conditional"],["oieraient","oyer",["v"],["v"],"Conditional"],["uyerais","uyer",["v"],["v"],"Conditional"],["uyerait","uyer",["v"],["v"],"Conditional"],["uyerions","uyer",["v"],["v"],"Conditional"],["uyeriez","uyer",["v"],["v"],"Conditional"],["uyeraient","uyer",["v"],["v"],"Conditional"],["irais","ir",["v"],["v"],"Conditional"],["irait","ir",["v"],["v"],"Conditional"],["irions","ir",["v"],["v"],"Conditional"],["iriez","ir",["v"],["v"],"Conditional"],["iraient","ir",["v"],["v"],"Conditional"],["haïrais","haïr",["v"],["v"],"Conditional"],["haïrait","haïr",["v"],["v"],"Conditional"],["haïrions","haïr",["v"],["v"],"Conditional"],["haïriez","haïr",["v"],["v"],"Conditional"],["haïraient","haïr",["v"],["v"],"Conditional"],["irais","aller",["v"],["v"],"Conditional"],["irait","aller",["v"],["v"],"Conditional"],["irions","aller",["v"],["v"],"Conditional"],["iriez","aller",["v"],["v"],"Conditional"],["iraient","aller",["v"],["v"],"Conditional"],["iendrais","enir",["v"],["v"],"Conditional"],["iendrait","enir",["v"],["v"],"Conditional"],["iendrions","enir",["v"],["v"],"Conditional"],["iendriez","enir",["v"],["v"],"Conditional"],["iendraient","enir",["v"],["v"],"Conditional"],["ierais","érir",["v"],["v"],"Conditional"],["ierait","érir",["v"],["v"],"Conditional"],["irions","érir",["v"],["v"],"Conditional"],["iriez","érir",["v"],["v"],"Conditional"],["ièrent","érir",["v"],["v"],"Conditional"],["irais","tir",["v"],["v"],"Conditional"],["irait","tir",["v"],["v"],"Conditional"],["irions","tir",["v"],["v"],"Conditional"],["iriez","tir",["v"],["v"],"Conditional"],["raient","tir",["v"],["v"],"Conditional"],["êtirais","êtir",["v"],["v"],"Conditional"],["êtirait","êtir",["v"],["v"],"Conditional"],["êtirions","êtir",["v"],["v"],"Conditional"],["êtiriez","êtir",["v"],["v"],"Conditional"],["êtiraient","êtir",["v"],["v"],"Conditional"],["vrirais","vrir",["v"],["v"],"Conditional"],["vrirait","vrir",["v"],["v"],"Conditional"],["vririons","vrir",["v"],["v"],"Conditional"],["vririez","vrir",["v"],["v"],"Conditional"],["vriraient","vrir",["v"],["v"],"Conditional"],["frirais","frir",["v"],["v"],"Conditional"],["frirait","frir",["v"],["v"],"Conditional"],["fririons","frir",["v"],["v"],"Conditional"],["fririez","frir",["v"],["v"],"Conditional"],["friraient","frir",["v"],["v"],"Conditional"],["ueillerais","ueillir",["v"],["v"],"Conditional"],["ueillerait","ueillir",["v"],["v"],"Conditional"],["ueillerions","ueillir",["v"],["v"],"Conditional"],["ueilleriez","ueillir",["v"],["v"],"Conditional"],["ueilleraient","ueillir",["v"],["v"],"Conditional"],["aillirais","aillir",["v"],["v"],"Conditional"],["aillirait","aillir",["v"],["v"],"Conditional"],["aillirions","aillir",["v"],["v"],"Conditional"],["ailliriez","aillir",["v"],["v"],"Conditional"],["ailliraient","aillir",["v"],["v"],"Conditional"],["faillirais","faillir",["v"],["v"],"Conditional"],["faillirait","faillir",["v"],["v"],"Conditional"],["faillirions","faillir",["v"],["v"],"Conditional"],["failliriez","faillir",["v"],["v"],"Conditional"],["failliraient","faillir",["v"],["v"],"Conditional"],["bouillirais","bouillir",["v"],["v"],"Conditional"],["bouillirait","bouillir",["v"],["v"],"Conditional"],["bouillirions","bouillir",["v"],["v"],"Conditional"],["bouilliriez","bouillir",["v"],["v"],"Conditional"],["bouilliraient","bouillir",["v"],["v"],"Conditional"],["dormirais","dormir",["v"],["v"],"Conditional"],["dormirait","dormir",["v"],["v"],"Conditional"],["dormirions","dormir",["v"],["v"],"Conditional"],["dormiriez","dormir",["v"],["v"],"Conditional"],["dormiraient","dormir",["v"],["v"],"Conditional"],["courrais","courir",["v"],["v"],"Conditional"],["courrait","courir",["v"],["v"],"Conditional"],["courrions","courir",["v"],["v"],"Conditional"],["courriez","courir",["v"],["v"],"Conditional"],["courraient","courir",["v"],["v"],"Conditional"],["mourrais","mourir",["v"],["v"],"Conditional"],["mourrait","mourir",["v"],["v"],"Conditional"],["mourrions","mourir",["v"],["v"],"Conditional"],["mourriez","mourir",["v"],["v"],"Conditional"],["mourraient","mourir",["v"],["v"],"Conditional"],["servirais","servir",["v"],["v"],"Conditional"],["servirait","servir",["v"],["v"],"Conditional"],["servirions","servir",["v"],["v"],"Conditional"],["serviriez","servir",["v"],["v"],"Conditional"],["serviraient","servir",["v"],["v"],"Conditional"],["fuirais","fuir",["v"],["v"],"Conditional"],["fuirait","fuir",["v"],["v"],"Conditional"],["fuirions","fuir",["v"],["v"],"Conditional"],["fuiriez","fuir",["v"],["v"],"Conditional"],["fuiraient","fuir",["v"],["v"],"Conditional"],["ouïrais","ouïr",["v"],["v"],"Conditional"],["ouïrait","ouïr",["v"],["v"],"Conditional"],["ouïrions","ouïr",["v"],["v"],"Conditional"],["ouïriez","ouïr",["v"],["v"],"Conditional"],["ouïraient","ouïr",["v"],["v"],"Conditional"],["gîrais","gésir",["v"],["v"],"Conditional"],["gîrait","gésir",["v"],["v"],"Conditional"],["gîraient","gésir",["v"],["v"],"Conditional"],["cevrais","cevoir",["v"],["v"],"Conditional"],["cevrait","cevoir",["v"],["v"],"Conditional"],["cevrions","cevoir",["v"],["v"],"Conditional"],["cevriez","cevoir",["v"],["v"],"Conditional"],["cevraient","cevoir",["v"],["v"],"Conditional"],["verrais","voir",["v"],["v"],"Conditional"],["verrait","voir",["v"],["v"],"Conditional"],["verrions","voir",["v"],["v"],"Conditional"],["verriez","voir",["v"],["v"],"Conditional"],["verraient","voir",["v"],["v"],"Conditional"],["saurais","savoir",["v"],["v"],"Conditional"],["saurait","savoir",["v"],["v"],"Conditional"],["saurions","savoir",["v"],["v"],"Conditional"],["sauriez","savoir",["v"],["v"],"Conditional"],["sauraient","savoir",["v"],["v"],"Conditional"],["devrais","devoir",["v"],["v"],"Conditional"],["devrait","devoir",["v"],["v"],"Conditional"],["devrions","devoir",["v"],["v"],"Conditional"],["devriez","devoir",["v"],["v"],"Conditional"],["devraient","devoir",["v"],["v"],"Conditional"],["pourrais","pouvoir",["v"],["v"],"Conditional"],["pourrait","pouvoir",["v"],["v"],"Conditional"],["pourrions","pouvoir",["v"],["v"],"Conditional"],["pourriez","pouvoir",["v"],["v"],"Conditional"],["pourraient","pouvoir",["v"],["v"],"Conditional"],["mouvrais","mouvoir",["v"],["v"],"Conditional"],["mouvrait","mouvoir",["v"],["v"],"Conditional"],["mouvrions","mouvoir",["v"],["v"],"Conditional"],["mouvriez","mouvoir",["v"],["v"],"Conditional"],["mouvraient","mouvoir",["v"],["v"],"Conditional"],["pleuvrait","pleuvoir",["v"],["v"],"Conditional"],["faudrait","falloir",["v"],["v"],"Conditional"],["vaudrais","valoir",["v"],["v"],"Conditional"],["vaudrait","valoir",["v"],["v"],"Conditional"],["vaudrions","valoir",["v"],["v"],"Conditional"],["vaudriez","valoir",["v"],["v"],"Conditional"],["vaudraient","valoir",["v"],["v"],"Conditional"],["voudrais","vouloir",["v"],["v"],"Conditional"],["voudrait","vouloir",["v"],["v"],"Conditional"],["voudrions","vouloir",["v"],["v"],"Conditional"],["voudriez","vouloir",["v"],["v"],"Conditional"],["voudraient","vouloir",["v"],["v"],"Conditional"],["serais","seoir",["v"],["v"],"Conditional"],["serait","seoir",["v"],["v"],"Conditional"],["serions","seoir",["v"],["v"],"Conditional"],["seriez","seoir",["v"],["v"],"Conditional"],["seraient","seoir",["v"],["v"],"Conditional"],["assoirais","asseoir",["v"],["v"],"Conditional"],["assoirait","asseoir",["v"],["v"],"Conditional"],["assoirions","asseoir",["v"],["v"],"Conditional"],["assoiriez","asseoir",["v"],["v"],"Conditional"],["assoiraient","asseoir",["v"],["v"],"Conditional"],["siéraient","seoir",["v"],["v"],"Conditional"],["choirais","choir",["v"],["v"],"Conditional"],["choirait","choir",["v"],["v"],"Conditional"],["choirions","choir",["v"],["v"],"Conditional"],["choiriez","choir",["v"],["v"],"Conditional"],["choiraient","choir",["v"],["v"],"Conditional"],["échoirais","échoir",["v"],["v"],"Conditional"],["échoirait","échoir",["v"],["v"],"Conditional"],["échoirions","échoir",["v"],["v"],"Conditional"],["échoiriez","échoir",["v"],["v"],"Conditional"],["échoiraient","échoir",["v"],["v"],"Conditional"],["andrais","andre",["v"],["v"],"Conditional"],["andrai","andre",["v"],["v"],"Conditional"],["andrions","andre",["v"],["v"],"Conditional"],["andriez","andre",["v"],["v"],"Conditional"],["andraient","andre",["v"],["v"],"Conditional"],["endrais","endre",["v"],["v"],"Conditional"],["endrai","endre",["v"],["v"],"Conditional"],["endrions","endre",["v"],["v"],"Conditional"],["endriez","endre",["v"],["v"],"Conditional"],["endraient","endre",["v"],["v"],"Conditional"],["ondrais","ondre",["v"],["v"],"Conditional"],["ondra","ondre",["v"],["v"],"Conditional"],["ondrions","ondre",["v"],["v"],"Conditional"],["ondriez","ondre",["v"],["v"],"Conditional"],["ondraient","ondre",["v"],["v"],"Conditional"],["erdras","erdre",["v"],["v"],"Conditional"],["erdrait","erdre",["v"],["v"],"Conditional"],["erdrions","erdre",["v"],["v"],"Conditional"],["erdriez","erdre",["v"],["v"],"Conditional"],["erdaient","erdre",["v"],["v"],"Conditional"],["ordrais","ordre",["v"],["v"],"Conditional"],["ordrait","ordre",["v"],["v"],"Conditional"],["ordrions","ordre",["v"],["v"],"Conditional"],["ordriez","ordre",["v"],["v"],"Conditional"],["ordraient","ordre",["v"],["v"],"Conditional"],["prendrais","prendre",["v"],["v"],"Conditional"],["prendrait","prendre",["v"],["v"],"Conditional"],["prendrions","prendre",["v"],["v"],"Conditional"],["prendriez","prendre",["v"],["v"],"Conditional"],["prendraient","prendre",["v"],["v"],"Conditional"],["battrais","battre",["v"],["v"],"Conditional"],["battrait","battre",["v"],["v"],"Conditional"],["battrions","battre",["v"],["v"],"Conditional"],["battriez","battre",["v"],["v"],"Conditional"],["battraient","battre",["v"],["v"],"Conditional"],["mettrais","mettre",["v"],["v"],"Conditional"],["mettrait","mettre",["v"],["v"],"Conditional"],["mettrions","mettre",["v"],["v"],"Conditional"],["mettriez","mettre",["v"],["v"],"Conditional"],["mettraient","mettre",["v"],["v"],"Conditional"],["eindrais","eindre",["v"],["v"],"Conditional"],["eindrait","eindre",["v"],["v"],"Conditional"],["eindrions","eindre",["v"],["v"],"Conditional"],["eindriez","eindre",["v"],["v"],"Conditional"],["eindraient","eindre",["v"],["v"],"Conditional"],["oindrais","oindre",["v"],["v"],"Conditional"],["oindrait","oindre",["v"],["v"],"Conditional"],["oindrions","oindre",["v"],["v"],"Conditional"],["oindriez","oindre",["v"],["v"],"Conditional"],["oindraient","oindre",["v"],["v"],"Conditional"],["aindrais","aindre",["v"],["v"],"Conditional"],["aindrait","aindre",["v"],["v"],"Conditional"],["aindrions","aindre",["v"],["v"],"Conditional"],["aindriez","aindre",["v"],["v"],"Conditional"],["aindraient","aindre",["v"],["v"],"Conditional"],["vaincrais","vaincre",["v"],["v"],"Conditional"],["vaincrait","vaincre",["v"],["v"],"Conditional"],["vaincrions","vaincre",["v"],["v"],"Conditional"],["vaincriez","vaincre",["v"],["v"],"Conditional"],["vaincraient","vaincre",["v"],["v"],"Conditional"],["rairais","raire",["v"],["v"],"Conditional"],["rairait","raire",["v"],["v"],"Conditional"],["rairions","raire",["v"],["v"],"Conditional"],["rairiez","raire",["v"],["v"],"Conditional"],["rairaient","raire",["v"],["v"],"Conditional"],["ferais","faire",["v"],["v"],"Conditional"],["ferait","faire",["v"],["v"],"Conditional"],["ferions","faire",["v"],["v"],"Conditional"],["feriez","faire",["v"],["v"],"Conditional"],["feraient","faire",["v"],["v"],"Conditional"],["plairais","faire",["v"],["v"],"Conditional"],["plairait","faire",["v"],["v"],"Conditional"],["plairions","faire",["v"],["v"],"Conditional"],["plairiez","faire",["v"],["v"],"Conditional"],["plairaient","faire",["v"],["v"],"Conditional"],["naîtrais","naître",["v"],["v"],"Conditional"],["naîtrait","naître",["v"],["v"],"Conditional"],["naîtrions","naître",["v"],["v"],"Conditional"],["naîtriez","naître",["v"],["v"],"Conditional"],["naîtraient","naître",["v"],["v"],"Conditional"],["oîtrais","oître",["v"],["v"],"Conditional"],["oîtrait","oître",["v"],["v"],"Conditional"],["oîtrions","oître",["v"],["v"],"Conditional"],["oîtriez","oître",["v"],["v"],"Conditional"],["oîtraient","oître",["v"],["v"],"Conditional"],["croirais","croire",["v"],["v"],"Conditional"],["croirait","croire",["v"],["v"],"Conditional"],["croirions","croire",["v"],["v"],"Conditional"],["croiriez","croire",["v"],["v"],"Conditional"],["croiraient","croire",["v"],["v"],"Conditional"],["boirais","boire",["v"],["v"],"Conditional"],["boirait","boire",["v"],["v"],"Conditional"],["boirions","boire",["v"],["v"],"Conditional"],["boiriez","boire",["v"],["v"],"Conditional"],["boiraient","boire",["v"],["v"],"Conditional"],["clorais","clore",["v"],["v"],"Conditional"],["clorait","clore",["v"],["v"],"Conditional"],["clorions","clore",["v"],["v"],"Conditional"],["cloriez","clore",["v"],["v"],"Conditional"],["cloraient","clore",["v"],["v"],"Conditional"],["clurais","clure",["v"],["v"],"Conditional"],["clurait","clure",["v"],["v"],"Conditional"],["clurions","clure",["v"],["v"],"Conditional"],["cluriez","clure",["v"],["v"],"Conditional"],["cluraient","clure",["v"],["v"],"Conditional"],["soudrais","soudre",["v"],["v"],"Conditional"],["soudrait","soudre",["v"],["v"],"Conditional"],["soudrions","soudre",["v"],["v"],"Conditional"],["soudriez","soudre",["v"],["v"],"Conditional"],["soudraient","soudre",["v"],["v"],"Conditional"],["coudrais","coudre",["v"],["v"],"Conditional"],["coudrait","coudre",["v"],["v"],"Conditional"],["coudrions","coudre",["v"],["v"],"Conditional"],["coudriez","coudre",["v"],["v"],"Conditional"],["coudraient","coudre",["v"],["v"],"Conditional"],["moudrais","moudre",["v"],["v"],"Conditional"],["moudrait","moudre",["v"],["v"],"Conditional"],["moudrions","moudre",["v"],["v"],"Conditional"],["moudriez","moudre",["v"],["v"],"Conditional"],["moudraient","moudre",["v"],["v"],"Conditional"],["vivrais","vivre",["v"],["v"],"Conditional"],["vivrait","vivre",["v"],["v"],"Conditional"],["vivrions","vivre",["v"],["v"],"Conditional"],["vivriez","vivre",["v"],["v"],"Conditional"],["vivraient","vivre",["v"],["v"],"Conditional"],["lirais","lire",["v"],["v"],"Conditional"],["lirait","lire",["v"],["v"],"Conditional"],["lirions","lire",["v"],["v"],"Conditional"],["liriez","lire",["v"],["v"],"Conditional"],["liraient","lire",["v"],["v"],"Conditional"],["dirais","dire",["v"],["v"],"Conditional"],["dirait","dire",["v"],["v"],"Conditional"],["dirions","dire",["v"],["v"],"Conditional"],["diriez","dire",["v"],["v"],"Conditional"],["diraient","dire",["v"],["v"],"Conditional"],["rirais","rire",["v"],["v"],"Conditional"],["rirait","rire",["v"],["v"],"Conditional"],["ririons","rire",["v"],["v"],"Conditional"],["ririez","rire",["v"],["v"],"Conditional"],["riraient","rire",["v"],["v"],"Conditional"],["maudirais","maudire",["v"],["v"],"Conditional"],["maudirait","maudire",["v"],["v"],"Conditional"],["maudrions","maudire",["v"],["v"],"Conditional"],["maudriez","maudire",["v"],["v"],"Conditional"],["maudiraient","maudire",["v"],["v"],"Conditional"],["crirais","crire",["v"],["v"],"Conditional"],["crirait","crire",["v"],["v"],"Conditional"],["cririons","crire",["v"],["v"],"Conditional"],["cririez","crire",["v"],["v"],"Conditional"],["criraient","crire",["v"],["v"],"Conditional"],["firais","fire",["v"],["v"],"Conditional"],["firait","fire",["v"],["v"],"Conditional"],["firions","fire",["v"],["v"],"Conditional"],["firiez","fire",["v"],["v"],"Conditional"],["firaient","fire",["v"],["v"],"Conditional"],["cirais","cire",["v"],["v"],"Conditional"],["cirait","cire",["v"],["v"],"Conditional"],["cirions","cire",["v"],["v"],"Conditional"],["ciriez","cire",["v"],["v"],"Conditional"],["ciraient","cire",["v"],["v"],"Conditional"],["frirais","frire",["v"],["v"],"Conditional"],["frirait","frire",["v"],["v"],"Conditional"],["fririons","frire",["v"],["v"],"Conditional"],["fririez","frire",["v"],["v"],"Conditional"],["friraient","frire",["v"],["v"],"Conditional"],["cuirais","uire",["v"],["v"],"Conditional"],["cuirait","uire",["v"],["v"],"Conditional"],["cuirions","uire",["v"],["v"],"Conditional"],["cuiriez","uire",["v"],["v"],"Conditional"],["cuiraient","uire",["v"],["v"],"Conditional"],["fus","être",["aux"],["v"],"Preterite"],["fus","être",["aux"],["v"],"Preterite"],["fut","être",["aux"],["v"],"Preterite"],["fûmes","être",["aux"],["v"],"Preterite"],["fûtes","être",["aux"],["v"],"Preterite"],["furent","être",["aux"],["v"],"Preterite"],["eus","avoir",["aux"],["v"],"Preterite"],["eus","avoir",["aux"],["v"],"Preterite"],["eut","avoir",["aux"],["v"],"Preterite"],["eûmes","avoir",["aux"],["v"],"Preterite"],["eûtes","avoir",["aux"],["v"],"Preterite"],["eurent","avoir",["aux"],["v"],"Preterite"],["ai","er",["v"],["v"],"Preterite"],["as","er",["v"],["v"],"Preterite"],["a","er",["v"],["v"],"Preterite"],["âmes","er",["v"],["v"],"Preterite"],["âtes","er",["v"],["v"],"Preterite"],["èrent","er",["v"],["v"],"Preterite"],["çai","cer",["v"],["v"],"Preterite"],["ças","cer",["v"],["v"],"Preterite"],["ça","cer",["v"],["v"],"Preterite"],["çâmes","cer",["v"],["v"],"Preterite"],["çâtes","cer",["v"],["v"],"Preterite"],["çèrent","cer",["v"],["v"],"Preterite"],["geai","ger",["v"],["v"],"Preterite"],["geas","ger",["v"],["v"],"Preterite"],["gea","ger",["v"],["v"],"Preterite"],["geâmes","ger",["v"],["v"],"Preterite"],["geâtes","ger",["v"],["v"],"Preterite"],["gèrent","ger",["v"],["v"],"Preterite"],["èçai","ecer",["v"],["v"],"Preterite"],["èças","ecer",["v"],["v"],"Preterite"],["èça","ecer",["v"],["v"],"Preterite"],["èçâmes","ecer",["v"],["v"],"Preterite"],["èçâtes","ecer",["v"],["v"],"Preterite"],["ècèrent","ecer",["v"],["v"],"Preterite"],["èvai","ever",["v"],["v"],"Preterite"],["èvas","ever",["v"],["v"],"Preterite"],["èva","ever",["v"],["v"],"Preterite"],["èvâmes","ever",["v"],["v"],"Preterite"],["èvâtes","ever",["v"],["v"],"Preterite"],["èvèrent","ever",["v"],["v"],"Preterite"],["ènai","ener",["v"],["v"],"Preterite"],["ènas","ener",["v"],["v"],"Preterite"],["èna","ener",["v"],["v"],"Preterite"],["ènâmes","ener",["v"],["v"],"Preterite"],["ènâtes","ener",["v"],["v"],"Preterite"],["ènèrent","ener",["v"],["v"],"Preterite"],["èpai","eper",["v"],["v"],"Preterite"],["èpas","eper",["v"],["v"],"Preterite"],["èpa","eper",["v"],["v"],"Preterite"],["èpâmes","eper",["v"],["v"],"Preterite"],["èpâtes","eper",["v"],["v"],"Preterite"],["èpèrent","eper",["v"],["v"],"Preterite"],["èrai","erer",["v"],["v"],"Preterite"],["èras","erer",["v"],["v"],"Preterite"],["èra","erer",["v"],["v"],"Preterite"],["èrâmes","erer",["v"],["v"],"Preterite"],["èrâtes","erer",["v"],["v"],"Preterite"],["èrèrent","erer",["v"],["v"],"Preterite"],["èmai","emer",["v"],["v"],"Preterite"],["èmas","emer",["v"],["v"],"Preterite"],["èma","emer",["v"],["v"],"Preterite"],["èmâmes","emer",["v"],["v"],"Preterite"],["èmâtes","emer",["v"],["v"],"Preterite"],["èmèrent","emer",["v"],["v"],"Preterite"],["èvrài","evrer",["v"],["v"],"Preterite"],["èvràs","evrer",["v"],["v"],"Preterite"],["èvrà","evrer",["v"],["v"],"Preterite"],["èvrâmes","evrer",["v"],["v"],"Preterite"],["èvrâtes","evrer",["v"],["v"],"Preterite"],["èvrèrent","evrer",["v"],["v"],"Preterite"],["èsai","eser",["v"],["v"],"Preterite"],["èsas","eser",["v"],["v"],"Preterite"],["èsa","eser",["v"],["v"],"Preterite"],["èsâmes","eser",["v"],["v"],"Preterite"],["èsâtes","eser",["v"],["v"],"Preterite"],["èsèrent","eser",["v"],["v"],"Preterite"],["édai","éder",["v"],["v"],"Preterite"],["édas","éder",["v"],["v"],"Preterite"],["éda","éder",["v"],["v"],"Preterite"],["édâmes","éder",["v"],["v"],"Preterite"],["édâtes","éder",["v"],["v"],"Preterite"],["édèrent","éder",["v"],["v"],"Preterite"],["ébrai","ébrer",["v"],["v"],"Preterite"],["ébras","ébrer",["v"],["v"],"Preterite"],["ébra","ébrer",["v"],["v"],"Preterite"],["ébrâmes","ébrer",["v"],["v"],"Preterite"],["ébrâtes","ébrer",["v"],["v"],"Preterite"],["ébrèrent","ébrer",["v"],["v"],"Preterite"],["échai","écher",["v"],["v"],"Preterite"],["échas","écher",["v"],["v"],"Preterite"],["écha","écher",["v"],["v"],"Preterite"],["échâmes","écher",["v"],["v"],"Preterite"],["échâtes","écher",["v"],["v"],"Preterite"],["échèrent","écher",["v"],["v"],"Preterite"],["aiyai","ayer",["v"],["v"],"Preterite"],["aiyas","ayer",["v"],["v"],"Preterite"],["aiya","ayer",["v"],["v"],"Preterite"],["aiyâmes","ayer",["v"],["v"],"Preterite"],["aiyâtes","ayer",["v"],["v"],"Preterite"],["aiyèrent","ayer",["v"],["v"],"Preterite"],["oiyai","oyer",["v"],["v"],"Preterite"],["oiyas","oyer",["v"],["v"],"Preterite"],["oiya","oyer",["v"],["v"],"Preterite"],["oiyâmes","oyer",["v"],["v"],"Preterite"],["oiyâtes","oyer",["v"],["v"],"Preterite"],["oiyèrent","oyer",["v"],["v"],"Preterite"],["uiyai","uyer",["v"],["v"],"Preterite"],["uiyas","uyer",["v"],["v"],"Preterite"],["uiya","uyer",["v"],["v"],"Preterite"],["uiyâmes","uyer",["v"],["v"],"Preterite"],["uiyâtes","uyer",["v"],["v"],"Preterite"],["uiyèrent","uyer",["v"],["v"],"Preterite"],["is","ir",["v"],["v"],"Preterite"],["it","ir",["v"],["v"],"Preterite"],["îmes","ir",["v"],["v"],"Preterite"],["îtes","ir",["v"],["v"],"Preterite"],["irent","ir",["v"],["v"],"Preterite"],["haïs","haïr",["v"],["v"],"Preterite"],["haït","haïr",["v"],["v"],"Preterite"],["haïmes","haïr",["v"],["v"],"Preterite"],["haïtes","haïr",["v"],["v"],"Preterite"],["haïrent","haïr",["v"],["v"],"Preterite"],["allai","aller",["v"],["v"],"Preterite"],["allas","aller",["v"],["v"],"Preterite"],["alla","aller",["v"],["v"],"Preterite"],["allâmes","aller",["v"],["v"],"Preterite"],["allâtes","aller",["v"],["v"],"Preterite"],["allèrent","aller",["v"],["v"],"Preterite"],["ins","enir",["v"],["v"],"Preterite"],["int","enir",["v"],["v"],"Preterite"],["înmes","enir",["v"],["v"],"Preterite"],["întes","enir",["v"],["v"],"Preterite"],["inrent","enir",["v"],["v"],"Preterite"],["éris","érir",["v"],["v"],"Preterite"],["érit","érir",["v"],["v"],"Preterite"],["érîmes","érir",["v"],["v"],"Preterite"],["érîtes","érir",["v"],["v"],"Preterite"],["érirent","érir",["v"],["v"],"Preterite"],["tis","tir",["v"],["v"],"Preterite"],["tit","tir",["v"],["v"],"Preterite"],["tîmes","tir",["v"],["v"],"Preterite"],["tîtes","tir",["v"],["v"],"Preterite"],["tirent","tir",["v"],["v"],"Preterite"],["êtis","êtir",["v"],["v"],"Preterite"],["êtit","êtir",["v"],["v"],"Preterite"],["êtîmes","êtir",["v"],["v"],"Preterite"],["êtîtes","êtir",["v"],["v"],"Preterite"],["êtirent","êtir",["v"],["v"],"Preterite"],["vris","vrir",["v"],["v"],"Preterite"],["vrit","vrir",["v"],["v"],"Preterite"],["vrîmes","vrir",["v"],["v"],"Preterite"],["vrîtes","vrir",["v"],["v"],"Preterite"],["vrirent","vrir",["v"],["v"],"Preterite"],["fris","frir",["v"],["v"],"Preterite"],["frit","frir",["v"],["v"],"Preterite"],["frîmes","frir",["v"],["v"],"Preterite"],["frîtes","frir",["v"],["v"],"Preterite"],["frirent","frir",["v"],["v"],"Preterite"],["ueillis","ueillir",["v"],["v"],"Preterite"],["ueillit","ueillir",["v"],["v"],"Preterite"],["ueillîmes","ueillir",["v"],["v"],"Preterite"],["ueillîtes","ueillir",["v"],["v"],"Preterite"],["ueillirent","ueillir",["v"],["v"],"Preterite"],["aillis","aillir",["v"],["v"],"Preterite"],["aillit","aillir",["v"],["v"],"Preterite"],["aillîmes","aillir",["v"],["v"],"Preterite"],["aillîtes","aillir",["v"],["v"],"Preterite"],["aillirent","aillir",["v"],["v"],"Preterite"],["bouillis","bouillir",["v"],["v"],"Preterite"],["bouillit","bouillir",["v"],["v"],"Preterite"],["bouillîmes","bouillir",["v"],["v"],"Preterite"],["bouillîtes","bouillir",["v"],["v"],"Preterite"],["bouillirent","bouillir",["v"],["v"],"Preterite"],["dormis","dormir",["v"],["v"],"Preterite"],["dormit","dormir",["v"],["v"],"Preterite"],["dormîmes","dormir",["v"],["v"],"Preterite"],["dormîtes","dormir",["v"],["v"],"Preterite"],["dormirent","dormir",["v"],["v"],"Preterite"],["courus","courir",["v"],["v"],"Preterite"],["courut","courir",["v"],["v"],"Preterite"],["courûmes","courir",["v"],["v"],"Preterite"],["courûtes","courir",["v"],["v"],"Preterite"],["coururent","courir",["v"],["v"],"Preterite"],["mourus","mourir",["v"],["v"],"Preterite"],["mourut","mourir",["v"],["v"],"Preterite"],["mourûmes","mourir",["v"],["v"],"Preterite"],["mourûtes","mourir",["v"],["v"],"Preterite"],["moururent","mourir",["v"],["v"],"Preterite"],["servis","servir",["v"],["v"],"Preterite"],["servit","servir",["v"],["v"],"Preterite"],["servîmes","servir",["v"],["v"],"Preterite"],["servîtes","servir",["v"],["v"],"Preterite"],["servirent","servir",["v"],["v"],"Preterite"],["fuis","fuir",["v"],["v"],"Preterite"],["fuit","fuir",["v"],["v"],"Preterite"],["fuîmes","fuir",["v"],["v"],"Preterite"],["fuîtes","fuir",["v"],["v"],"Preterite"],["fuirent","fuir",["v"],["v"],"Preterite"],["ouïs","ouïr",["v"],["v"],"Preterite"],["ouït","ouïr",["v"],["v"],"Preterite"],["ouïmes","ouïr",["v"],["v"],"Preterite"],["ouïtes","ouïr",["v"],["v"],"Preterite"],["ouïrent","ouïr",["v"],["v"],"Preterite"],["gis","gésir",["v"],["v"],"Preterite"],["git","gésir",["v"],["v"],"Preterite"],["gîmes","gésir",["v"],["v"],"Preterite"],["gîtes","gésir",["v"],["v"],"Preterite"],["gisirent","gésir",["v"],["v"],"Preterite"],["çus","cevoir",["v"],["v"],"Preterite"],["çut","cevoir",["v"],["v"],"Preterite"],["çûmes","cevoir",["v"],["v"],"Preterite"],["çûtes","cevoir",["v"],["v"],"Preterite"],["çurent","cevoir",["v"],["v"],"Preterite"],["vis","voir",["v"],["v"],"Preterite"],["vit","voir",["v"],["v"],"Preterite"],["vîmes","voir",["v"],["v"],"Preterite"],["vîtes","voir",["v"],["v"],"Preterite"],["virent","voir",["v"],["v"],"Preterite"],["sus","savoir",["v"],["v"],"Preterite"],["sut","savoir",["v"],["v"],"Preterite"],["sûmes","savoir",["v"],["v"],"Preterite"],["sûtes","savoir",["v"],["v"],"Preterite"],["surent","savoir",["v"],["v"],"Preterite"],["dus","devoir",["v"],["v"],"Preterite"],["dut","devoir",["v"],["v"],"Preterite"],["dûmes","devoir",["v"],["v"],"Preterite"],["dûtes","devoir",["v"],["v"],"Preterite"],["durent","devoir",["v"],["v"],"Preterite"],["pus","pouvoir",["v"],["v"],"Preterite"],["put","pouvoir",["v"],["v"],"Preterite"],["pûmes","pouvoir",["v"],["v"],"Preterite"],["pûtes","pouvoir",["v"],["v"],"Preterite"],["purent","pouvoir",["v"],["v"],"Preterite"],["mus","mouvoir",["v"],["v"],"Preterite"],["mut","mouvoir",["v"],["v"],"Preterite"],["mûmes","mouvoir",["v"],["v"],"Preterite"],["mûtes","mouvoir",["v"],["v"],"Preterite"],["murent","mouvoir",["v"],["v"],"Preterite"],["plut","pleuvoir",["v"],["v"],"Preterite"],["fallut","falloir",["v"],["v"],"Preterite"],["valus","valoir",["v"],["v"],"Preterite"],["valut","valoir",["v"],["v"],"Preterite"],["valûmes","valoir",["v"],["v"],"Preterite"],["valûtes","valoir",["v"],["v"],"Preterite"],["valurent","valoir",["v"],["v"],"Preterite"],["voulus","vouloir",["v"],["v"],"Preterite"],["voulut","vouloir",["v"],["v"],"Preterite"],["voulûmes","vouloir",["v"],["v"],"Preterite"],["voulûtes","vouloir",["v"],["v"],"Preterite"],["voulurent","vouloir",["v"],["v"],"Preterite"],["seus","seoir",["v"],["v"],"Preterite"],["seut","seoir",["v"],["v"],"Preterite"],["seûmes","seoir",["v"],["v"],"Preterite"],["seûtes","seoir",["v"],["v"],"Preterite"],["seurent","seoir",["v"],["v"],"Preterite"],["assis","asseoir",["v"],["v"],"Preterite"],["assit","asseoir",["v"],["v"],"Preterite"],["assîmes","asseoir",["v"],["v"],"Preterite"],["assîtes","asseoir",["v"],["v"],"Preterite"],["assirent","asseoir",["v"],["v"],"Preterite"],["chus","choir",["v"],["v"],"Preterite"],["chut","choir",["v"],["v"],"Preterite"],["chûmes","choir",["v"],["v"],"Preterite"],["chûtes","choir",["v"],["v"],"Preterite"],["churent","choir",["v"],["v"],"Preterite"],["andis","andre",["v"],["v"],"Preterite"],["andit","andre",["v"],["v"],"Preterite"],["andîmes","andre",["v"],["v"],"Preterite"],["andîtes","andre",["v"],["v"],"Preterite"],["andirent","andre",["v"],["v"],"Preterite"],["endis","endre",["v"],["v"],"Preterite"],["endit","endre",["v"],["v"],"Preterite"],["endîmes","endre",["v"],["v"],"Preterite"],["endîtes","endre",["v"],["v"],"Preterite"],["endirent","endre",["v"],["v"],"Preterite"],["ondis","ondre",["v"],["v"],"Preterite"],["ondit","ondre",["v"],["v"],"Preterite"],["ondîmes","ondre",["v"],["v"],"Preterite"],["ondîtes","ondre",["v"],["v"],"Preterite"],["ondirent","ondre",["v"],["v"],"Preterite"],["erdis","erdre",["v"],["v"],"Preterite"],["erdit","erdre",["v"],["v"],"Preterite"],["erdîmes","erdre",["v"],["v"],"Preterite"],["erdîtes","erdre",["v"],["v"],"Preterite"],["erdirent","erdre",["v"],["v"],"Preterite"],["ordis","ordre",["v"],["v"],"Preterite"],["ordit","ordre",["v"],["v"],"Preterite"],["ordîmes","ordre",["v"],["v"],"Preterite"],["ordîtes","ordre",["v"],["v"],"Preterite"],["ordirent","ordre",["v"],["v"],"Preterite"],["pris","prendre",["v"],["v"],"Preterite"],["prit","prendre",["v"],["v"],"Preterite"],["prîmes","prendre",["v"],["v"],"Preterite"],["prîtes","prendre",["v"],["v"],"Preterite"],["prirent","prendre",["v"],["v"],"Preterite"],["battis","battre",["v"],["v"],"Preterite"],["battit","battre",["v"],["v"],"Preterite"],["battîmes","battre",["v"],["v"],"Preterite"],["battîtes","battre",["v"],["v"],"Preterite"],["battirent","battre",["v"],["v"],"Preterite"],["mis","mettre",["v"],["v"],"Preterite"],["mit","mettre",["v"],["v"],"Preterite"],["mîmes","mettre",["v"],["v"],"Preterite"],["mîtes","mettre",["v"],["v"],"Preterite"],["mirent","mettre",["v"],["v"],"Preterite"],["eignis","eindre",["v"],["v"],"Preterite"],["eignit","eindre",["v"],["v"],"Preterite"],["eignîmes","eindre",["v"],["v"],"Preterite"],["eignîtes","eindre",["v"],["v"],"Preterite"],["eignirent","eindre",["v"],["v"],"Preterite"],["oignis","oindre",["v"],["v"],"Preterite"],["oignit","oindre",["v"],["v"],"Preterite"],["oignîmes","oindre",["v"],["v"],"Preterite"],["oignîtes","oindre",["v"],["v"],"Preterite"],["oignirent","oindre",["v"],["v"],"Preterite"],["aignis","aindre",["v"],["v"],"Preterite"],["aignit","aindre",["v"],["v"],"Preterite"],["aignîmes","aindre",["v"],["v"],"Preterite"],["aignîtes","aindre",["v"],["v"],"Preterite"],["aignirent","aindre",["v"],["v"],"Preterite"],["vainquis","vaincre",["v"],["v"],"Preterite"],["vainquit","vaincre",["v"],["v"],"Preterite"],["vainquîmes","vaincre",["v"],["v"],"Preterite"],["vainquîtes","vaincre",["v"],["v"],"Preterite"],["vainquirent","vaincre",["v"],["v"],"Preterite"],["rais","raire",["v"],["v"],"Preterite"],["rait","raire",["v"],["v"],"Preterite"],["rayons","raire",["v"],["v"],"Preterite"],["rayez","raire",["v"],["v"],"Preterite"],["raient","raire",["v"],["v"],"Preterite"],["fis","faire",["v"],["v"],"Preterite"],["fit","faire",["v"],["v"],"Preterite"],["fîmes","faire",["v"],["v"],"Preterite"],["fîtes","faire",["v"],["v"],"Preterite"],["firent","faire",["v"],["v"],"Preterite"],["plais","plaire",["v"],["v"],"Preterite"],["plut","plaire",["v"],["v"],"Preterite"],["plûmes","plaire",["v"],["v"],"Preterite"],["plûtes","plaire",["v"],["v"],"Preterite"],["plurent","plaire",["v"],["v"],"Preterite"],["naquis","naître",["v"],["v"],"Preterite"],["naquit","naître",["v"],["v"],"Preterite"],["naquîmes","naître",["v"],["v"],"Preterite"],["naquîtes","naître",["v"],["v"],"Preterite"],["naquirent","naître",["v"],["v"],"Preterite"],["perdis","perdre",["v"],["v"],"Preterite"],["perdit","perdre",["v"],["v"],"Preterite"],["perdîmes","perdre",["v"],["v"],"Preterite"],["perdîtes","perdre",["v"],["v"],"Preterite"],["perdirent","perdre",["v"],["v"],"Preterite"],["crus","croire",["v"],["v"],"Preterite"],["crut","croire",["v"],["v"],"Preterite"],["crûmes","croire",["v"],["v"],"Preterite"],["crûtes","croire",["v"],["v"],"Preterite"],["crurent","croire",["v"],["v"],"Preterite"],["bus","boire",["v"],["v"],"Preterite"],["but","boire",["v"],["v"],"Preterite"],["bûmes","boire",["v"],["v"],"Preterite"],["bûtes","boire",["v"],["v"],"Preterite"],["burent","boire",["v"],["v"],"Preterite"],["closis","clore",["v"],["v"],"Preterite"],["closit","clore",["v"],["v"],"Preterite"],["closîmes","clore",["v"],["v"],"Preterite"],["closîtes","clore",["v"],["v"],"Preterite"],["closirent","clore",["v"],["v"],"Preterite"],["clus","clure",["v"],["v"],"Preterite"],["clut","clure",["v"],["v"],"Preterite"],["clûmes","clure",["v"],["v"],"Preterite"],["clûtes","clure",["v"],["v"],"Preterite"],["clurent","clure",["v"],["v"],"Preterite"],["sous","soudre",["v"],["v"],"Preterite"],["sout","soudre",["v"],["v"],"Preterite"],["solvons","soudre",["v"],["v"],"Preterite"],["solvez","soudre",["v"],["v"],"Preterite"],["solvent","soudre",["v"],["v"],"Preterite"],["couds","coudre",["v"],["v"],"Preterite"],["coud","coudre",["v"],["v"],"Preterite"],["cousîmes","coudre",["v"],["v"],"Preterite"],["cousîtes","coudre",["v"],["v"],"Preterite"],["cousirent","coudre",["v"],["v"],"Preterite"],["mouds","moudre",["v"],["v"],"Preterite"],["moud","moudre",["v"],["v"],"Preterite"],["moulîmes","moudre",["v"],["v"],"Preterite"],["moulîtes","moudre",["v"],["v"],"Preterite"],["moulurent","moudre",["v"],["v"],"Preterite"],["vis","vivre",["v"],["v"],"Preterite"],["vit","vivre",["v"],["v"],"Preterite"],["vîmes","vivre",["v"],["v"],"Preterite"],["vîtes","vivre",["v"],["v"],"Preterite"],["virent","vivre",["v"],["v"],"Preterite"],["lis","lire",["v"],["v"],"Preterite"],["lit","lire",["v"],["v"],"Preterite"],["lîmes","lire",["v"],["v"],"Preterite"],["lîtes","lire",["v"],["v"],"Preterite"],["lurent","lire",["v"],["v"],"Preterite"],["dis","dire",["v"],["v"],"Preterite"],["dit","dire",["v"],["v"],"Preterite"],["dîmes","dire",["v"],["v"],"Preterite"],["dîtes","dire",["v"],["v"],"Preterite"],["dirent","dire",["v"],["v"],"Preterite"],["ris","rire",["v"],["v"],"Preterite"],["rit","rire",["v"],["v"],"Preterite"],["rîmes","rire",["v"],["v"],"Preterite"],["rîtes","rire",["v"],["v"],"Preterite"],["rirent","rire",["v"],["v"],"Preterite"],["maudis","maudire",["v"],["v"],"Preterite"],["maudit","maudire",["v"],["v"],"Preterite"],["maudîmes","maudire",["v"],["v"],"Preterite"],["maudîtes","maudire",["v"],["v"],"Preterite"],["maudissent","maudire",["v"],["v"],"Preterite"],["cris","crire",["v"],["v"],"Preterite"],["crit","crire",["v"],["v"],"Preterite"],["crîmes","crire",["v"],["v"],"Preterite"],["crîtes","crire",["v"],["v"],"Preterite"],["crirent","crire",["v"],["v"],"Preterite"],["fis","fire",["v"],["v"],"Preterite"],["fit","fire",["v"],["v"],"Preterite"],["fîmes","fire",["v"],["v"],"Preterite"],["fîtes","fire",["v"],["v"],"Preterite"],["fîrent","fire",["v"],["v"],"Preterite"],["cis","cire",["v"],["v"],"Preterite"],["cit","cire",["v"],["v"],"Preterite"],["cîmes","cire",["v"],["v"],"Preterite"],["cîtes","cire",["v"],["v"],"Preterite"],["cîrent","cire",["v"],["v"],"Preterite"],["fris","frire",["v"],["v"],"Preterite"],["frit","frire",["v"],["v"],"Preterite"],["frîmes","frire",["v"],["v"],"Preterite"],["frîtes","frire",["v"],["v"],"Preterite"],["frîrent","frire",["v"],["v"],"Preterite"],["uis","uire",["v"],["v"],"Preterite"],["uit","uire",["v"],["v"],"Preterite"],["ûmes","uire",["v"],["v"],"Preterite"],["ûtes","uire",["v"],["v"],"Preterite"],["urent","uire",["v"],["v"],"Preterite"],["s","",["n"],["n"],"plural"],["aux","au",["n"],["n"],"plural"],["eaux","eau",["n"],["n"],"plural"],["eux","eu",["n"],["n"],"plural"],["oux","ou",["n"],["n"],"plural"],["aux","al",["n"],["n"],"plural"],["aux","ail",["n"],["n"],"plural"],["ant","er",["v"],["v"],"present participle"],["geant","ger",["v"],["v"],"present participle"],["issant","ir",["v"],["v"],"present participle"],["ant","ir",["v"],["v"],"present participle"],["ant","re",["v"],["v"],"present participle"],["ant","oir",["v"],["v"],"present participle"],["ignant","indre",["v"],["v"],"present participle"],["solvant","soudre",["v"],["v"],"present participle"],["ant","dre",["v"],["v"],"present participle"],["rait","raire",["v"],["v"],"present participle"],["ant","oir",["v"],["v"],"present participle"],["ayant","avoir",["v"],["v"],"present participle"],["étant","être",["v"],["v"],"present participle"],["faisant","faire",["v"],["v"],"present participle"],["disant","dire",["v"],["v"],"present participle"],["lisant","lire",["v"],["v"],"present participle"],["voyant","voir",["v"],["v"],"present participle"],["sachant","savoir",["v"],["v"],"present participle"],["e","er",["v"],["v"],"present subjunctive"],["es","er",["v"],["v"],"present subjunctive"],["e","er",["v"],["v"],"present subjunctive"],["ions","er",["v"],["v"],"present subjunctive"],["iez","er",["v"],["v"],"present subjunctive"],["ent","er",["v"],["v"],"present subjunctive"],["sse","ir",["v"],["v"],"present subjunctive"],["sses","ir",["v"],["v"],"present subjunctive"],["t","ir",["v"],["v"],"present subjunctive"],["ssions","ir",["v"],["v"],"present subjunctive"],["ssiez","ir",["v"],["v"],"present subjunctive"],["ssent","ir",["v"],["v"],"present subjunctive"],["sois","être",["v"],["v"],"present subjunctive"],["sois","être",["v"],["v"],"present subjunctive"],["soit","être",["v"],["v"],"present subjunctive"],["soyons","être",["v"],["v"],"present subjunctive"],["soyez","être",["v"],["v"],"present subjunctive"],["soient","être",["v"],["v"],"present subjunctive"],["aie","avoir",["v"],["v"],"present subjunctive"],["aies","avoir",["v"],["v"],"present subjunctive"],["ait","avoir",["v"],["v"],"present subjunctive"],["ayons","avoir",["v"],["v"],"present subjunctive"],["ayez","avoir",["v"],["v"],"present subjunctive"],["aient","avoir",["v"],["v"],"present subjunctive"],["fasse","faire",["v"],["v"],"present subjunctive"],["fasses","faire",["v"],["v"],"present subjunctive"],["fasse","faire",["v"],["v"],"present subjunctive"],["fassions","faire",["v"],["v"],"present subjunctive"],["fassiez","faire",["v"],["v"],"present subjunctive"],["fassent","faire",["v"],["v"],"present subjunctive"],["aille","aller",["v"],["v"],"present subjunctive"],["ailles","aller",["v"],["v"],"present subjunctive"],["aille","aller",["v"],["v"],"present subjunctive"],["allions","aller",["v"],["v"],"present subjunctive"],["alliez","aller",["v"],["v"],"present subjunctive"],["aillent","aller",["v"],["v"],"present subjunctive"],["sache","savoir",["v"],["v"],"present subjunctive"],["saches","savoir",["v"],["v"],"present subjunctive"],["sache","savoir",["v"],["v"],"present subjunctive"],["sachions","savoir",["v"],["v"],"present subjunctive"],["sachiez","savoir",["v"],["v"],"present subjunctive"],["sachent","savoir",["v"],["v"],"present subjunctive"],["puisse","pouvoir",["v"],["v"],"present subjunctive"],["puisses","pouvoir",["v"],["v"],"present subjunctive"],["puisse","pouvoir",["v"],["v"],"present subjunctive"],["puissions","pouvoir",["v"],["v"],"present subjunctive"],["puissiez","pouvoir",["v"],["v"],"present subjunctive"],["puissent","pouvoir",["v"],["v"],"present subjunctive"],["sse","re",["v"],["v"],"present subjunctive"],["sses","re",["v"],["v"],"present subjunctive"],["t","re",["v"],["v"],"present subjunctive"],["ssions","re",["v"],["v"],"present subjunctive"],["ssiez","re",["v"],["v"],"present subjunctive"],["ssent","re",["v"],["v"],"present subjunctive"],["ienne","ir",["v"],["v"],"present subjunctive"],["iennes","ir",["v"],["v"],"present subjunctive"],["ienne","ir",["v"],["v"],"present subjunctive"],["nions","ir",["v"],["v"],"present subjunctive"],["niez","ir",["v"],["v"],"present subjunctive"],["iennent","ir",["v"],["v"],"present subjunctive"],["sse","indre",["v"],["v"],"present subjunctive"],["sses","indre",["v"],["v"],"present subjunctive"],["t","indre",["v"],["v"],"present subjunctive"],["nions","indre",["v"],["v"],"present subjunctive"],["niez","indre",["v"],["v"],"present subjunctive"],["ngent","indre",["v"],["v"],"present subjunctive"],["sse","oudre",["v"],["v"],"present subjunctive"],["sses","oudre",["v"],["v"],"present subjunctive"],["t","oudre",["v"],["v"],"present subjunctive"],["dions","oudre",["v"],["v"],"present subjunctive"],["diez","oudre",["v"],["v"],"present subjunctive"],["dent","oudre",["v"],["v"],"present subjunctive"],["se","uire",["v"],["v"],"present subjunctive"],["ses","uire",["v"],["v"],"present subjunctive"],["t","uire",["v"],["v"],"present subjunctive"],["sions","uire",["v"],["v"],"present subjunctive"],["siez","uire",["v"],["v"],"present subjunctive"],["sent","uire",["v"],["v"],"present subjunctive"],["sse","ir",["v"],["v"],"present subjunctive"],["sses","ir",["v"],["v"],"present subjunctive"],["t","ir",["v"],["v"],"present subjunctive"],["ssions","ir",["v"],["v"],"present subjunctive"],["ssiez","ir",["v"],["v"],"present subjunctive"],["ssent","ir",["v"],["v"],"present subjunctive"]];
+const HOSHITAN_FRENCH_YOMITAN_SUFFIX_RULES = [["suis","être",["aux"],["v"],"present indicative"],["es","être",["aux"],["v"],"present indicative"],["est","être",["aux"],["v"],"present indicative"],["sommes","être",["aux"],["v"],"present indicative"],["êtes","être",["aux"],["v"],"present indicative"],["sont","être",["aux"],["v"],"present indicative"],["ai","avoir",["aux"],["v"],"present indicative"],["as","avoir",["aux"],["v"],"present indicative"],["a","avoir",["aux"],["v"],"present indicative"],["avons","avoir",["aux"],["v"],"present indicative"],["avez","avoir",["aux"],["v"],"present indicative"],["ont","avoir",["aux"],["v"],"present indicative"],["e","er",["v"],["v"],"present indicative"],["es","er",["v"],["v"],"present indicative"],["ons","er",["v"],["v"],"present indicative"],["ez","er",["v"],["v"],"present indicative"],["ent","er",["v"],["v"],"present indicative"],["çons","cer",["v"],["v"],"present indicative"],["geons","ger",["v"],["v"],"present indicative"],["èce","ecer",["v"],["v"],"present indicative"],["ève","ever",["v"],["v"],"present indicative"],["ène","ener",["v"],["v"],"present indicative"],["èpe","eper",["v"],["v"],"present indicative"],["ère","erer",["v"],["v"],"present indicative"],["ème","emer",["v"],["v"],"present indicative"],["èvre","evrer",["v"],["v"],"present indicative"],["èse","eser",["v"],["v"],"present indicative"],["ède","éder",["v"],["v"],"present indicative"],["èdes","éder",["v"],["v"],"present indicative"],["èdent","éder",["v"],["v"],"present indicative"],["èbre","ébrer",["v"],["v"],"present indicative"],["èbres","ébrer",["v"],["v"],"present indicative"],["èbrent","ébrer",["v"],["v"],"present indicative"],["èce","écer",["v"],["v"],"present indicative"],["èces","écer",["v"],["v"],"present indicative"],["ècent","écer",["v"],["v"],"present indicative"],["èche","écher",["v"],["v"],"present indicative"],["èches","écher",["v"],["v"],"present indicative"],["èchent","écher",["v"],["v"],"present indicative"],["ècre","écrer",["v"],["v"],"present indicative"],["ècres","écrer",["v"],["v"],"present indicative"],["ècrent","écrer",["v"],["v"],"present indicative"],["ègle","égler",["v"],["v"],"present indicative"],["ègles","égler",["v"],["v"],"present indicative"],["èglent","égler",["v"],["v"],"present indicative"],["ègne","égner",["v"],["v"],"present indicative"],["ègnes","égner",["v"],["v"],"present indicative"],["ègnent","égner",["v"],["v"],"present indicative"],["ègre","égrer",["v"],["v"],"present indicative"],["ègres","égrer",["v"],["v"],"present indicative"],["ègrent","égrer",["v"],["v"],"present indicative"],["ègue","éguer",["v"],["v"],"present indicative"],["ègues","éguer",["v"],["v"],"present indicative"],["èguent","éguer",["v"],["v"],"present indicative"],["èle","éler",["v"],["v"],"present indicative"],["èles","éler",["v"],["v"],"present indicative"],["èlent","éler",["v"],["v"],"present indicative"],["ème","émer",["v"],["v"],"present indicative"],["èmes","émer",["v"],["v"],"present indicative"],["èment","émer",["v"],["v"],"present indicative"],["ène","éner",["v"],["v"],"present indicative"],["ènes","éner",["v"],["v"],"present indicative"],["ènent","éner",["v"],["v"],"present indicative"],["èpe","éper",["v"],["v"],"present indicative"],["èpes","éper",["v"],["v"],"present indicative"],["èpent","éper",["v"],["v"],"present indicative"],["èque","équer",["v"],["v"],"present indicative"],["èques","équer",["v"],["v"],"present indicative"],["èquent","équer",["v"],["v"],"present indicative"],["ère","érer",["v"],["v"],"present indicative"],["ères","érer",["v"],["v"],"present indicative"],["èrent","érer",["v"],["v"],"present indicative"],["èse","éser",["v"],["v"],"present indicative"],["èses","éser",["v"],["v"],"present indicative"],["èsent","éser",["v"],["v"],"present indicative"],["ète","éter",["v"],["v"],"present indicative"],["ètes","éter",["v"],["v"],"present indicative"],["ètent","éter",["v"],["v"],"present indicative"],["ètre","étrer",["v"],["v"],"present indicative"],["ètres","étrer",["v"],["v"],"present indicative"],["ètrent","étrer",["v"],["v"],"present indicative"],["èye","éyer",["v"],["v"],"present indicative"],["èyes","éyer",["v"],["v"],"present indicative"],["èyent","éyer",["v"],["v"],"present indicative"],["elle","eler",["v"],["v"],"present indicative"],["elles","eler",["v"],["v"],"present indicative"],["ellent","eler",["v"],["v"],"present indicative"],["ette","eter",["v"],["v"],"present indicative"],["ettes","eter",["v"],["v"],"present indicative"],["ettent","eter",["v"],["v"],"present indicative"],["èle","eler",["v"],["v"],"present indicative"],["èles","eler",["v"],["v"],"present indicative"],["èlent","eler",["v"],["v"],"present indicative"],["ète","eter",["v"],["v"],"present indicative"],["ètes","eter",["v"],["v"],"present indicative"],["ètent","eter",["v"],["v"],"present indicative"],["ège","éger",["v"],["v"],"present indicative"],["èges","éger",["v"],["v"],"present indicative"],["ègent","éger",["v"],["v"],"present indicative"],["aie","ayer",["v"],["v"],"present indicative"],["aies","ayer",["v"],["v"],"present indicative"],["aient","ayer",["v"],["v"],"present indicative"],["oie","oyer",["v"],["v"],"present indicative"],["oies","oyer",["v"],["v"],"present indicative"],["oient","oyer",["v"],["v"],"present indicative"],["uie","uyer",["v"],["v"],"present indicative"],["uies","uyer",["v"],["v"],"present indicative"],["uient","uyer",["v"],["v"],"present indicative"],["is","ir",["v"],["v"],"present indicative"],["it","ir",["v"],["v"],"present indicative"],["issons","ir",["v"],["v"],"present indicative"],["issez","ir",["v"],["v"],"present indicative"],["issent","ir",["v"],["v"],"present indicative"],["hais","haïr",["v"],["v"],"present indicative"],["hait","haïr",["v"],["v"],"present indicative"],["vais","aller",["v"],["v"],"present indicative"],["vas","aller",["v"],["v"],"present indicative"],["va","aller",["v"],["v"],"present indicative"],["vont","aller",["v"],["v"],"present indicative"],["iens","enir",["v"],["v"],"present indicative"],["ient","enir",["v"],["v"],"present indicative"],["enons","enir",["v"],["v"],"present indicative"],["enez","enir",["v"],["v"],"present indicative"],["iennent","enir",["v"],["v"],"present indicative"],["iers","érir",["v"],["v"],"present indicative"],["iert","érir",["v"],["v"],"present indicative"],["érons","érir",["v"],["v"],"present indicative"],["érez","érir",["v"],["v"],"present indicative"],["ièrent","érir",["v"],["v"],"present indicative"],["s","tir",["v"],["v"],"present indicative"],["t","tir",["v"],["v"],"present indicative"],["tons","tir",["v"],["v"],"present indicative"],["tez","tir",["v"],["v"],"present indicative"],["tent","tir",["v"],["v"],"present indicative"],["êts","êtir",["v"],["v"],"present indicative"],["êt","êtir",["v"],["v"],"present indicative"],["êtons","êtir",["v"],["v"],"present indicative"],["êtez","êtir",["v"],["v"],"present indicative"],["êtent","êtir",["v"],["v"],"present indicative"],["vre","vrir",["v"],["v"],"present indicative"],["vres","vrir",["v"],["v"],"present indicative"],["vrons","vrir",["v"],["v"],"present indicative"],["vrez","vrir",["v"],["v"],"present indicative"],["vrent","vrir",["v"],["v"],"present indicative"],["fre","frir",["v"],["v"],"present indicative"],["fres","frir",["v"],["v"],"present indicative"],["frons","frir",["v"],["v"],"present indicative"],["frez","frir",["v"],["v"],"present indicative"],["frent","frir",["v"],["v"],"present indicative"],["ueille","ueillir",["v"],["v"],"present indicative"],["ueilles","ueillir",["v"],["v"],"present indicative"],["ueillons","ueillir",["v"],["v"],"present indicative"],["ueillez","ueillir",["v"],["v"],"present indicative"],["ueillent","ueillir",["v"],["v"],"present indicative"],["aille","aillir",["v"],["v"],"present indicative"],["ailles","aillir",["v"],["v"],"present indicative"],["aillons","aillir",["v"],["v"],"present indicative"],["aillez","aillir",["v"],["v"],"present indicative"],["aillent","aillir",["v"],["v"],"present indicative"],["faux","aillir",["v"],["v"],"present indicative"],["faut","aillir",["v"],["v"],"present indicative"],["bous","bouillir",["v"],["v"],"present indicative"],["bout","bouillir",["v"],["v"],"present indicative"],["bouillons","bouillir",["v"],["v"],"present indicative"],["bouillez","bouillir",["v"],["v"],"present indicative"],["bouillent","bouillir",["v"],["v"],"present indicative"],["dors","dormir",["v"],["v"],"present indicative"],["dort","dormir",["v"],["v"],"present indicative"],["dormons","dormir",["v"],["v"],"present indicative"],["dormez","dormir",["v"],["v"],"present indicative"],["dorment","dormir",["v"],["v"],"present indicative"],["cours","dormir",["v"],["v"],"present indicative"],["court","dormir",["v"],["v"],"present indicative"],["courons","dormir",["v"],["v"],"present indicative"],["courez","dormir",["v"],["v"],"present indicative"],["courent","dormir",["v"],["v"],"present indicative"],["meurs","mourir",["v"],["v"],"present indicative"],["meurt","mourir",["v"],["v"],"present indicative"],["mourons","mourir",["v"],["v"],"present indicative"],["mourez","mourir",["v"],["v"],"present indicative"],["meurent","mourir",["v"],["v"],"present indicative"],["sers","servir",["v"],["v"],"present indicative"],["sert","servir",["v"],["v"],"present indicative"],["servons","servir",["v"],["v"],"present indicative"],["servez","servir",["v"],["v"],"present indicative"],["servent","servir",["v"],["v"],"present indicative"],["fuis","fuir",["v"],["v"],"present indicative"],["fuit","fuir",["v"],["v"],"present indicative"],["fuyons","fuir",["v"],["v"],"present indicative"],["fuyez","fuir",["v"],["v"],"present indicative"],["fuient","fuir",["v"],["v"],"present indicative"],["ois","ouïr",["v"],["v"],"present indicative"],["oit","ouïr",["v"],["v"],"present indicative"],["oyons","ouïr",["v"],["v"],"present indicative"],["oyez","ouïr",["v"],["v"],"present indicative"],["oient","ouïr",["v"],["v"],"present indicative"],["gis","gésir",["v"],["v"],"present indicative"],["git","gésir",["v"],["v"],"present indicative"],["gisons","gésir",["v"],["v"],"present indicative"],["gisez","gésir",["v"],["v"],"present indicative"],["gisent","gésir",["v"],["v"],"present indicative"],["çois","cevoir",["v"],["v"],"present indicative"],["çoit","cevoir",["v"],["v"],"present indicative"],["cevons","cevoir",["v"],["v"],"present indicative"],["cevez","cevoir",["v"],["v"],"present indicative"],["çoivent","cevoir",["v"],["v"],"present indicative"],["vois","voir",["v"],["v"],"present indicative"],["voit","voir",["v"],["v"],"present indicative"],["voyons","voir",["v"],["v"],"present indicative"],["voyez","voir",["v"],["v"],"present indicative"],["voient","voir",["v"],["v"],"present indicative"],["sais","savoir",["v"],["v"],"present indicative"],["sait","savoir",["v"],["v"],"present indicative"],["savons","savoir",["v"],["v"],"present indicative"],["savez","savoir",["v"],["v"],"present indicative"],["savent","savoir",["v"],["v"],"present indicative"],["dois","devoir",["v"],["v"],"present indicative"],["doit","devoir",["v"],["v"],"present indicative"],["devons","devoir",["v"],["v"],"present indicative"],["devez","devoir",["v"],["v"],"present indicative"],["doivent","devoir",["v"],["v"],"present indicative"],["puis","pouvoir",["v"],["v"],"present indicative"],["peux","pouvoir",["v"],["v"],"present indicative"],["peut","pouvoir",["v"],["v"],"present indicative"],["pouvons","pouvoir",["v"],["v"],"present indicative"],["pouvez","pouvoir",["v"],["v"],"present indicative"],["peuvent","pouvoir",["v"],["v"],"present indicative"],["meus","mouvoir",["v"],["v"],"present indicative"],["meut","mouvoir",["v"],["v"],"present indicative"],["mouvons","mouvoir",["v"],["v"],"present indicative"],["mouvez","mouvoir",["v"],["v"],"present indicative"],["meuvent","mouvoir",["v"],["v"],"present indicative"],["pleut","pleuvoir",["v"],["v"],"present indicative"],["faut","falloir",["v"],["v"],"present indicative"],["vaux","valoir",["v"],["v"],"present indicative"],["vaut","valoir",["v"],["v"],"present indicative"],["valons","valoir",["v"],["v"],"present indicative"],["valez","valoir",["v"],["v"],"present indicative"],["valent","valoir",["v"],["v"],"present indicative"],["veux","vouloir",["v"],["v"],"present indicative"],["veut","vouloir",["v"],["v"],"present indicative"],["voulons","vouloir",["v"],["v"],"present indicative"],["voulez","vouloir",["v"],["v"],"present indicative"],["veulent","vouloir",["v"],["v"],"present indicative"],["sois","seoir",["v"],["v"],"present indicative"],["soit","seoir",["v"],["v"],"present indicative"],["soyons","seoir",["v"],["v"],"present indicative"],["soyez","seoir",["v"],["v"],"present indicative"],["soient","seoir",["v"],["v"],"present indicative"],["assied","asseoir",["v"],["v"],"present indicative"],["assieds","asseoir",["v"],["v"],"present indicative"],["asseyons","asseoir",["v"],["v"],"present indicative"],["asseyez","asseoir",["v"],["v"],"present indicative"],["asseyent","asseoir",["v"],["v"],"present indicative"],["sied","seoir",["v"],["v"],"present indicative"],["chois","choir",["v"],["v"],"present indicative"],["choit","choir",["v"],["v"],"present indicative"],["choyons","choir",["v"],["v"],"present indicative"],["choyez","choir",["v"],["v"],"present indicative"],["choient","choir",["v"],["v"],"present indicative"],["échoit","échoir",["v"],["v"],"present indicative"],["échet","échoir",["v"],["v"],"present indicative"],["échoient","échoir",["v"],["v"],"present indicative"],["échéent","échoir",["v"],["v"],"present indicative"],["and","andre",["v"],["v"],"present indicative"],["ands","andre",["v"],["v"],"present indicative"],["andons","andre",["v"],["v"],"present indicative"],["andez","andre",["v"],["v"],"present indicative"],["andent","andre",["v"],["v"],"present indicative"],["end","endre",["v"],["v"],"present indicative"],["ends","endre",["v"],["v"],"present indicative"],["endons","endre",["v"],["v"],"present indicative"],["endez","endre",["v"],["v"],"present indicative"],["endent","endre",["v"],["v"],"present indicative"],["ond","ondre",["v"],["v"],"present indicative"],["onds","ondre",["v"],["v"],"present indicative"],["ondons","ondre",["v"],["v"],"present indicative"],["ondez","ondre",["v"],["v"],"present indicative"],["ondent","ondre",["v"],["v"],"present indicative"],["erd","erdre",["v"],["v"],"present indicative"],["erds","erdre",["v"],["v"],"present indicative"],["erdons","erdre",["v"],["v"],"present indicative"],["erdez","erdre",["v"],["v"],"present indicative"],["erdent","erdre",["v"],["v"],"present indicative"],["ord","ordre",["v"],["v"],"present indicative"],["ords","ordre",["v"],["v"],"present indicative"],["ordons","ordre",["v"],["v"],"present indicative"],["ordez","ordre",["v"],["v"],"present indicative"],["ordent","ordre",["v"],["v"],"present indicative"],["prenons","prendre",["v"],["v"],"present indicative"],["prenez","prendre",["v"],["v"],"present indicative"],["prenent","prendre",["v"],["v"],"present indicative"],["bats","battre",["v"],["v"],"present indicative"],["bat","battre",["v"],["v"],"present indicative"],["battons","battre",["v"],["v"],"present indicative"],["battez","battre",["v"],["v"],"present indicative"],["battent","battre",["v"],["v"],"present indicative"],["mets","mettre",["v"],["v"],"present indicative"],["met","mettre",["v"],["v"],"present indicative"],["mettons","mettre",["v"],["v"],"present indicative"],["mettez","mettre",["v"],["v"],"present indicative"],["mettent","mettre",["v"],["v"],"present indicative"],["eins","eindre",["v"],["v"],"present indicative"],["eint","eindre",["v"],["v"],"present indicative"],["eignons","eindre",["v"],["v"],"present indicative"],["eignez","eindre",["v"],["v"],"present indicative"],["eignent","eindre",["v"],["v"],"present indicative"],["oins","oindre",["v"],["v"],"present indicative"],["oint","oindre",["v"],["v"],"present indicative"],["oignons","oindre",["v"],["v"],"present indicative"],["oignez","oindre",["v"],["v"],"present indicative"],["oignent","oindre",["v"],["v"],"present indicative"],["ains","aindre",["v"],["v"],"present indicative"],["aint","aindre",["v"],["v"],"present indicative"],["aignons","aindre",["v"],["v"],"present indicative"],["aignez","aindre",["v"],["v"],"present indicative"],["aignent","aindre",["v"],["v"],"present indicative"],["vaincs","vaincre",["v"],["v"],"present indicative"],["vainc","vaincre",["v"],["v"],"present indicative"],["vainquons","vaincre",["v"],["v"],"present indicative"],["vainquez","vaincre",["v"],["v"],"present indicative"],["vainquent","vaincre",["v"],["v"],"present indicative"],["rais","raire",["v"],["v"],"present indicative"],["rait","raire",["v"],["v"],"present indicative"],["rayons","raire",["v"],["v"],"present indicative"],["rayez","raire",["v"],["v"],"present indicative"],["raient","raire",["v"],["v"],"present indicative"],["fais","faire",["v"],["v"],"present indicative"],["fait","faire",["v"],["v"],"present indicative"],["faisons","faire",["v"],["v"],"present indicative"],["faites","faire",["v"],["v"],"present indicative"],["font","faire",["v"],["v"],"present indicative"],["plais","faire",["v"],["v"],"present indicative"],["plait","faire",["v"],["v"],"present indicative"],["plaisons","faire",["v"],["v"],"present indicative"],["plaisez","faire",["v"],["v"],"present indicative"],["plaisent","faire",["v"],["v"],"present indicative"],["ais","aître",["v"],["v"],"present indicative"],["aît","aître",["v"],["v"],"present indicative"],["ait","aître",["v"],["v"],"present indicative"],["aissons","aître",["v"],["v"],"present indicative"],["aissez","aître",["v"],["v"],"present indicative"],["aissent","aître",["v"],["v"],"present indicative"],["ois","oître",["v"],["v"],"present indicative"],["oît","oître",["v"],["v"],"present indicative"],["oit","oître",["v"],["v"],"present indicative"],["oissons","oître",["v"],["v"],"present indicative"],["oissez","oître",["v"],["v"],"present indicative"],["oissent","oître",["v"],["v"],"present indicative"],["crois","croire",["v"],["v"],"present indicative"],["croît","croire",["v"],["v"],"present indicative"],["croit","croire",["v"],["v"],"present indicative"],["croyons","croire",["v"],["v"],"present indicative"],["croyez","croire",["v"],["v"],"present indicative"],["croient","croire",["v"],["v"],"present indicative"],["bois","boire",["v"],["v"],"present indicative"],["boît","boire",["v"],["v"],"present indicative"],["boit","boire",["v"],["v"],"present indicative"],["buvons","boire",["v"],["v"],"present indicative"],["buvez","boire",["v"],["v"],"present indicative"],["boivent","boire",["v"],["v"],"present indicative"],["clos","clore",["v"],["v"],"present indicative"],["clôt","clore",["v"],["v"],"present indicative"],["closent","croire",["v"],["v"],"present indicative"],["clus","clure",["v"],["v"],"present indicative"],["clut","clure",["v"],["v"],"present indicative"],["cluons","clure",["v"],["v"],"present indicative"],["cluez","clure",["v"],["v"],"present indicative"],["cluent","clure",["v"],["v"],"present indicative"],["sous","soudre",["v"],["v"],"present indicative"],["sout","soudre",["v"],["v"],"present indicative"],["solvons","soudre",["v"],["v"],"present indicative"],["solvez","soudre",["v"],["v"],"present indicative"],["solvent","soudre",["v"],["v"],"present indicative"],["coud","coudre",["v"],["v"],"present indicative"],["couds","coudre",["v"],["v"],"present indicative"],["cousons","coudre",["v"],["v"],"present indicative"],["cousez","coudre",["v"],["v"],"present indicative"],["cousent","coudre",["v"],["v"],"present indicative"],["moud","moudre",["v"],["v"],"present indicative"],["mouds","moudre",["v"],["v"],"present indicative"],["moulons","moudre",["v"],["v"],"present indicative"],["moulez","moudre",["v"],["v"],"present indicative"],["moulent","moudre",["v"],["v"],"present indicative"],["is","vivre",["v"],["v"],"present indicative"],["it","vivre",["v"],["v"],"present indicative"],["ivons","vivre",["v"],["v"],"present indicative"],["ivez","vivre",["v"],["v"],"present indicative"],["ivent","vivre",["v"],["v"],"present indicative"],["lis","lire",["v"],["v"],"present indicative"],["lit","lire",["v"],["v"],"present indicative"],["lisons","lire",["v"],["v"],"present indicative"],["lisez","lire",["v"],["v"],"present indicative"],["lisent","lire",["v"],["v"],"present indicative"],["dis","dire",["v"],["v"],"present indicative"],["dit","dire",["v"],["v"],"present indicative"],["disons","dire",["v"],["v"],"present indicative"],["disez","dire",["v"],["v"],"present indicative"],["disent","dire",["v"],["v"],"present indicative"],["ris","rire",["v"],["v"],"present indicative"],["rit","rire",["v"],["v"],"present indicative"],["rions","rire",["v"],["v"],"present indicative"],["riez","rire",["v"],["v"],"present indicative"],["rient","rire",["v"],["v"],"present indicative"],["maudissons","maudire",["v"],["v"],"present indicative"],["maudissez","maudire",["v"],["v"],"present indicative"],["maudissent","maudire",["v"],["v"],"present indicative"],["cris","crire",["v"],["v"],"present indicative"],["crit","crire",["v"],["v"],"present indicative"],["crivons","crire",["v"],["v"],"present indicative"],["crivez","crire",["v"],["v"],"present indicative"],["crivent","crire",["v"],["v"],"present indicative"],["fis","fire",["v"],["v"],"present indicative"],["fit","fire",["v"],["v"],"present indicative"],["fisons","fire",["v"],["v"],"present indicative"],["fisez","fire",["v"],["v"],"present indicative"],["fisent","fire",["v"],["v"],"present indicative"],["cis","cire",["v"],["v"],"present indicative"],["cit","cire",["v"],["v"],"present indicative"],["cisons","cire",["v"],["v"],"present indicative"],["cisez","cire",["v"],["v"],"present indicative"],["cisent","cire",["v"],["v"],"present indicative"],["fris","frire",["v"],["v"],"present indicative"],["frit","frire",["v"],["v"],"present indicative"],["frisons","frire",["v"],["v"],"present indicative"],["frisez","frire",["v"],["v"],"present indicative"],["frisent","frire",["v"],["v"],"present indicative"],["uis","uire",["v"],["v"],"present indicative"],["uit","uire",["v"],["v"],"present indicative"],["uisons","uire",["v"],["v"],"present indicative"],["uisez","uire",["v"],["v"],"present indicative"],["uisent","uire",["v"],["v"],"present indicative"],["étais","être",["v"],["v"],"imperfect indicative"],["était","être",["v"],["v"],"imperfect indicative"],["étions","être",["v"],["v"],"imperfect indicative"],["étiez","être",["v"],["v"],"imperfect indicative"],["étaient","être",["v"],["v"],"imperfect indicative"],["avais","avoir",["v"],["v"],"imperfect indicative"],["avait","avoir",["v"],["v"],"imperfect indicative"],["avions","avoir",["v"],["v"],"imperfect indicative"],["aviez","avoir",["v"],["v"],"imperfect indicative"],["avaient","avoir",["v"],["v"],"imperfect indicative"],["ais","er",["v"],["v"],"imperfect indicative"],["ait","er",["v"],["v"],"imperfect indicative"],["ions","er",["v"],["v"],"imperfect indicative"],["iez","er",["v"],["v"],"imperfect indicative"],["aient","er",["v"],["v"],"imperfect indicative"],["çais","cer",["v"],["v"],"imperfect indicative"],["çait","cer",["v"],["v"],"imperfect indicative"],["çions","cer",["v"],["v"],"imperfect indicative"],["çiez","cer",["v"],["v"],"imperfect indicative"],["çaient","cer",["v"],["v"],"imperfect indicative"],["geais","ger",["v"],["v"],"imperfect indicative"],["geait","ger",["v"],["v"],"imperfect indicative"],["geaient","ger",["v"],["v"],"imperfect indicative"],["issais","ir",["v"],["v"],"imperfect indicative"],["issait","ir",["v"],["v"],"imperfect indicative"],["issions","ir",["v"],["v"],"imperfect indicative"],["issiez","ir",["v"],["v"],"imperfect indicative"],["issaient","ir",["v"],["v"],"imperfect indicative"],["haïssais","haïr",["v"],["v"],"imperfect indicative"],["haïssait","haïr",["v"],["v"],"imperfect indicative"],["haïssions","haïr",["v"],["v"],"imperfect indicative"],["haïssaient","haïr",["v"],["v"],"imperfect indicative"],["haissais","haïr",["v"],["v"],"imperfect indicative"],["haissait","haïr",["v"],["v"],"imperfect indicative"],["haissions","haïr",["v"],["v"],"imperfect indicative"],["haissaient","haïr",["v"],["v"],"imperfect indicative"],["allais","aller",["v"],["v"],"imperfect indicative"],["allait","aller",["v"],["v"],"imperfect indicative"],["allions","aller",["v"],["v"],"imperfect indicative"],["alliez","aller",["v"],["v"],"imperfect indicative"],["allaient","aller",["v"],["v"],"imperfect indicative"],["enais","enir",["v"],["v"],"imperfect indicative"],["enait","enir",["v"],["v"],"imperfect indicative"],["enions","enir",["v"],["v"],"imperfect indicative"],["eniez","enir",["v"],["v"],"imperfect indicative"],["enaient","enir",["v"],["v"],"imperfect indicative"],["érais","érir",["v"],["v"],"imperfect indicative"],["érait","érir",["v"],["v"],"imperfect indicative"],["érions","érir",["v"],["v"],"imperfect indicative"],["ériez","érir",["v"],["v"],"imperfect indicative"],["éraient","érir",["v"],["v"],"imperfect indicative"],["tais","tir",["v"],["v"],"imperfect indicative"],["tait","tir",["v"],["v"],"imperfect indicative"],["tions","tir",["v"],["v"],"imperfect indicative"],["tiez","tir",["v"],["v"],"imperfect indicative"],["taient","tir",["v"],["v"],"imperfect indicative"],["êtais","êtir",["v"],["v"],"imperfect indicative"],["êtait","êtir",["v"],["v"],"imperfect indicative"],["êtions","êtir",["v"],["v"],"imperfect indicative"],["êtiez","êtir",["v"],["v"],"imperfect indicative"],["êtaient","êtir",["v"],["v"],"imperfect indicative"],["vrais","vrir",["v"],["v"],"imperfect indicative"],["vrait","vrir",["v"],["v"],"imperfect indicative"],["vrions","vrir",["v"],["v"],"imperfect indicative"],["vriez","vrir",["v"],["v"],"imperfect indicative"],["vraient","vrir",["v"],["v"],"imperfect indicative"],["frais","frir",["v"],["v"],"imperfect indicative"],["frait","frir",["v"],["v"],"imperfect indicative"],["frions","frir",["v"],["v"],"imperfect indicative"],["friez","frir",["v"],["v"],"imperfect indicative"],["fraient","frir",["v"],["v"],"imperfect indicative"],["ueillais","ueillir",["v"],["v"],"imperfect indicative"],["ueillait","ueillir",["v"],["v"],"imperfect indicative"],["ueillions","ueillir",["v"],["v"],"imperfect indicative"],["ueilliez","ueillir",["v"],["v"],"imperfect indicative"],["ueillaient","ueillir",["v"],["v"],"imperfect indicative"],["aillais","aillir",["v"],["v"],"imperfect indicative"],["aillait","aillir",["v"],["v"],"imperfect indicative"],["aillions","aillir",["v"],["v"],"imperfect indicative"],["ailliez","aillir",["v"],["v"],"imperfect indicative"],["aillaient","aillir",["v"],["v"],"imperfect indicative"],["bouilliais","bouillir",["v"],["v"],"imperfect indicative"],["bouilliait","bouillir",["v"],["v"],"imperfect indicative"],["bouillions","bouillir",["v"],["v"],"imperfect indicative"],["bouilliez","bouillir",["v"],["v"],"imperfect indicative"],["bouillaient","bouillir",["v"],["v"],"imperfect indicative"],["dormais","dormir",["v"],["v"],"imperfect indicative"],["dormait","dormir",["v"],["v"],"imperfect indicative"],["dormions","dormir",["v"],["v"],"imperfect indicative"],["dormiez","dormir",["v"],["v"],"imperfect indicative"],["dormaient","dormir",["v"],["v"],"imperfect indicative"],["courais","dormir",["v"],["v"],"imperfect indicative"],["courait","dormir",["v"],["v"],"imperfect indicative"],["courions","dormir",["v"],["v"],"imperfect indicative"],["couriez","dormir",["v"],["v"],"imperfect indicative"],["couraient","dormir",["v"],["v"],"imperfect indicative"],["mourais","mourir",["v"],["v"],"imperfect indicative"],["mourait","mourir",["v"],["v"],"imperfect indicative"],["mourions","mourir",["v"],["v"],"imperfect indicative"],["mouriez","mourir",["v"],["v"],"imperfect indicative"],["mouraient","mourir",["v"],["v"],"imperfect indicative"],["servais","servir",["v"],["v"],"imperfect indicative"],["servait","servir",["v"],["v"],"imperfect indicative"],["servions","servir",["v"],["v"],"imperfect indicative"],["serviez","servir",["v"],["v"],"imperfect indicative"],["servaient","servir",["v"],["v"],"imperfect indicative"],["fuyais","fuir",["v"],["v"],"imperfect indicative"],["fuyait","fuir",["v"],["v"],"imperfect indicative"],["fuyions","fuir",["v"],["v"],"imperfect indicative"],["fuyiez","fuir",["v"],["v"],"imperfect indicative"],["fuyaient","fuir",["v"],["v"],"imperfect indicative"],["oyais","ouïr",["v"],["v"],"imperfect indicative"],["oyait","ouïr",["v"],["v"],"imperfect indicative"],["oyions","ouïr",["v"],["v"],"imperfect indicative"],["oyiez","ouïr",["v"],["v"],"imperfect indicative"],["oyaient","ouïr",["v"],["v"],"imperfect indicative"],["gisais","gésir",["v"],["v"],"imperfect indicative"],["gisait","gésir",["v"],["v"],"imperfect indicative"],["gisions","gésir",["v"],["v"],"imperfect indicative"],["gisiez","gésir",["v"],["v"],"imperfect indicative"],["gisaient","gésir",["v"],["v"],"imperfect indicative"],["cevais","cevoir",["v"],["v"],"imperfect indicative"],["cevait","cevoir",["v"],["v"],"imperfect indicative"],["cevions","cevoir",["v"],["v"],"imperfect indicative"],["ceviez","cevoir",["v"],["v"],"imperfect indicative"],["cevaient","cevoir",["v"],["v"],"imperfect indicative"],["voyais","voir",["v"],["v"],"imperfect indicative"],["voyait","voir",["v"],["v"],"imperfect indicative"],["voyions","voir",["v"],["v"],"imperfect indicative"],["voyiez","voir",["v"],["v"],"imperfect indicative"],["voyaient","voir",["v"],["v"],"imperfect indicative"],["savais","savoir",["v"],["v"],"imperfect indicative"],["savait","savoir",["v"],["v"],"imperfect indicative"],["savions","savoir",["v"],["v"],"imperfect indicative"],["saviez","savoir",["v"],["v"],"imperfect indicative"],["savaient","savoir",["v"],["v"],"imperfect indicative"],["devais","devoir",["v"],["v"],"imperfect indicative"],["devait","devoir",["v"],["v"],"imperfect indicative"],["devions","devoir",["v"],["v"],"imperfect indicative"],["deviez","devoir",["v"],["v"],"imperfect indicative"],["devaient","devoir",["v"],["v"],"imperfect indicative"],["pouvais","pouvoir",["v"],["v"],"imperfect indicative"],["pouvait","pouvoir",["v"],["v"],"imperfect indicative"],["pouvions","pouvoir",["v"],["v"],"imperfect indicative"],["pouviez","pouvoir",["v"],["v"],"imperfect indicative"],["pouvaient","pouvoir",["v"],["v"],"imperfect indicative"],["mouvais","mouvoir",["v"],["v"],"imperfect indicative"],["mouvait","mouvoir",["v"],["v"],"imperfect indicative"],["mouvions","mouvoir",["v"],["v"],"imperfect indicative"],["mouviez","mouvoir",["v"],["v"],"imperfect indicative"],["mouvaient","mouvoir",["v"],["v"],"imperfect indicative"],["pleuvait","pleuvoir",["v"],["v"],"imperfect indicative"],["fallait","falloir",["v"],["v"],"imperfect indicative"],["valais","vouloir",["v"],["v"],"imperfect indicative"],["valait","vouloir",["v"],["v"],"imperfect indicative"],["valions","vouloir",["v"],["v"],"imperfect indicative"],["valiez","vouloir",["v"],["v"],"imperfect indicative"],["valaient","vouloir",["v"],["v"],"imperfect indicative"],["voulais","vouloir",["v"],["v"],"imperfect indicative"],["voulait","vouloir",["v"],["v"],"imperfect indicative"],["voulions","vouloir",["v"],["v"],"imperfect indicative"],["vouliez","vouloir",["v"],["v"],"imperfect indicative"],["voulaient","vouloir",["v"],["v"],"imperfect indicative"],["seyais","seoir",["v"],["v"],"imperfect indicative"],["seyait","seoir",["v"],["v"],"imperfect indicative"],["seyions","seoir",["v"],["v"],"imperfect indicative"],["seyiez","seoir",["v"],["v"],"imperfect indicative"],["seyaient","seoir",["v"],["v"],"imperfect indicative"],["soyais","seoir",["v"],["v"],"imperfect indicative"],["soyait","seoir",["v"],["v"],"imperfect indicative"],["soyions","seoir",["v"],["v"],"imperfect indicative"],["soyiez","seoir",["v"],["v"],"imperfect indicative"],["soyaient","seoir",["v"],["v"],"imperfect indicative"],["assoyais","asseoir",["v"],["v"],"imperfect indicative"],["assoyait","asseoir",["v"],["v"],"imperfect indicative"],["assoyions","asseoir",["v"],["v"],"imperfect indicative"],["assoyiez","asseoir",["v"],["v"],"imperfect indicative"],["assoyaient","asseoir",["v"],["v"],"imperfect indicative"],["sied","seoir",["v"],["v"],"imperfect indicative"],["siéent","seoir",["v"],["v"],"imperfect indicative"],["échoyait","échoir",["v"],["v"],"imperfect indicative"],["échoyaient","échoir",["v"],["v"],"imperfect indicative"],["andais","andre",["v"],["v"],"imperfect indicative"],["andais","andre",["v"],["v"],"imperfect indicative"],["andions","andre",["v"],["v"],"imperfect indicative"],["andiez","andre",["v"],["v"],"imperfect indicative"],["andaient","andre",["v"],["v"],"imperfect indicative"],["endais","endre",["v"],["v"],"imperfect indicative"],["endait","endre",["v"],["v"],"imperfect indicative"],["endions","endre",["v"],["v"],"imperfect indicative"],["endiez","endre",["v"],["v"],"imperfect indicative"],["endaient","endre",["v"],["v"],"imperfect indicative"],["ondais","ondre",["v"],["v"],"imperfect indicative"],["ondait","ondre",["v"],["v"],"imperfect indicative"],["ondions","ondre",["v"],["v"],"imperfect indicative"],["ondiez","ondre",["v"],["v"],"imperfect indicative"],["ondaient","ondre",["v"],["v"],"imperfect indicative"],["erdais","erdre",["v"],["v"],"imperfect indicative"],["erdait","erdre",["v"],["v"],"imperfect indicative"],["erdions","erdre",["v"],["v"],"imperfect indicative"],["erdiez","erdre",["v"],["v"],"imperfect indicative"],["erdaient","erdre",["v"],["v"],"imperfect indicative"],["ordais","ordre",["v"],["v"],"imperfect indicative"],["ordait","ordre",["v"],["v"],"imperfect indicative"],["ordions","ordre",["v"],["v"],"imperfect indicative"],["ordiez","ordre",["v"],["v"],"imperfect indicative"],["ordaient","ordre",["v"],["v"],"imperfect indicative"],["prenais","prendre",["v"],["v"],"imperfect indicative"],["prenait","prendre",["v"],["v"],"imperfect indicative"],["prenions","prendre",["v"],["v"],"imperfect indicative"],["preniez","prendre",["v"],["v"],"imperfect indicative"],["prenaient","prendre",["v"],["v"],"imperfect indicative"],["battais","battre",["v"],["v"],"imperfect indicative"],["battait","battre",["v"],["v"],"imperfect indicative"],["battions","battre",["v"],["v"],"imperfect indicative"],["battiez","battre",["v"],["v"],"imperfect indicative"],["battaient","battre",["v"],["v"],"imperfect indicative"],["mettais","mettre",["v"],["v"],"imperfect indicative"],["mettait","mettre",["v"],["v"],"imperfect indicative"],["mettions","mettre",["v"],["v"],"imperfect indicative"],["mettiez","mettre",["v"],["v"],"imperfect indicative"],["mettaient","mettre",["v"],["v"],"imperfect indicative"],["eignais","eindre",["v"],["v"],"imperfect indicative"],["eignait","eindre",["v"],["v"],"imperfect indicative"],["eiginons","eindre",["v"],["v"],"imperfect indicative"],["eiginez","eindre",["v"],["v"],"imperfect indicative"],["eignaient","eindre",["v"],["v"],"imperfect indicative"],["oignais","oindre",["v"],["v"],"imperfect indicative"],["oignait","oindre",["v"],["v"],"imperfect indicative"],["oignions","oindre",["v"],["v"],"imperfect indicative"],["oigniez","oindre",["v"],["v"],"imperfect indicative"],["oignaient","oindre",["v"],["v"],"imperfect indicative"],["aignais","aindre",["v"],["v"],"imperfect indicative"],["aignait","aindre",["v"],["v"],"imperfect indicative"],["aignions","aindre",["v"],["v"],"imperfect indicative"],["aigniez","aindre",["v"],["v"],"imperfect indicative"],["aignaient","aindre",["v"],["v"],"imperfect indicative"],["vainquas","vaincre",["v"],["v"],"imperfect indicative"],["vainquait","vaincre",["v"],["v"],"imperfect indicative"],["vainquions","vaincre",["v"],["v"],"imperfect indicative"],["vainquiez","vaincre",["v"],["v"],"imperfect indicative"],["vainquaient","vaincre",["v"],["v"],"imperfect indicative"],["rayais","raire",["v"],["v"],"imperfect indicative"],["raiyat","raire",["v"],["v"],"imperfect indicative"],["rayions","raire",["v"],["v"],"imperfect indicative"],["rayiez","raire",["v"],["v"],"imperfect indicative"],["rayaient","raire",["v"],["v"],"imperfect indicative"],["faisais","faire",["v"],["v"],"imperfect indicative"],["faisait","faire",["v"],["v"],"imperfect indicative"],["faisions","faire",["v"],["v"],"imperfect indicative"],["faisiez","faire",["v"],["v"],"imperfect indicative"],["faisaient","faire",["v"],["v"],"imperfect indicative"],["plaisais","faire",["v"],["v"],"imperfect indicative"],["plaisait","faire",["v"],["v"],"imperfect indicative"],["plaisions","faire",["v"],["v"],"imperfect indicative"],["plaisiez","faire",["v"],["v"],"imperfect indicative"],["plaisaient","faire",["v"],["v"],"imperfect indicative"],["aissais","aître",["v"],["v"],"imperfect indicative"],["aissait","aître",["v"],["v"],"imperfect indicative"],["aissions","aître",["v"],["v"],"imperfect indicative"],["aissiez","aître",["v"],["v"],"imperfect indicative"],["aissaient","aître",["v"],["v"],"imperfect indicative"],["oissais","oître",["v"],["v"],"imperfect indicative"],["oissait","oître",["v"],["v"],"imperfect indicative"],["oissions","oître",["v"],["v"],"imperfect indicative"],["oissiez","oître",["v"],["v"],"imperfect indicative"],["oissaient","oître",["v"],["v"],"imperfect indicative"],["croyais","croire",["v"],["v"],"imperfect indicative"],["croyait","croire",["v"],["v"],"imperfect indicative"],["croyions","croire",["v"],["v"],"imperfect indicative"],["croyiez","croire",["v"],["v"],"imperfect indicative"],["croyaient","croire",["v"],["v"],"imperfect indicative"],["buvais","boire",["v"],["v"],"imperfect indicative"],["buvait","boire",["v"],["v"],"imperfect indicative"],["buvions","boire",["v"],["v"],"imperfect indicative"],["buviez","boire",["v"],["v"],"imperfect indicative"],["buvaient","boire",["v"],["v"],"imperfect indicative"],["cluais","clure",["v"],["v"],"imperfect indicative"],["cluait","clure",["v"],["v"],"imperfect indicative"],["cluions","clure",["v"],["v"],"imperfect indicative"],["cluiez","clure",["v"],["v"],"imperfect indicative"],["cluaient","clure",["v"],["v"],"imperfect indicative"],["solvais","soudre",["v"],["v"],"imperfect indicative"],["solvait","soudre",["v"],["v"],"imperfect indicative"],["solvions","soudre",["v"],["v"],"imperfect indicative"],["solviez","soudre",["v"],["v"],"imperfect indicative"],["solvaient","soudre",["v"],["v"],"imperfect indicative"],["cousais","coudre",["v"],["v"],"imperfect indicative"],["cousait","coudre",["v"],["v"],"imperfect indicative"],["cousions","coudre",["v"],["v"],"imperfect indicative"],["cousiez","coudre",["v"],["v"],"imperfect indicative"],["cousaient","coudre",["v"],["v"],"imperfect indicative"],["moulais","moudre",["v"],["v"],"imperfect indicative"],["moulait","moudre",["v"],["v"],"imperfect indicative"],["moulions","moudre",["v"],["v"],"imperfect indicative"],["mouliez","moudre",["v"],["v"],"imperfect indicative"],["moulaient","moudre",["v"],["v"],"imperfect indicative"],["ivais","vivre",["v"],["v"],"imperfect indicative"],["ivait","vivre",["v"],["v"],"imperfect indicative"],["ivions","vivre",["v"],["v"],"imperfect indicative"],["iviez","vivre",["v"],["v"],"imperfect indicative"],["ivaient","vivre",["v"],["v"],"imperfect indicative"],["lisais","lire",["v"],["v"],"imperfect indicative"],["lisait","lire",["v"],["v"],"imperfect indicative"],["lisions","lire",["v"],["v"],"imperfect indicative"],["lisiez","lire",["v"],["v"],"imperfect indicative"],["lisaient","lire",["v"],["v"],"imperfect indicative"],["disais","dire",["v"],["v"],"imperfect indicative"],["disait","dire",["v"],["v"],"imperfect indicative"],["disions","dire",["v"],["v"],"imperfect indicative"],["disiez","dire",["v"],["v"],"imperfect indicative"],["disaient","dire",["v"],["v"],"imperfect indicative"],["riais","rire",["v"],["v"],"imperfect indicative"],["riait","rire",["v"],["v"],"imperfect indicative"],["riions","rire",["v"],["v"],"imperfect indicative"],["riiez","rire",["v"],["v"],"imperfect indicative"],["riaient","rire",["v"],["v"],"imperfect indicative"],["maudissais","maudire",["v"],["v"],"imperfect indicative"],["maudissait","maudire",["v"],["v"],"imperfect indicative"],["maudissions","maudire",["v"],["v"],"imperfect indicative"],["maudissiez","maudire",["v"],["v"],"imperfect indicative"],["maudissaient","maudire",["v"],["v"],"imperfect indicative"],["crivais","crire",["v"],["v"],"imperfect indicative"],["crivait","crire",["v"],["v"],"imperfect indicative"],["crivions","crire",["v"],["v"],"imperfect indicative"],["criviez","crire",["v"],["v"],"imperfect indicative"],["crivaient","crire",["v"],["v"],"imperfect indicative"],["fisais","fire",["v"],["v"],"imperfect indicative"],["fisait","fire",["v"],["v"],"imperfect indicative"],["fisions","fire",["v"],["v"],"imperfect indicative"],["fisiez","fire",["v"],["v"],"imperfect indicative"],["fisaient","fire",["v"],["v"],"imperfect indicative"],["cisais","cire",["v"],["v"],"imperfect indicative"],["cisait","cire",["v"],["v"],"imperfect indicative"],["cisions","cire",["v"],["v"],"imperfect indicative"],["cisiez","cire",["v"],["v"],"imperfect indicative"],["cisaient","cire",["v"],["v"],"imperfect indicative"],["frisais","frire",["v"],["v"],"imperfect indicative"],["frisait","frire",["v"],["v"],"imperfect indicative"],["frisions","frire",["v"],["v"],"imperfect indicative"],["frisiez","frire",["v"],["v"],"imperfect indicative"],["frisaient","frire",["v"],["v"],"imperfect indicative"],["uisais","uire",["v"],["v"],"imperfect indicative"],["uisait","uire",["v"],["v"],"imperfect indicative"],["uisions","uire",["v"],["v"],"imperfect indicative"],["uisiez","uire",["v"],["v"],"imperfect indicative"],["uisaient","uire",["v"],["v"],"imperfect indicative"],["serai","être",["aux"],["v"],"future"],["seras","être",["aux"],["v"],"future"],["sera","être",["aux"],["v"],"future"],["serons,","être",["aux"],["v"],"future"],["serez","être",["aux"],["v"],"future"],["seront","être",["aux"],["v"],"future"],["aurai","avoir",["aux"],["v"],"future"],["auras","avoir",["aux"],["v"],"future"],["aura","avoir",["aux"],["v"],"future"],["aurons","avoir",["aux"],["v"],"future"],["aurez","avoir",["aux"],["v"],"future"],["auront","avoir",["aux"],["v"],"future"],["erai","er",["v"],["v"],"future"],["eras","er",["v"],["v"],"future"],["era","er",["v"],["v"],"future"],["erons","er",["v"],["v"],"future"],["erez","er",["v"],["v"],"future"],["eront","er",["v"],["v"],"future"],["ècerai","ecer",["v"],["v"],"future"],["èverai","ever",["v"],["v"],"future"],["ènerai","ener",["v"],["v"],"future"],["èperai","eper",["v"],["v"],"future"],["èrerai","erer",["v"],["v"],"future"],["èmerai","emer",["v"],["v"],"future"],["èvrerai","evrer",["v"],["v"],"future"],["èserai","eser",["v"],["v"],"future"],["èceras","ecer",["v"],["v"],"future"],["èveras","ever",["v"],["v"],"future"],["èneras","ener",["v"],["v"],"future"],["èperas","eper",["v"],["v"],"future"],["èreras","erer",["v"],["v"],"future"],["èmeras","emer",["v"],["v"],"future"],["èvreras","evrer",["v"],["v"],"future"],["èseras","eser",["v"],["v"],"future"],["ècera","ecer",["v"],["v"],"future"],["èvera","ever",["v"],["v"],"future"],["ènera","ener",["v"],["v"],"future"],["èpera","eper",["v"],["v"],"future"],["èrera","erer",["v"],["v"],"future"],["èmera","emer",["v"],["v"],"future"],["èvrera","evrer",["v"],["v"],"future"],["èsera","eser",["v"],["v"],"future"],["ècerons","ecer",["v"],["v"],"future"],["èverons","ever",["v"],["v"],"future"],["ènerons","ener",["v"],["v"],"future"],["èperons","eper",["v"],["v"],"future"],["èrerons","erer",["v"],["v"],"future"],["èmerons","emer",["v"],["v"],"future"],["èvrerons","evrer",["v"],["v"],"future"],["èserons","eser",["v"],["v"],"future"],["ècerez","ecer",["v"],["v"],"future"],["èverez","ever",["v"],["v"],"future"],["ènerez","ener",["v"],["v"],"future"],["èperez","eper",["v"],["v"],"future"],["èrerez","erer",["v"],["v"],"future"],["èmerez","emer",["v"],["v"],"future"],["èvrerez","evrer",["v"],["v"],"future"],["èserez","eser",["v"],["v"],"future"],["èceront","ecer",["v"],["v"],"future"],["èveront","ever",["v"],["v"],"future"],["èneront","ener",["v"],["v"],"future"],["èperontz","eper",["v"],["v"],"future"],["èreront","erer",["v"],["v"],"future"],["èmeront","emer",["v"],["v"],"future"],["èvreront","evrer",["v"],["v"],"future"],["èseront","eser",["v"],["v"],"future"],["ellerai","eler",["v"],["v"],"future"],["elleras","eler",["v"],["v"],"future"],["ellera","eler",["v"],["v"],"future"],["ellerons","eler",["v"],["v"],"future"],["ellerez","eler",["v"],["v"],"future"],["elleront","eler",["v"],["v"],"future"],["etterais","eter",["v"],["v"],"future"],["etteras","eter",["v"],["v"],"future"],["ettera","eter",["v"],["v"],"future"],["etterons","eter",["v"],["v"],"future"],["etterez","eter",["v"],["v"],"future"],["etteront","eter",["v"],["v"],"future"],["èlerai","eler",["v"],["v"],"future"],["èleras","eler",["v"],["v"],"future"],["èlera","eler",["v"],["v"],"future"],["èlerons","eler",["v"],["v"],"future"],["èlerez","eler",["v"],["v"],"future"],["èleront","eler",["v"],["v"],"future"],["èterai","eter",["v"],["v"],"future"],["èteras","eter",["v"],["v"],"future"],["ètera","eter",["v"],["v"],"future"],["èterons","eter",["v"],["v"],"future"],["èterez","eter",["v"],["v"],"future"],["èteront","eter",["v"],["v"],"future"],["ègerai","éger",["v"],["v"],"future"],["ègeras","éger",["v"],["v"],"future"],["ègera","éger",["v"],["v"],"future"],["ègerons","éger",["v"],["v"],"future"],["ègerez","éger",["v"],["v"],"future"],["ègeront","éger",["v"],["v"],"future"],["aierai","ayer",["v"],["v"],"future"],["aieras","ayer",["v"],["v"],"future"],["aiera","ayer",["v"],["v"],"future"],["aierons","ayer",["v"],["v"],"future"],["aierez","ayer",["v"],["v"],"future"],["aieront","ayer",["v"],["v"],"future"],["ayerai","ayer",["v"],["v"],"future"],["ayeras","ayer",["v"],["v"],"future"],["ayera","ayer",["v"],["v"],"future"],["ayerons","ayer",["v"],["v"],"future"],["ayerez","ayer",["v"],["v"],"future"],["ayeront","ayer",["v"],["v"],"future"],["oierai","oyer",["v"],["v"],"future"],["oieras","oyer",["v"],["v"],"future"],["oiera","oyer",["v"],["v"],"future"],["oierons","oyer",["v"],["v"],"future"],["oierez","oyer",["v"],["v"],"future"],["oieront","oyer",["v"],["v"],"future"],["uierai","uyer",["v"],["v"],"future"],["uieras","uyer",["v"],["v"],"future"],["uiera","uyer",["v"],["v"],"future"],["uierons","uyer",["v"],["v"],"future"],["uierez","uyer",["v"],["v"],"future"],["uieront","uyer",["v"],["v"],"future"],["enverrai","envoyer",["v"],["v"],"future"],["enverras","envoyer",["v"],["v"],"future"],["enverra","envoyer",["v"],["v"],"future"],["enverrons","envoyer",["v"],["v"],"future"],["enverrez","envoyer",["v"],["v"],"future"],["enverront","envoyer",["v"],["v"],"future"],["irai","ir",["v"],["v"],"future"],["iras","ir",["v"],["v"],"future"],["ira","ir",["v"],["v"],"future"],["irons","ir",["v"],["v"],"future"],["irez","ir",["v"],["v"],"future"],["iront","ir",["v"],["v"],"future"],["ïrai","ïr",["v"],["v"],"future"],["ïras","ïr",["v"],["v"],"future"],["ïra","ïr",["v"],["v"],"future"],["ïrons","ïr",["v"],["v"],"future"],["ïrez","ïr",["v"],["v"],"future"],["ïront","ïr",["v"],["v"],"future"],["irai","aller",["v"],["v"],"future"],["iras","aller",["v"],["v"],"future"],["ira","aller",["v"],["v"],"future"],["irons","aller",["v"],["v"],"future"],["irez","aller",["v"],["v"],"future"],["iront","aller",["v"],["v"],"future"],["iendrai","enir",["v"],["v"],"future"],["iendras","enir",["v"],["v"],"future"],["iendrons","enir",["v"],["v"],"future"],["iendrez","enir",["v"],["v"],"future"],["iendront","enir",["v"],["v"],"future"],["errai","érir",["v"],["v"],"future"],["erras","érir",["v"],["v"],"future"],["erra","érir",["v"],["v"],"future"],["errons","érir",["v"],["v"],"future"],["errez","érir",["v"],["v"],"future"],["erront","érir",["v"],["v"],"future"],["tirai","tir",["v"],["v"],"future"],["tiras","tir",["v"],["v"],"future"],["tira","tir",["v"],["v"],"future"],["tirons","tir",["v"],["v"],"future"],["tirez","tir",["v"],["v"],"future"],["tiront","tir",["v"],["v"],"future"],["êtirai","êtir",["v"],["v"],"future"],["êtiras","êtir",["v"],["v"],"future"],["êtira","êtir",["v"],["v"],"future"],["êtirons","êtir",["v"],["v"],"future"],["êtirez","êtir",["v"],["v"],"future"],["êtiront","êtir",["v"],["v"],"future"],["vrirai","vrir",["v"],["v"],"future"],["vriras","vrir",["v"],["v"],"future"],["vrira","vrir",["v"],["v"],"future"],["vrirons","vrir",["v"],["v"],"future"],["vrirez","vrir",["v"],["v"],"future"],["vriront","vrir",["v"],["v"],"future"],["frirai","frir",["v"],["v"],"future"],["frira","frir",["v"],["v"],"future"],["frira","frir",["v"],["v"],"future"],["frirons","frir",["v"],["v"],"future"],["frirez","frir",["v"],["v"],"future"],["friront","frir",["v"],["v"],"future"],["ueillerai","ueillir",["v"],["v"],"future"],["ueilleras","ueillir",["v"],["v"],"future"],["ueillera","ueillir",["v"],["v"],"future"],["ueillerons","ueillir",["v"],["v"],"future"],["ueillerez","ueillir",["v"],["v"],"future"],["ueilleront","ueillir",["v"],["v"],"future"],["aillirai","aillir",["v"],["v"],"future"],["ailliras","aillir",["v"],["v"],"future"],["aillira","aillir",["v"],["v"],"future"],["aillirons","aillir",["v"],["v"],"future"],["aillirez","aillir",["v"],["v"],"future"],["ailliront","aillir",["v"],["v"],"future"],["bouillirai","bouillir",["v"],["v"],"future"],["bouilliras","bouillir",["v"],["v"],"future"],["bouillira","bouillir",["v"],["v"],"future"],["bouillirons","bouillir",["v"],["v"],"future"],["bouillirez","bouillir",["v"],["v"],"future"],["bouilliront","bouillir",["v"],["v"],"future"],["dormirai","dormir",["v"],["v"],"future"],["dormiras","dormir",["v"],["v"],"future"],["dormira","dormir",["v"],["v"],"future"],["dormirons","dormir",["v"],["v"],"future"],["dormirez","dormir",["v"],["v"],"future"],["dormiront","dormir",["v"],["v"],"future"],["courrai","dormir",["v"],["v"],"future"],["courras","dormir",["v"],["v"],"future"],["courra","dormir",["v"],["v"],"future"],["courrons","dormir",["v"],["v"],"future"],["courrez","dormir",["v"],["v"],"future"],["courront","dormir",["v"],["v"],"future"],["mourrai","mourir",["v"],["v"],"future"],["mourras","mourir",["v"],["v"],"future"],["mourra","mourir",["v"],["v"],"future"],["mourrons","mourir",["v"],["v"],"future"],["mourrez","mourir",["v"],["v"],"future"],["mourront","mourir",["v"],["v"],"future"],["orrai","ouïr",["v"],["v"],"future"],["oirai","ouïr",["v"],["v"],"future"],["orras","ouïr",["v"],["v"],"future"],["orra","ouïr",["v"],["v"],"future"],["orrons","ouïr",["v"],["v"],"future"],["orrez","ouïr",["v"],["v"],"future"],["orront","ouïr",["v"],["v"],"future"],["cevrai","cevoir",["v"],["v"],"future"],["cevras","cevoir",["v"],["v"],"future"],["cevra","cevoir",["v"],["v"],"future"],["cevrons","cevoir",["v"],["v"],"future"],["cevrez","cevoir",["v"],["v"],"future"],["cevront","cevoir",["v"],["v"],"future"],["verrai","voir",["v"],["v"],"future"],["verras","voir",["v"],["v"],"future"],["verra","voir",["v"],["v"],"future"],["verrons","voir",["v"],["v"],"future"],["verrez","voir",["v"],["v"],"future"],["verront","voir",["v"],["v"],"future"],["pourvoirai","pourvoir",["v"],["v"],"future"],["pourvoiras","pourvoir",["v"],["v"],"future"],["pourvoira","pourvoir",["v"],["v"],"future"],["pourvoirons","pourvoir",["v"],["v"],"future"],["pourvoirez","pourvoir",["v"],["v"],"future"],["pourvoiront","pourvoir",["v"],["v"],"future"],["saurai","savoir",["v"],["v"],"future"],["sauras","savoir",["v"],["v"],"future"],["saura","savoir",["v"],["v"],"future"],["saurons","savoir",["v"],["v"],"future"],["saurez","savoir",["v"],["v"],"future"],["sauront","savoir",["v"],["v"],"future"],["devrai","devoir",["v"],["v"],"future"],["devras","devoir",["v"],["v"],"future"],["devra","devoir",["v"],["v"],"future"],["devrons","devoir",["v"],["v"],"future"],["devrez","devoir",["v"],["v"],"future"],["devront","devoir",["v"],["v"],"future"],["pourrai","pouvoir",["v"],["v"],"future"],["pourras","pouvoir",["v"],["v"],"future"],["pourra","pouvoir",["v"],["v"],"future"],["pourrons","pouvoir",["v"],["v"],"future"],["pourrez","pouvoir",["v"],["v"],"future"],["pourront","pouvoir",["v"],["v"],"future"],["mouvrai","mouvoir",["v"],["v"],"future"],["mouvras","mouvoir",["v"],["v"],"future"],["mouvra","mouvoir",["v"],["v"],"future"],["mouvrons","mouvoir",["v"],["v"],"future"],["mouvrez","mouvoir",["v"],["v"],"future"],["mouvront","mouvoir",["v"],["v"],"future"],["pleuvra","pleuvoir",["v"],["v"],"future"],["pleuvront","pleuvoir",["v"],["v"],"future"],["faudra","falloir",["v"],["v"],"future"],["vaudrai","valoir",["v"],["v"],"future"],["vaudras","valoir",["v"],["v"],"future"],["vaudra","valoir",["v"],["v"],"future"],["vaudrons","valoir",["v"],["v"],"future"],["vaudrez","valoir",["v"],["v"],"future"],["vaudront","valoir",["v"],["v"],"future"],["voudrai","vouloir",["v"],["v"],"future"],["voudras","vouloir",["v"],["v"],"future"],["voudra","vouloir",["v"],["v"],"future"],["voudrons","vouloir",["v"],["v"],"future"],["voudrez","vouloir",["v"],["v"],"future"],["voudront","vouloir",["v"],["v"],"future"],["soirai","seoir",["v"],["v"],"future"],["soiras","seoir",["v"],["v"],"future"],["soira","seoir",["v"],["v"],"future"],["soirons","seoir",["v"],["v"],"future"],["soirez","seoir",["v"],["v"],"future"],["soiront","seoir",["v"],["v"],"future"],["assiérai","asseoir",["v"],["v"],"future"],["assiéras","asseoir",["v"],["v"],"future"],["assiéra","asseoir",["v"],["v"],"future"],["assiérons","asseoir",["v"],["v"],"future"],["assiérez","asseoir",["v"],["v"],"future"],["assiéront","asseoir",["v"],["v"],"future"],["siéra","seoir",["v"],["v"],"future"],["siéront","seoir",["v"],["v"],"future"],["choirai","choir",["v"],["v"],"future"],["choiras","choir",["v"],["v"],"future"],["choira","choir",["v"],["v"],"future"],["choirons","choir",["v"],["v"],"future"],["choirez","choir",["v"],["v"],"future"],["choiront","choir",["v"],["v"],"future"],["cherrai","choir",["v"],["v"],"future"],["cherras","choir",["v"],["v"],"future"],["cherra","choir",["v"],["v"],"future"],["cherrosn","choir",["v"],["v"],"future"],["cherrez","choir",["v"],["v"],"future"],["cherront","choir",["v"],["v"],"future"],["andrai","andre",["v"],["v"],"future"],["andras","andre",["v"],["v"],"future"],["andra","andre",["v"],["v"],"future"],["androns","andre",["v"],["v"],"future"],["andrez","andre",["v"],["v"],"future"],["andront","andre",["v"],["v"],"future"],["endrai","endre",["v"],["v"],"future"],["endras","endre",["v"],["v"],"future"],["endra","endre",["v"],["v"],"future"],["endrons","endre",["v"],["v"],"future"],["endrez","endre",["v"],["v"],"future"],["endront","endre",["v"],["v"],"future"],["ondrai","ondre",["v"],["v"],"future"],["ondras","ondre",["v"],["v"],"future"],["ondra","ondre",["v"],["v"],"future"],["ondrons","ondre",["v"],["v"],"future"],["ondrez","ondre",["v"],["v"],"future"],["ondront","ondre",["v"],["v"],"future"],["erdrai","erdre",["v"],["v"],"future"],["erdras","erdre",["v"],["v"],"future"],["erdra","erdre",["v"],["v"],"future"],["erdrons","erdre",["v"],["v"],"future"],["erdrez","erdre",["v"],["v"],"future"],["erdront","erdre",["v"],["v"],"future"],["ordrai","ordre",["v"],["v"],"future"],["ordras","ordre",["v"],["v"],"future"],["ordra","ordre",["v"],["v"],"future"],["ordrons","ordre",["v"],["v"],"future"],["ordrez","ordre",["v"],["v"],"future"],["ordront","ordre",["v"],["v"],"future"],["battrai","battre",["v"],["v"],"future"],["battras","battre",["v"],["v"],"future"],["battra","battre",["v"],["v"],"future"],["battrons","battre",["v"],["v"],"future"],["battrez","battre",["v"],["v"],"future"],["battront","battre",["v"],["v"],"future"],["mettrai","mettre",["v"],["v"],"future"],["mettras","mettre",["v"],["v"],"future"],["mettra","mettre",["v"],["v"],"future"],["mettrons","mettre",["v"],["v"],"future"],["mettrez","mettre",["v"],["v"],"future"],["mettront","mettre",["v"],["v"],"future"],["eindrai","eindre",["v"],["v"],"future"],["eindras","eindre",["v"],["v"],"future"],["eindra","eindre",["v"],["v"],"future"],["eindrons","eindre",["v"],["v"],"future"],["eindrez","eindre",["v"],["v"],"future"],["eindront","eindre",["v"],["v"],"future"],["oindrai","oindre",["v"],["v"],"future"],["oindras","oindre",["v"],["v"],"future"],["oindra","oindre",["v"],["v"],"future"],["oindrons","oindre",["v"],["v"],"future"],["oindrez","oindre",["v"],["v"],"future"],["oindront","oindre",["v"],["v"],"future"],["aindrai","aindre",["v"],["v"],"future"],["aindras","aindre",["v"],["v"],"future"],["aindra","aindre",["v"],["v"],"future"],["aindrons","aindre",["v"],["v"],"future"],["aindrez","aindre",["v"],["v"],"future"],["aindront","aindre",["v"],["v"],"future"],["vaincrai","vaincre",["v"],["v"],"future"],["vaincras","vaincre",["v"],["v"],"future"],["vaincra","vaincre",["v"],["v"],"future"],["vaincrons","vaincre",["v"],["v"],"future"],["vaincrez","vaincre",["v"],["v"],"future"],["vaincront","vaincre",["v"],["v"],"future"],["rairai","raire",["v"],["v"],"future"],["rairas","raire",["v"],["v"],"future"],["raira","raire",["v"],["v"],"future"],["rairons","raire",["v"],["v"],"future"],["rairez","raire",["v"],["v"],"future"],["rairont","raire",["v"],["v"],"future"],["ferai","faire",["v"],["v"],"future"],["feras","faire",["v"],["v"],"future"],["fera","faire",["v"],["v"],"future"],["ferons","faire",["v"],["v"],"future"],["ferez","faire",["v"],["v"],"future"],["feront","faire",["v"],["v"],"future"],["plairai","plaire",["v"],["v"],"future"],["plairas","plaire",["v"],["v"],"future"],["plaira","plaire",["v"],["v"],"future"],["plairons","plaire",["v"],["v"],"future"],["plairez","plaire",["v"],["v"],"future"],["plairont","plaire",["v"],["v"],"future"],["aîtrai","aître",["v"],["v"],"future"],["aîtras","aître",["v"],["v"],"future"],["aîtra","aître",["v"],["v"],"future"],["aîtrons","aître",["v"],["v"],"future"],["aîtrez","aître",["v"],["v"],"future"],["aîtront","aître",["v"],["v"],"future"],["oîtrai","oître",["v"],["v"],"future"],["oîtras","oître",["v"],["v"],"future"],["oîtra","oître",["v"],["v"],"future"],["oîtrons","oître",["v"],["v"],"future"],["oîtrez","oître",["v"],["v"],"future"],["oîtront","oître",["v"],["v"],"future"],["croirai","croire",["v"],["v"],"future"],["croiras","croire",["v"],["v"],"future"],["croira","croire",["v"],["v"],"future"],["croirons","croire",["v"],["v"],"future"],["croirez","croire",["v"],["v"],"future"],["croiront","croire",["v"],["v"],"future"],["boirai","boire",["v"],["v"],"future"],["boiras","boire",["v"],["v"],"future"],["boira","boire",["v"],["v"],"future"],["boirons","boire",["v"],["v"],"future"],["boirez","boire",["v"],["v"],"future"],["boiront","boire",["v"],["v"],"future"],["clorai","clore",["v"],["v"],"future"],["cloras","clore",["v"],["v"],"future"],["clora","clore",["v"],["v"],"future"],["clorons","clore",["v"],["v"],"future"],["clorez","clore",["v"],["v"],"future"],["cloront","clore",["v"],["v"],"future"],["clurai","clure",["v"],["v"],"future"],["cluras","clure",["v"],["v"],"future"],["clura","clure",["v"],["v"],"future"],["clurons","clure",["v"],["v"],"future"],["clurez","clure",["v"],["v"],"future"],["cluront","clure",["v"],["v"],"future"],["soudrai","soudre",["v"],["v"],"future"],["soudras","soudre",["v"],["v"],"future"],["soudra","soudre",["v"],["v"],"future"],["soudrons","soudre",["v"],["v"],"future"],["soudrez","soudre",["v"],["v"],"future"],["soudront","soudre",["v"],["v"],"future"],["coudrai","coudre",["v"],["v"],"future"],["coudras","coudre",["v"],["v"],"future"],["coudra","coudre",["v"],["v"],"future"],["coudrons","coudre",["v"],["v"],"future"],["coudrez","coudre",["v"],["v"],"future"],["coudront","coudre",["v"],["v"],"future"],["moudrai","moudre",["v"],["v"],"future"],["moudras","moudre",["v"],["v"],"future"],["moudra","moudre",["v"],["v"],"future"],["moudrons","moudre",["v"],["v"],"future"],["moudrez","moudre",["v"],["v"],"future"],["moudront","moudre",["v"],["v"],"future"],["ivrai","vivre",["v"],["v"],"future"],["ivras","vivre",["v"],["v"],"future"],["ivra","vivre",["v"],["v"],"future"],["ivrons","vivre",["v"],["v"],"future"],["ivrez","vivre",["v"],["v"],"future"],["ivront","vivre",["v"],["v"],"future"],["lirai","lire",["v"],["v"],"future"],["liras","lire",["v"],["v"],"future"],["lira","lire",["v"],["v"],"future"],["lirons","lire",["v"],["v"],"future"],["lirez","lire",["v"],["v"],"future"],["liront","lire",["v"],["v"],"future"],["dirai","dire",["v"],["v"],"future"],["diras","dire",["v"],["v"],"future"],["dira","dire",["v"],["v"],"future"],["dirons","dire",["v"],["v"],"future"],["direz","dire",["v"],["v"],"future"],["diront","dire",["v"],["v"],"future"],["rirai","rire",["v"],["v"],"future"],["riras","rire",["v"],["v"],"future"],["rira","rire",["v"],["v"],"future"],["rirons","rire",["v"],["v"],"future"],["rirez","rire",["v"],["v"],"future"],["riront","rire",["v"],["v"],"future"],["maudirai","maudire",["v"],["v"],"future"],["maudiras","maudire",["v"],["v"],"future"],["maudira","maudire",["v"],["v"],"future"],["maudirons","maudire",["v"],["v"],"future"],["maudirez","maudire",["v"],["v"],"future"],["maudiront","maudire",["v"],["v"],"future"],["crirai","crire",["v"],["v"],"future"],["criras","crire",["v"],["v"],"future"],["crira","crire",["v"],["v"],"future"],["crirons","crire",["v"],["v"],"future"],["crirez","crire",["v"],["v"],"future"],["criront","crire",["v"],["v"],"future"],["firai","fire",["v"],["v"],"future"],["firas","fire",["v"],["v"],"future"],["fira","fire",["v"],["v"],"future"],["firons","fire",["v"],["v"],"future"],["firez","fire",["v"],["v"],"future"],["firont","fire",["v"],["v"],"future"],["cirai","cire",["v"],["v"],"future"],["ciras","cire",["v"],["v"],"future"],["cira","cire",["v"],["v"],"future"],["cirons","cire",["v"],["v"],"future"],["cirez","cire",["v"],["v"],"future"],["ciront","cire",["v"],["v"],"future"],["frirai","frire",["v"],["v"],"future"],["friras","frire",["v"],["v"],"future"],["frira","frire",["v"],["v"],"future"],["frirons","frire",["v"],["v"],"future"],["frirez","frire",["v"],["v"],"future"],["friront","frire",["v"],["v"],"future"],["uirai","uire",["v"],["v"],"future"],["uiras","uire",["v"],["v"],"future"],["uira","uire",["v"],["v"],"future"],["uirons","uire",["v"],["v"],"future"],["uirez","uire",["v"],["v"],"future"],["uiront","uire",["v"],["v"],"future"],["sois","être",["aux"],["v"],"imperative present"],["soyons","être",["aux"],["v"],"imperative present"],["soyez","être",["aux"],["v"],"imperative present"],["aie","avoir",["aux"],["v"],"imperative present"],["ayons","avoir",["aux"],["v"],"imperative present"],["ayez","avoir",["aux"],["v"],"imperative present"],["e","er",["v"],["v"],"imperative present"],["ons","er",["v"],["v"],"imperative present"],["ez","er",["v"],["v"],"imperative present"],["ce","er",["v"],["v"],"imperative present"],["çons","er",["v"],["v"],"imperative present"],["cez","er",["v"],["v"],"imperative present"],["ge","ger",["v"],["v"],"imperative present"],["geons","ger",["v"],["v"],"imperative present"],["gez","ger",["v"],["v"],"imperative present"],["èce","ecer",["v"],["v"],"imperative present"],["eçons","ecer",["v"],["v"],"imperative present"],["ecez","ecer",["v"],["v"],"imperative present"],["ève","ever",["v"],["v"],"imperative present"],["evons","ever",["v"],["v"],"imperative present"],["evez","ever",["v"],["v"],"imperative present"],["ène","ener",["v"],["v"],"imperative present"],["enons","ener",["v"],["v"],"imperative present"],["enez","ener",["v"],["v"],"imperative present"],["èpe","eper",["v"],["v"],"imperative present"],["epons","eper",["v"],["v"],"imperative present"],["epez","eper",["v"],["v"],"imperative present"],["ère","erer",["v"],["v"],"imperative present"],["erons","erer",["v"],["v"],"imperative present"],["erez","erer",["v"],["v"],"imperative present"],["ème","emer",["v"],["v"],"imperative present"],["emons","emer",["v"],["v"],"imperative present"],["emez","emer",["v"],["v"],"imperative present"],["èvre","evrer",["v"],["v"],"imperative present"],["evrons","evrer",["v"],["v"],"imperative present"],["evrez","evrer",["v"],["v"],"imperative present"],["èse","eser",["v"],["v"],"imperative present"],["èsons","eser",["v"],["v"],"imperative present"],["esez","eser",["v"],["v"],"imperative present"],["ède","éder",["v"],["v"],"imperative present"],["édons","éder",["v"],["v"],"imperative present"],["édez","éder",["v"],["v"],"imperative present"],["èbre","ébrer",["v"],["v"],"imperative present"],["ébrons","ébrer",["v"],["v"],"imperative present"],["ébrez","ébrer",["v"],["v"],"imperative present"],["èce","écer",["v"],["v"],"imperative present"],["éçons","écer",["v"],["v"],"imperative present"],["écez","écer",["v"],["v"],"imperative present"],["èche","écher",["v"],["v"],"imperative present"],["échons","écher",["v"],["v"],"imperative present"],["échez","écher",["v"],["v"],"imperative present"],["ècre","écrer",["v"],["v"],"imperative present"],["écrons","écrer",["v"],["v"],"imperative present"],["écrez","écrer",["v"],["v"],"imperative present"],["ègle","égler",["v"],["v"],"imperative present"],["églons","égler",["v"],["v"],"imperative present"],["églez","égler",["v"],["v"],"imperative present"],["ègne","égner",["v"],["v"],"imperative present"],["égnons","égner",["v"],["v"],"imperative present"],["égnez","égner",["v"],["v"],"imperative present"],["ègre","égrer",["v"],["v"],"imperative present"],["égrons","égrer",["v"],["v"],"imperative present"],["égrez","égrer",["v"],["v"],"imperative present"],["ègue","éguer",["v"],["v"],"imperative present"],["éguons","éguer",["v"],["v"],"imperative present"],["éguez","éguer",["v"],["v"],"imperative present"],["èle","éler",["v"],["v"],"imperative present"],["élons","éler",["v"],["v"],"imperative present"],["élez","éler",["v"],["v"],"imperative present"],["ème","émer",["v"],["v"],"imperative present"],["émons","émer",["v"],["v"],"imperative present"],["émez","émer",["v"],["v"],"imperative present"],["ène","éner",["v"],["v"],"imperative present"],["énons","éner",["v"],["v"],"imperative present"],["énez","éner",["v"],["v"],"imperative present"],["èpe","éper",["v"],["v"],"imperative present"],["épons","éper",["v"],["v"],"imperative present"],["épez","éper",["v"],["v"],"imperative present"],["èque","équer",["v"],["v"],"imperative present"],["équons","équer",["v"],["v"],"imperative present"],["équez","équer",["v"],["v"],"imperative present"],["ère","érer",["v"],["v"],"imperative present"],["érons","érer",["v"],["v"],"imperative present"],["érez","érer",["v"],["v"],"imperative present"],["èse","éser",["v"],["v"],"imperative present"],["ésons","éser",["v"],["v"],"imperative present"],["ésez","éser",["v"],["v"],"imperative present"],["ète","éter",["v"],["v"],"imperative present"],["étons","éter",["v"],["v"],"imperative present"],["étez","éter",["v"],["v"],"imperative present"],["ètre","étrer",["v"],["v"],"imperative present"],["étrons","étrer",["v"],["v"],"imperative present"],["étrez","étrer",["v"],["v"],"imperative present"],["èye","éyer",["v"],["v"],"imperative present"],["éyons","éyer",["v"],["v"],"imperative present"],["éyez","éyer",["v"],["v"],"imperative present"],["elle","eler",["v"],["v"],"imperative present"],["ellons","eler",["v"],["v"],"imperative present"],["ellez","eler",["v"],["v"],"imperative present"],["ette","eter",["v"],["v"],"imperative present"],["ettons","eter",["v"],["v"],"imperative present"],["ettez","eter",["v"],["v"],"imperative present"],["èle","eler",["v"],["v"],"imperative present"],["élons","eler",["v"],["v"],"imperative present"],["élez","eler",["v"],["v"],"imperative present"],["ète","eter",["v"],["v"],"imperative present"],["étons","eter",["v"],["v"],"imperative present"],["étez","eter",["v"],["v"],"imperative present"],["ège","éger",["v"],["v"],"imperative present"],["égeons","éger",["v"],["v"],"imperative present"],["égez","éger",["v"],["v"],"imperative present"],["aie","ayer",["v"],["v"],"imperative present"],["ayons","ayer",["v"],["v"],"imperative present"],["ayez","ayer",["v"],["v"],"imperative present"],["oie","oyer",["v"],["v"],"imperative present"],["oyons","oyer",["v"],["v"],"imperative present"],["oyez","oyer",["v"],["v"],"imperative present"],["uie","uyer",["v"],["v"],"imperative present"],["uyons","uyer",["v"],["v"],"imperative present"],["uyez","uyer",["v"],["v"],"imperative present"],["is","ir",["v"],["v"],"imperative present"],["issons","ir",["v"],["v"],"imperative present"],["issez","ir",["v"],["v"],"imperative present"],["ïs","ïr",["v"],["v"],"imperative present"],["ïssons","ïr",["v"],["v"],"imperative present"],["ïssez","ïr",["v"],["v"],"imperative present"],["hais","haïr",["v"],["v"],"imperative present"],["haïssons","haïr",["v"],["v"],"imperative present"],["haïssez","haïr",["v"],["v"],"imperative present"],["va","aller",["v"],["v"],"imperative present"],["allons","aller",["v"],["v"],"imperative present"],["allez","aller",["v"],["v"],"imperative present"],["iens","enir",["v"],["v"],"imperative present"],["enons","enir",["v"],["v"],"imperative present"],["enez","enir",["v"],["v"],"imperative present"],["iers","érir",["v"],["v"],"imperative present"],["érons","érir",["v"],["v"],"imperative present"],["érez","érir",["v"],["v"],"imperative present"],["s","tir",["v"],["v"],"imperative present"],["tons","tir",["v"],["v"],"imperative present"],["tez","tir",["v"],["v"],"imperative present"],["êts","êtir",["v"],["v"],"imperative present"],["êtons","êtir",["v"],["v"],"imperative present"],["êtez","êtir",["v"],["v"],"imperative present"],["vre","vrir",["v"],["v"],"imperative present"],["vrons","vrir",["v"],["v"],"imperative present"],["vrez","vrir",["v"],["v"],"imperative present"],["fre","frir",["v"],["v"],"imperative present"],["frons","frir",["v"],["v"],"imperative present"],["frez","frir",["v"],["v"],"imperative present"],["ueille","ueillir",["v"],["v"],"imperative present"],["ueillons","ueillir",["v"],["v"],"imperative present"],["ueillez","ueillir",["v"],["v"],"imperative present"],["aille","aillir",["v"],["v"],"imperative present"],["aillons","aillir",["v"],["v"],"imperative present"],["aillez","aillir",["v"],["v"],"imperative present"],["bous","bouillir",["v"],["v"],"imperative present"],["bouillons","bouillir",["v"],["v"],"imperative present"],["bouillez","bouillir",["v"],["v"],"imperative present"],["dors","dormir",["v"],["v"],"imperative present"],["dormons","dormir",["v"],["v"],"imperative present"],["dormez","dormir",["v"],["v"],"imperative present"],["cours","dormir",["v"],["v"],"imperative present"],["courons","dormir",["v"],["v"],"imperative present"],["courez","dormir",["v"],["v"],"imperative present"],["meurs","mourir",["v"],["v"],"imperative present"],["mourons","mourir",["v"],["v"],"imperative present"],["mourez","mourir",["v"],["v"],"imperative present"],["sers","servir",["v"],["v"],"imperative present"],["servons","servir",["v"],["v"],"imperative present"],["servez","servir",["v"],["v"],"imperative present"],["fuis","fuir",["v"],["v"],"imperative present"],["fuyons","fuir",["v"],["v"],"imperative present"],["fuyez","fuir",["v"],["v"],"imperative present"],["ois","ouïr",["v"],["v"],"imperative present"],["oyons","ouïr",["v"],["v"],"imperative present"],["oyez","ouïr",["v"],["v"],"imperative present"],["çois","cevoir",["v"],["v"],"imperative present"],["cevons","cevoir",["v"],["v"],"imperative present"],["cevez","cevoir",["v"],["v"],"imperative present"],["vois","voir",["v"],["v"],"imperative present"],["voyons","voir",["v"],["v"],"imperative present"],["voyez","voir",["v"],["v"],"imperative present"],["sais","savoir",["v"],["v"],"imperative present"],["savons","savoir",["v"],["v"],"imperative present"],["savez","savoir",["v"],["v"],"imperative present"],["dois","devoir",["v"],["v"],"imperative present"],["devons","devoir",["v"],["v"],"imperative present"],["devez","devoir",["v"],["v"],"imperative present"],["meus","mouvoir",["v"],["v"],"imperative present"],["mouvons","mouvoir",["v"],["v"],"imperative present"],["mouvez","mouvoir",["v"],["v"],"imperative present"],["vaux","valoir",["v"],["v"],"imperative present"],["valons","valoir",["v"],["v"],"imperative present"],["valez","valoir",["v"],["v"],"imperative present"],["veux","vouloir",["v"],["v"],"imperative present"],["veuille","vouloir",["v"],["v"],"imperative present"],["voulons","vouloir",["v"],["v"],"imperative present"],["voulez","vouloir",["v"],["v"],"imperative present"],["veuillez","vouloir",["v"],["v"],"imperative present"],["sois","seoir",["v"],["v"],"imperative present"],["soyons","seoir",["v"],["v"],"imperative present"],["soyez","seoir",["v"],["v"],"imperative present"],["assieds","asseoir",["v"],["v"],"imperative present"],["asseyons","asseoir",["v"],["v"],"imperative present"],["asseyez","asseoir",["v"],["v"],"imperative present"],["ands","andre",["v"],["v"],"imperative present"],["andons","andre",["v"],["v"],"imperative present"],["andez","andre",["v"],["v"],"imperative present"],["ends","endre",["v"],["v"],"imperative present"],["endons","endre",["v"],["v"],"imperative present"],["endez","endre",["v"],["v"],"imperative present"],["onds","ondre",["v"],["v"],"imperative present"],["ondons","ondre",["v"],["v"],"imperative present"],["ondez","ondre",["v"],["v"],"imperative present"],["erds","erdre",["v"],["v"],"imperative present"],["erdons","erdre",["v"],["v"],"imperative present"],["erdez","erdre",["v"],["v"],"imperative present"],["ords","ordre",["v"],["v"],"imperative present"],["ordons","ordre",["v"],["v"],"imperative present"],["ordez","ordre",["v"],["v"],"imperative present"],["prends","prendre",["v"],["v"],"imperative present"],["prenons","prendre",["v"],["v"],"imperative present"],["prenez","prendre",["v"],["v"],"imperative present"],["bats","battre",["v"],["v"],"imperative present"],["battons","battre",["v"],["v"],"imperative present"],["battez","battre",["v"],["v"],"imperative present"],["mets","mettre",["v"],["v"],"imperative present"],["mettons","mettre",["v"],["v"],"imperative present"],["mettez","mettre",["v"],["v"],"imperative present"],["eins","eindre",["v"],["v"],"imperative present"],["eignons","eindre",["v"],["v"],"imperative present"],["eignez","eindre",["v"],["v"],"imperative present"],["oins","oindre",["v"],["v"],"imperative present"],["oignons","oindre",["v"],["v"],"imperative present"],["oignez","oindre",["v"],["v"],"imperative present"],["ains","aindre",["v"],["v"],"imperative present"],["aignons","aindre",["v"],["v"],"imperative present"],["aignez","aindre",["v"],["v"],"imperative present"],["vaincs","vaincre",["v"],["v"],"imperative present"],["vainquons","vaincre",["v"],["v"],"imperative present"],["vainquez","vaincre",["v"],["v"],"imperative present"],["rais","raire",["v"],["v"],"imperative present"],["rayons","raire",["v"],["v"],"imperative present"],["rayez","raire",["v"],["v"],"imperative present"],["fais","faire",["v"],["v"],"imperative present"],["faisons","faire",["v"],["v"],"imperative present"],["faites","faire",["v"],["v"],"imperative present"],["plais","faire",["v"],["v"],"imperative present"],["plaisons","faire",["v"],["v"],"imperative present"],["plaisez","faire",["v"],["v"],"imperative present"],["ais","aître",["v"],["v"],"imperative present"],["aissons","aître",["v"],["v"],"imperative present"],["aissez","aître",["v"],["v"],"imperative present"],["ois","oître",["v"],["v"],"imperative present"],["oissons","oître",["v"],["v"],"imperative present"],["oissez","oître",["v"],["v"],"imperative present"],["crois","croire",["v"],["v"],"imperative present"],["croyons","croire",["v"],["v"],"imperative present"],["croyez","croire",["v"],["v"],"imperative present"],["bois","boire",["v"],["v"],"imperative present"],["buvons","boire",["v"],["v"],"imperative present"],["buvez","boire",["v"],["v"],"imperative present"],["clos","clore",["v"],["v"],"imperative present"],["clus","clure",["v"],["v"],"imperative present"],["cluons","clure",["v"],["v"],"imperative present"],["cluez","clure",["v"],["v"],"imperative present"],["sous","soudre",["v"],["v"],"imperative present"],["solvons","soudre",["v"],["v"],"imperative present"],["solvez","soudre",["v"],["v"],"imperative present"],["couds","coudre",["v"],["v"],"imperative present"],["cousons","coudre",["v"],["v"],"imperative present"],["cousez","coudre",["v"],["v"],"imperative present"],["mouds","moudre",["v"],["v"],"imperative present"],["moulons","moudre",["v"],["v"],"imperative present"],["moulez","moudre",["v"],["v"],"imperative present"],["is","vivre",["v"],["v"],"imperative present"],["ivons","vivre",["v"],["v"],"imperative present"],["ivez","vivre",["v"],["v"],"imperative present"],["lis","lire",["v"],["v"],"imperative present"],["lisons","lire",["v"],["v"],"imperative present"],["lisez","lire",["v"],["v"],"imperative present"],["dis","dire",["v"],["v"],"imperative present"],["disons","dire",["v"],["v"],"imperative present"],["disez","dire",["v"],["v"],"imperative present"],["ris","rire",["v"],["v"],"imperative present"],["rions","rire",["v"],["v"],"imperative present"],["riez","rire",["v"],["v"],"imperative present"],["maudis","maudire",["v"],["v"],"imperative present"],["maudissons","maudire",["v"],["v"],"imperative present"],["maudissez","maudire",["v"],["v"],"imperative present"],["cris","crire",["v"],["v"],"imperative present"],["crivons","crire",["v"],["v"],"imperative present"],["crivez","crire",["v"],["v"],"imperative present"],["fis","fire",["v"],["v"],"imperative present"],["fisons","fire",["v"],["v"],"imperative present"],["fisez","fire",["v"],["v"],"imperative present"],["cis","cire",["v"],["v"],"imperative present"],["cisons","cire",["v"],["v"],"imperative present"],["cisez","cire",["v"],["v"],"imperative present"],["fris","frire",["v"],["v"],"imperative present"],["frisons","frire",["v"],["v"],"imperative present"],["frisez","frire",["v"],["v"],"imperative present"],["uis","uire",["v"],["v"],"imperative present"],["uisons","uire",["v"],["v"],"imperative present"],["uisez","uire",["v"],["v"],"imperative present"],["serais","être",["aux"],["v"],"Conditional"],["serais","être",["aux"],["v"],"Conditional"],["serait","être",["aux"],["v"],"Conditional"],["serions","être",["aux"],["v"],"Conditional"],["seriez","être",["aux"],["v"],"Conditional"],["seraient","être",["aux"],["v"],"Conditional"],["aurais","avoir",["aux"],["v"],"Conditional"],["aurais","avoir",["aux"],["v"],"Conditional"],["aurait","avoir",["aux"],["v"],"Conditional"],["aurions","avoir",["aux"],["v"],"Conditional"],["auriez","avoir",["aux"],["v"],"Conditional"],["auraient","avoir",["aux"],["v"],"Conditional"],["erais","er",["v"],["v"],"Conditional"],["erait","er",["v"],["v"],"Conditional"],["erions","er",["v"],["v"],"Conditional"],["eriez","er",["v"],["v"],"Conditional"],["eraient","er",["v"],["v"],"Conditional"],["cerais","cer",["v"],["v"],"Conditional"],["cerait","cer",["v"],["v"],"Conditional"],["cerions","cer",["v"],["v"],"Conditional"],["ceriez","cer",["v"],["v"],"Conditional"],["ceraient","cer",["v"],["v"],"Conditional"],["gerais","ger",["v"],["v"],"Conditional"],["gerait","ger",["v"],["v"],"Conditional"],["gerions","ger",["v"],["v"],"Conditional"],["geriez","ger",["v"],["v"],"Conditional"],["géraient","ger",["v"],["v"],"Conditional"],["ècerais","ecer",["v"],["v"],"Conditional"],["ècerait","ecer",["v"],["v"],"Conditional"],["ècerions","ecer",["v"],["v"],"Conditional"],["èceriez","ecer",["v"],["v"],"Conditional"],["èceraient","ecer",["v"],["v"],"Conditional"],["èverais","ever",["v"],["v"],"Conditional"],["èverait","ever",["v"],["v"],"Conditional"],["èverions","ever",["v"],["v"],"Conditional"],["èveriez","ever",["v"],["v"],"Conditional"],["èveraient","ever",["v"],["v"],"Conditional"],["ènerais","ener",["v"],["v"],"Conditional"],["ènerait","ener",["v"],["v"],"Conditional"],["ènerions","ener",["v"],["v"],"Conditional"],["èneriez","ener",["v"],["v"],"Conditional"],["èneraient","ener",["v"],["v"],"Conditional"],["èperais","eper",["v"],["v"],"Conditional"],["èperait","eper",["v"],["v"],"Conditional"],["èperions","eper",["v"],["v"],"Conditional"],["èperiez","eper",["v"],["v"],"Conditional"],["èperaient","eper",["v"],["v"],"Conditional"],["èrerais","erer",["v"],["v"],"Conditional"],["èrerait","erer",["v"],["v"],"Conditional"],["èrerions","erer",["v"],["v"],"Conditional"],["èreriez","erer",["v"],["v"],"Conditional"],["èraient","erer",["v"],["v"],"Conditional"],["èmerais","emer",["v"],["v"],"Conditional"],["èmerait","emer",["v"],["v"],"Conditional"],["èmerions","emer",["v"],["v"],"Conditional"],["èmeriez","emer",["v"],["v"],"Conditional"],["èmeraient","emer",["v"],["v"],"Conditional"],["èvrerais","evrer",["v"],["v"],"Conditional"],["èvrerait","evrer",["v"],["v"],"Conditional"],["èvrerions","evrer",["v"],["v"],"Conditional"],["èvreriez","evrer",["v"],["v"],"Conditional"],["èvreraient","evrer",["v"],["v"],"Conditional"],["èserais","eser",["v"],["v"],"Conditional"],["èserait","eser",["v"],["v"],"Conditional"],["èserions","eser",["v"],["v"],"Conditional"],["èseriez","eser",["v"],["v"],"Conditional"],["èseraient","eser",["v"],["v"],"Conditional"],["éderais","éder",["v"],["v"],"Conditional"],["éderait","éder",["v"],["v"],"Conditional"],["éderions","éder",["v"],["v"],"Conditional"],["éderiez","éder",["v"],["v"],"Conditional"],["éderaient","éder",["v"],["v"],"Conditional"],["ébrerais","ébrer",["v"],["v"],"Conditional"],["ébrerait","ébrer",["v"],["v"],"Conditional"],["ébrerions","ébrer",["v"],["v"],"Conditional"],["ébreriez","ébrer",["v"],["v"],"Conditional"],["ébreraient","ébrer",["v"],["v"],"Conditional"],["écerais","écer",["v"],["v"],"Conditional"],["écerait","écer",["v"],["v"],"Conditional"],["écerions","écer",["v"],["v"],"Conditional"],["éceriez","écer",["v"],["v"],"Conditional"],["éceraient","écer",["v"],["v"],"Conditional"],["écherais","écher",["v"],["v"],"Conditional"],["écherait","écher",["v"],["v"],"Conditional"],["écherions","écher",["v"],["v"],"Conditional"],["écheriez","écher",["v"],["v"],"Conditional"],["écheraient","écher",["v"],["v"],"Conditional"],["écrerais","écrer",["v"],["v"],"Conditional"],["écrerait","écrer",["v"],["v"],"Conditional"],["écrerions","écrer",["v"],["v"],"Conditional"],["écreriez","écrer",["v"],["v"],"Conditional"],["écreraient","écrer",["v"],["v"],"Conditional"],["églerais","égler",["v"],["v"],"Conditional"],["églerait","égler",["v"],["v"],"Conditional"],["églerions","égler",["v"],["v"],"Conditional"],["égleriez","égler",["v"],["v"],"Conditional"],["égleraient","égler",["v"],["v"],"Conditional"],["égnerais","égner",["v"],["v"],"Conditional"],["égnerait","égner",["v"],["v"],"Conditional"],["égnerions","égner",["v"],["v"],"Conditional"],["égneriez","égner",["v"],["v"],"Conditional"],["égneraient","égner",["v"],["v"],"Conditional"],["égrerais","égrer",["v"],["v"],"Conditional"],["égrerait","égrer",["v"],["v"],"Conditional"],["égrerions","égrer",["v"],["v"],"Conditional"],["égreriez","égrer",["v"],["v"],"Conditional"],["égréraient","égrer",["v"],["v"],"Conditional"],["éguerais","éguer",["v"],["v"],"Conditional"],["éguerait","éguer",["v"],["v"],"Conditional"],["éguerions","éguer",["v"],["v"],"Conditional"],["égueriez","éguer",["v"],["v"],"Conditional"],["égueraient","éguer",["v"],["v"],"Conditional"],["élerais","éler",["v"],["v"],"Conditional"],["élerait","éler",["v"],["v"],"Conditional"],["élerions","éler",["v"],["v"],"Conditional"],["éleriez","éler",["v"],["v"],"Conditional"],["éleraient","éler",["v"],["v"],"Conditional"],["émerais","émer",["v"],["v"],"Conditional"],["émerait","émer",["v"],["v"],"Conditional"],["émerions","émer",["v"],["v"],"Conditional"],["émeriez","émer",["v"],["v"],"Conditional"],["émeraient","émer",["v"],["v"],"Conditional"],["énerais","éner",["v"],["v"],"Conditional"],["énerait","éner",["v"],["v"],"Conditional"],["énerions","éner",["v"],["v"],"Conditional"],["éneriez","éner",["v"],["v"],"Conditional"],["éneraient","éner",["v"],["v"],"Conditional"],["éperais","éper",["v"],["v"],"Conditional"],["éperait","éper",["v"],["v"],"Conditional"],["éperions","éper",["v"],["v"],"Conditional"],["éperiez","éper",["v"],["v"],"Conditional"],["éperaient","éper",["v"],["v"],"Conditional"],["équerais","équer",["v"],["v"],"Conditional"],["équerait","équer",["v"],["v"],"Conditional"],["équerions","équer",["v"],["v"],"Conditional"],["équeriez","équer",["v"],["v"],"Conditional"],["équeraient","équer",["v"],["v"],"Conditional"],["érerais","érer",["v"],["v"],"Conditional"],["érerait","érer",["v"],["v"],"Conditional"],["érerions","érer",["v"],["v"],"Conditional"],["éreriez","érer",["v"],["v"],"Conditional"],["éraient","érer",["v"],["v"],"Conditional"],["éserais","éser",["v"],["v"],"Conditional"],["éserait","éser",["v"],["v"],"Conditional"],["éserions","éser",["v"],["v"],"Conditional"],["éseriez","éser",["v"],["v"],"Conditional"],["ésaient","éser",["v"],["v"],"Conditional"],["éterais","éter",["v"],["v"],"Conditional"],["éterait","éter",["v"],["v"],"Conditional"],["éterions","éter",["v"],["v"],"Conditional"],["éteriez","éter",["v"],["v"],"Conditional"],["éteraient","éter",["v"],["v"],"Conditional"],["étrerais","étrer",["v"],["v"],"Conditional"],["étrerait","étrer",["v"],["v"],"Conditional"],["étrerions","étrer",["v"],["v"],"Conditional"],["étreriez","étrer",["v"],["v"],"Conditional"],["étraient","étrer",["v"],["v"],"Conditional"],["éyerais","éyer",["v"],["v"],"Conditional"],["éyerait","éyer",["v"],["v"],"Conditional"],["éyerions","éyer",["v"],["v"],"Conditional"],["éyeriez","éyer",["v"],["v"],"Conditional"],["éyeraient","éyer",["v"],["v"],"Conditional"],["ellerais","eler",["v"],["v"],"Conditional"],["ellerait","eler",["v"],["v"],"Conditional"],["ellerions","eler",["v"],["v"],"Conditional"],["elleriez","eler",["v"],["v"],"Conditional"],["elleraient","eler",["v"],["v"],"Conditional"],["etterais","eter",["v"],["v"],"Conditional"],["etterait","eter",["v"],["v"],"Conditional"],["etterions","eter",["v"],["v"],"Conditional"],["etteriez","eter",["v"],["v"],"Conditional"],["etteraient","eter",["v"],["v"],"Conditional"],["èlerais","eler",["v"],["v"],"Conditional"],["èlerait","eler",["v"],["v"],"Conditional"],["èlerions","eler",["v"],["v"],"Conditional"],["èleriez","eler",["v"],["v"],"Conditional"],["èleraient","eler",["v"],["v"],"Conditional"],["èterais","eter",["v"],["v"],"Conditional"],["èterait","eter",["v"],["v"],"Conditional"],["èterions","eter",["v"],["v"],"Conditional"],["èteriez","eter",["v"],["v"],"Conditional"],["èteraient","eter",["v"],["v"],"Conditional"],["égerais","éger",["v"],["v"],"Conditional"],["égerait","éger",["v"],["v"],"Conditional"],["égerions","éger",["v"],["v"],"Conditional"],["égeriez","éger",["v"],["v"],"Conditional"],["égeraient","éger",["v"],["v"],"Conditional"],["ayerais","ayer",["v"],["v"],"Conditional"],["ayerait","ayer",["v"],["v"],"Conditional"],["ayerions","ayer",["v"],["v"],"Conditional"],["ayeriez","ayer",["v"],["v"],"Conditional"],["ayeraient","ayer",["v"],["v"],"Conditional"],["aierais","ayer",["v"],["v"],"Conditional"],["aierait","ayer",["v"],["v"],"Conditional"],["aierions","ayer",["v"],["v"],"Conditional"],["aieriez","ayer",["v"],["v"],"Conditional"],["aieraient","ayer",["v"],["v"],"Conditional"],["oierais","oyer",["v"],["v"],"Conditional"],["oierait","oyer",["v"],["v"],"Conditional"],["oierions","oyer",["v"],["v"],"Conditional"],["oieriez","oyer",["v"],["v"],"Conditional"],["oieraient","oyer",["v"],["v"],"Conditional"],["uyerais","uyer",["v"],["v"],"Conditional"],["uyerait","uyer",["v"],["v"],"Conditional"],["uyerions","uyer",["v"],["v"],"Conditional"],["uyeriez","uyer",["v"],["v"],"Conditional"],["uyeraient","uyer",["v"],["v"],"Conditional"],["irais","ir",["v"],["v"],"Conditional"],["irait","ir",["v"],["v"],"Conditional"],["irions","ir",["v"],["v"],"Conditional"],["iriez","ir",["v"],["v"],"Conditional"],["iraient","ir",["v"],["v"],"Conditional"],["haïrais","haïr",["v"],["v"],"Conditional"],["haïrait","haïr",["v"],["v"],"Conditional"],["haïrions","haïr",["v"],["v"],"Conditional"],["haïriez","haïr",["v"],["v"],"Conditional"],["haïraient","haïr",["v"],["v"],"Conditional"],["irais","aller",["v"],["v"],"Conditional"],["irait","aller",["v"],["v"],"Conditional"],["irions","aller",["v"],["v"],"Conditional"],["iriez","aller",["v"],["v"],"Conditional"],["iraient","aller",["v"],["v"],"Conditional"],["iendrais","enir",["v"],["v"],"Conditional"],["iendrait","enir",["v"],["v"],"Conditional"],["iendrions","enir",["v"],["v"],"Conditional"],["iendriez","enir",["v"],["v"],"Conditional"],["iendraient","enir",["v"],["v"],"Conditional"],["ierais","érir",["v"],["v"],"Conditional"],["ierait","érir",["v"],["v"],"Conditional"],["irions","érir",["v"],["v"],"Conditional"],["iriez","érir",["v"],["v"],"Conditional"],["ièrent","érir",["v"],["v"],"Conditional"],["irais","tir",["v"],["v"],"Conditional"],["irait","tir",["v"],["v"],"Conditional"],["irions","tir",["v"],["v"],"Conditional"],["iriez","tir",["v"],["v"],"Conditional"],["raient","tir",["v"],["v"],"Conditional"],["êtirais","êtir",["v"],["v"],"Conditional"],["êtirait","êtir",["v"],["v"],"Conditional"],["êtirions","êtir",["v"],["v"],"Conditional"],["êtiriez","êtir",["v"],["v"],"Conditional"],["êtiraient","êtir",["v"],["v"],"Conditional"],["vrirais","vrir",["v"],["v"],"Conditional"],["vrirait","vrir",["v"],["v"],"Conditional"],["vririons","vrir",["v"],["v"],"Conditional"],["vririez","vrir",["v"],["v"],"Conditional"],["vriraient","vrir",["v"],["v"],"Conditional"],["frirais","frir",["v"],["v"],"Conditional"],["frirait","frir",["v"],["v"],"Conditional"],["fririons","frir",["v"],["v"],"Conditional"],["fririez","frir",["v"],["v"],"Conditional"],["friraient","frir",["v"],["v"],"Conditional"],["ueillerais","ueillir",["v"],["v"],"Conditional"],["ueillerait","ueillir",["v"],["v"],"Conditional"],["ueillerions","ueillir",["v"],["v"],"Conditional"],["ueilleriez","ueillir",["v"],["v"],"Conditional"],["ueilleraient","ueillir",["v"],["v"],"Conditional"],["aillirais","aillir",["v"],["v"],"Conditional"],["aillirait","aillir",["v"],["v"],"Conditional"],["aillirions","aillir",["v"],["v"],"Conditional"],["ailliriez","aillir",["v"],["v"],"Conditional"],["ailliraient","aillir",["v"],["v"],"Conditional"],["faillirais","faillir",["v"],["v"],"Conditional"],["faillirait","faillir",["v"],["v"],"Conditional"],["faillirions","faillir",["v"],["v"],"Conditional"],["failliriez","faillir",["v"],["v"],"Conditional"],["failliraient","faillir",["v"],["v"],"Conditional"],["bouillirais","bouillir",["v"],["v"],"Conditional"],["bouillirait","bouillir",["v"],["v"],"Conditional"],["bouillirions","bouillir",["v"],["v"],"Conditional"],["bouilliriez","bouillir",["v"],["v"],"Conditional"],["bouilliraient","bouillir",["v"],["v"],"Conditional"],["dormirais","dormir",["v"],["v"],"Conditional"],["dormirait","dormir",["v"],["v"],"Conditional"],["dormirions","dormir",["v"],["v"],"Conditional"],["dormiriez","dormir",["v"],["v"],"Conditional"],["dormiraient","dormir",["v"],["v"],"Conditional"],["courrais","courir",["v"],["v"],"Conditional"],["courrait","courir",["v"],["v"],"Conditional"],["courrions","courir",["v"],["v"],"Conditional"],["courriez","courir",["v"],["v"],"Conditional"],["courraient","courir",["v"],["v"],"Conditional"],["mourrais","mourir",["v"],["v"],"Conditional"],["mourrait","mourir",["v"],["v"],"Conditional"],["mourrions","mourir",["v"],["v"],"Conditional"],["mourriez","mourir",["v"],["v"],"Conditional"],["mourraient","mourir",["v"],["v"],"Conditional"],["servirais","servir",["v"],["v"],"Conditional"],["servirait","servir",["v"],["v"],"Conditional"],["servirions","servir",["v"],["v"],"Conditional"],["serviriez","servir",["v"],["v"],"Conditional"],["serviraient","servir",["v"],["v"],"Conditional"],["fuirais","fuir",["v"],["v"],"Conditional"],["fuirait","fuir",["v"],["v"],"Conditional"],["fuirions","fuir",["v"],["v"],"Conditional"],["fuiriez","fuir",["v"],["v"],"Conditional"],["fuiraient","fuir",["v"],["v"],"Conditional"],["ouïrais","ouïr",["v"],["v"],"Conditional"],["ouïrait","ouïr",["v"],["v"],"Conditional"],["ouïrions","ouïr",["v"],["v"],"Conditional"],["ouïriez","ouïr",["v"],["v"],"Conditional"],["ouïraient","ouïr",["v"],["v"],"Conditional"],["gîrais","gésir",["v"],["v"],"Conditional"],["gîrait","gésir",["v"],["v"],"Conditional"],["gîraient","gésir",["v"],["v"],"Conditional"],["cevrais","cevoir",["v"],["v"],"Conditional"],["cevrait","cevoir",["v"],["v"],"Conditional"],["cevrions","cevoir",["v"],["v"],"Conditional"],["cevriez","cevoir",["v"],["v"],"Conditional"],["cevraient","cevoir",["v"],["v"],"Conditional"],["verrais","voir",["v"],["v"],"Conditional"],["verrait","voir",["v"],["v"],"Conditional"],["verrions","voir",["v"],["v"],"Conditional"],["verriez","voir",["v"],["v"],"Conditional"],["verraient","voir",["v"],["v"],"Conditional"],["saurais","savoir",["v"],["v"],"Conditional"],["saurait","savoir",["v"],["v"],"Conditional"],["saurions","savoir",["v"],["v"],"Conditional"],["sauriez","savoir",["v"],["v"],"Conditional"],["sauraient","savoir",["v"],["v"],"Conditional"],["devrais","devoir",["v"],["v"],"Conditional"],["devrait","devoir",["v"],["v"],"Conditional"],["devrions","devoir",["v"],["v"],"Conditional"],["devriez","devoir",["v"],["v"],"Conditional"],["devraient","devoir",["v"],["v"],"Conditional"],["pourrais","pouvoir",["v"],["v"],"Conditional"],["pourrait","pouvoir",["v"],["v"],"Conditional"],["pourrions","pouvoir",["v"],["v"],"Conditional"],["pourriez","pouvoir",["v"],["v"],"Conditional"],["pourraient","pouvoir",["v"],["v"],"Conditional"],["mouvrais","mouvoir",["v"],["v"],"Conditional"],["mouvrait","mouvoir",["v"],["v"],"Conditional"],["mouvrions","mouvoir",["v"],["v"],"Conditional"],["mouvriez","mouvoir",["v"],["v"],"Conditional"],["mouvraient","mouvoir",["v"],["v"],"Conditional"],["pleuvrait","pleuvoir",["v"],["v"],"Conditional"],["faudrait","falloir",["v"],["v"],"Conditional"],["vaudrais","valoir",["v"],["v"],"Conditional"],["vaudrait","valoir",["v"],["v"],"Conditional"],["vaudrions","valoir",["v"],["v"],"Conditional"],["vaudriez","valoir",["v"],["v"],"Conditional"],["vaudraient","valoir",["v"],["v"],"Conditional"],["voudrais","vouloir",["v"],["v"],"Conditional"],["voudrait","vouloir",["v"],["v"],"Conditional"],["voudrions","vouloir",["v"],["v"],"Conditional"],["voudriez","vouloir",["v"],["v"],"Conditional"],["voudraient","vouloir",["v"],["v"],"Conditional"],["serais","seoir",["v"],["v"],"Conditional"],["serait","seoir",["v"],["v"],"Conditional"],["serions","seoir",["v"],["v"],"Conditional"],["seriez","seoir",["v"],["v"],"Conditional"],["seraient","seoir",["v"],["v"],"Conditional"],["assoirais","asseoir",["v"],["v"],"Conditional"],["assoirait","asseoir",["v"],["v"],"Conditional"],["assoirions","asseoir",["v"],["v"],"Conditional"],["assoiriez","asseoir",["v"],["v"],"Conditional"],["assoiraient","asseoir",["v"],["v"],"Conditional"],["siéraient","seoir",["v"],["v"],"Conditional"],["choirais","choir",["v"],["v"],"Conditional"],["choirait","choir",["v"],["v"],"Conditional"],["choirions","choir",["v"],["v"],"Conditional"],["choiriez","choir",["v"],["v"],"Conditional"],["choiraient","choir",["v"],["v"],"Conditional"],["échoirais","échoir",["v"],["v"],"Conditional"],["échoirait","échoir",["v"],["v"],"Conditional"],["échoirions","échoir",["v"],["v"],"Conditional"],["échoiriez","échoir",["v"],["v"],"Conditional"],["échoiraient","échoir",["v"],["v"],"Conditional"],["andrais","andre",["v"],["v"],"Conditional"],["andrai","andre",["v"],["v"],"Conditional"],["andrions","andre",["v"],["v"],"Conditional"],["andriez","andre",["v"],["v"],"Conditional"],["andraient","andre",["v"],["v"],"Conditional"],["endrais","endre",["v"],["v"],"Conditional"],["endrai","endre",["v"],["v"],"Conditional"],["endrions","endre",["v"],["v"],"Conditional"],["endriez","endre",["v"],["v"],"Conditional"],["endraient","endre",["v"],["v"],"Conditional"],["ondrais","ondre",["v"],["v"],"Conditional"],["ondra","ondre",["v"],["v"],"Conditional"],["ondrions","ondre",["v"],["v"],"Conditional"],["ondriez","ondre",["v"],["v"],"Conditional"],["ondraient","ondre",["v"],["v"],"Conditional"],["erdras","erdre",["v"],["v"],"Conditional"],["erdrait","erdre",["v"],["v"],"Conditional"],["erdrions","erdre",["v"],["v"],"Conditional"],["erdriez","erdre",["v"],["v"],"Conditional"],["erdaient","erdre",["v"],["v"],"Conditional"],["ordrais","ordre",["v"],["v"],"Conditional"],["ordrait","ordre",["v"],["v"],"Conditional"],["ordrions","ordre",["v"],["v"],"Conditional"],["ordriez","ordre",["v"],["v"],"Conditional"],["ordraient","ordre",["v"],["v"],"Conditional"],["prendrais","prendre",["v"],["v"],"Conditional"],["prendrait","prendre",["v"],["v"],"Conditional"],["prendrions","prendre",["v"],["v"],"Conditional"],["prendriez","prendre",["v"],["v"],"Conditional"],["prendraient","prendre",["v"],["v"],"Conditional"],["battrais","battre",["v"],["v"],"Conditional"],["battrait","battre",["v"],["v"],"Conditional"],["battrions","battre",["v"],["v"],"Conditional"],["battriez","battre",["v"],["v"],"Conditional"],["battraient","battre",["v"],["v"],"Conditional"],["mettrais","mettre",["v"],["v"],"Conditional"],["mettrait","mettre",["v"],["v"],"Conditional"],["mettrions","mettre",["v"],["v"],"Conditional"],["mettriez","mettre",["v"],["v"],"Conditional"],["mettraient","mettre",["v"],["v"],"Conditional"],["eindrais","eindre",["v"],["v"],"Conditional"],["eindrait","eindre",["v"],["v"],"Conditional"],["eindrions","eindre",["v"],["v"],"Conditional"],["eindriez","eindre",["v"],["v"],"Conditional"],["eindraient","eindre",["v"],["v"],"Conditional"],["oindrais","oindre",["v"],["v"],"Conditional"],["oindrait","oindre",["v"],["v"],"Conditional"],["oindrions","oindre",["v"],["v"],"Conditional"],["oindriez","oindre",["v"],["v"],"Conditional"],["oindraient","oindre",["v"],["v"],"Conditional"],["aindrais","aindre",["v"],["v"],"Conditional"],["aindrait","aindre",["v"],["v"],"Conditional"],["aindrions","aindre",["v"],["v"],"Conditional"],["aindriez","aindre",["v"],["v"],"Conditional"],["aindraient","aindre",["v"],["v"],"Conditional"],["vaincrais","vaincre",["v"],["v"],"Conditional"],["vaincrait","vaincre",["v"],["v"],"Conditional"],["vaincrions","vaincre",["v"],["v"],"Conditional"],["vaincriez","vaincre",["v"],["v"],"Conditional"],["vaincraient","vaincre",["v"],["v"],"Conditional"],["rairais","raire",["v"],["v"],"Conditional"],["rairait","raire",["v"],["v"],"Conditional"],["rairions","raire",["v"],["v"],"Conditional"],["rairiez","raire",["v"],["v"],"Conditional"],["rairaient","raire",["v"],["v"],"Conditional"],["ferais","faire",["v"],["v"],"Conditional"],["ferait","faire",["v"],["v"],"Conditional"],["ferions","faire",["v"],["v"],"Conditional"],["feriez","faire",["v"],["v"],"Conditional"],["feraient","faire",["v"],["v"],"Conditional"],["plairais","faire",["v"],["v"],"Conditional"],["plairait","faire",["v"],["v"],"Conditional"],["plairions","faire",["v"],["v"],"Conditional"],["plairiez","faire",["v"],["v"],"Conditional"],["plairaient","faire",["v"],["v"],"Conditional"],["naîtrais","naître",["v"],["v"],"Conditional"],["naîtrait","naître",["v"],["v"],"Conditional"],["naîtrions","naître",["v"],["v"],"Conditional"],["naîtriez","naître",["v"],["v"],"Conditional"],["naîtraient","naître",["v"],["v"],"Conditional"],["oîtrais","oître",["v"],["v"],"Conditional"],["oîtrait","oître",["v"],["v"],"Conditional"],["oîtrions","oître",["v"],["v"],"Conditional"],["oîtriez","oître",["v"],["v"],"Conditional"],["oîtraient","oître",["v"],["v"],"Conditional"],["croirais","croire",["v"],["v"],"Conditional"],["croirait","croire",["v"],["v"],"Conditional"],["croirions","croire",["v"],["v"],"Conditional"],["croiriez","croire",["v"],["v"],"Conditional"],["croiraient","croire",["v"],["v"],"Conditional"],["boirais","boire",["v"],["v"],"Conditional"],["boirait","boire",["v"],["v"],"Conditional"],["boirions","boire",["v"],["v"],"Conditional"],["boiriez","boire",["v"],["v"],"Conditional"],["boiraient","boire",["v"],["v"],"Conditional"],["clorais","clore",["v"],["v"],"Conditional"],["clorait","clore",["v"],["v"],"Conditional"],["clorions","clore",["v"],["v"],"Conditional"],["cloriez","clore",["v"],["v"],"Conditional"],["cloraient","clore",["v"],["v"],"Conditional"],["clurais","clure",["v"],["v"],"Conditional"],["clurait","clure",["v"],["v"],"Conditional"],["clurions","clure",["v"],["v"],"Conditional"],["cluriez","clure",["v"],["v"],"Conditional"],["cluraient","clure",["v"],["v"],"Conditional"],["soudrais","soudre",["v"],["v"],"Conditional"],["soudrait","soudre",["v"],["v"],"Conditional"],["soudrions","soudre",["v"],["v"],"Conditional"],["soudriez","soudre",["v"],["v"],"Conditional"],["soudraient","soudre",["v"],["v"],"Conditional"],["coudrais","coudre",["v"],["v"],"Conditional"],["coudrait","coudre",["v"],["v"],"Conditional"],["coudrions","coudre",["v"],["v"],"Conditional"],["coudriez","coudre",["v"],["v"],"Conditional"],["coudraient","coudre",["v"],["v"],"Conditional"],["moudrais","moudre",["v"],["v"],"Conditional"],["moudrait","moudre",["v"],["v"],"Conditional"],["moudrions","moudre",["v"],["v"],"Conditional"],["moudriez","moudre",["v"],["v"],"Conditional"],["moudraient","moudre",["v"],["v"],"Conditional"],["vivrais","vivre",["v"],["v"],"Conditional"],["vivrait","vivre",["v"],["v"],"Conditional"],["vivrions","vivre",["v"],["v"],"Conditional"],["vivriez","vivre",["v"],["v"],"Conditional"],["vivraient","vivre",["v"],["v"],"Conditional"],["lirais","lire",["v"],["v"],"Conditional"],["lirait","lire",["v"],["v"],"Conditional"],["lirions","lire",["v"],["v"],"Conditional"],["liriez","lire",["v"],["v"],"Conditional"],["liraient","lire",["v"],["v"],"Conditional"],["dirais","dire",["v"],["v"],"Conditional"],["dirait","dire",["v"],["v"],"Conditional"],["dirions","dire",["v"],["v"],"Conditional"],["diriez","dire",["v"],["v"],"Conditional"],["diraient","dire",["v"],["v"],"Conditional"],["rirais","rire",["v"],["v"],"Conditional"],["rirait","rire",["v"],["v"],"Conditional"],["ririons","rire",["v"],["v"],"Conditional"],["ririez","rire",["v"],["v"],"Conditional"],["riraient","rire",["v"],["v"],"Conditional"],["maudirais","maudire",["v"],["v"],"Conditional"],["maudirait","maudire",["v"],["v"],"Conditional"],["maudrions","maudire",["v"],["v"],"Conditional"],["maudriez","maudire",["v"],["v"],"Conditional"],["maudiraient","maudire",["v"],["v"],"Conditional"],["crirais","crire",["v"],["v"],"Conditional"],["crirait","crire",["v"],["v"],"Conditional"],["cririons","crire",["v"],["v"],"Conditional"],["cririez","crire",["v"],["v"],"Conditional"],["criraient","crire",["v"],["v"],"Conditional"],["firais","fire",["v"],["v"],"Conditional"],["firait","fire",["v"],["v"],"Conditional"],["firions","fire",["v"],["v"],"Conditional"],["firiez","fire",["v"],["v"],"Conditional"],["firaient","fire",["v"],["v"],"Conditional"],["cirais","cire",["v"],["v"],"Conditional"],["cirait","cire",["v"],["v"],"Conditional"],["cirions","cire",["v"],["v"],"Conditional"],["ciriez","cire",["v"],["v"],"Conditional"],["ciraient","cire",["v"],["v"],"Conditional"],["frirais","frire",["v"],["v"],"Conditional"],["frirait","frire",["v"],["v"],"Conditional"],["fririons","frire",["v"],["v"],"Conditional"],["fririez","frire",["v"],["v"],"Conditional"],["friraient","frire",["v"],["v"],"Conditional"],["cuirais","uire",["v"],["v"],"Conditional"],["cuirait","uire",["v"],["v"],"Conditional"],["cuirions","uire",["v"],["v"],"Conditional"],["cuiriez","uire",["v"],["v"],"Conditional"],["cuiraient","uire",["v"],["v"],"Conditional"],["fus","être",["aux"],["v"],"Preterite"],["fus","être",["aux"],["v"],"Preterite"],["fut","être",["aux"],["v"],"Preterite"],["fûmes","être",["aux"],["v"],"Preterite"],["fûtes","être",["aux"],["v"],"Preterite"],["furent","être",["aux"],["v"],"Preterite"],["eus","avoir",["aux"],["v"],"Preterite"],["eus","avoir",["aux"],["v"],"Preterite"],["eut","avoir",["aux"],["v"],"Preterite"],["eûmes","avoir",["aux"],["v"],"Preterite"],["eûtes","avoir",["aux"],["v"],"Preterite"],["eurent","avoir",["aux"],["v"],"Preterite"],["ai","er",["v"],["v"],"Preterite"],["as","er",["v"],["v"],"Preterite"],["a","er",["v"],["v"],"Preterite"],["âmes","er",["v"],["v"],"Preterite"],["âtes","er",["v"],["v"],"Preterite"],["èrent","er",["v"],["v"],"Preterite"],["çai","cer",["v"],["v"],"Preterite"],["ças","cer",["v"],["v"],"Preterite"],["ça","cer",["v"],["v"],"Preterite"],["çâmes","cer",["v"],["v"],"Preterite"],["çâtes","cer",["v"],["v"],"Preterite"],["çèrent","cer",["v"],["v"],"Preterite"],["geai","ger",["v"],["v"],"Preterite"],["geas","ger",["v"],["v"],"Preterite"],["gea","ger",["v"],["v"],"Preterite"],["geâmes","ger",["v"],["v"],"Preterite"],["geâtes","ger",["v"],["v"],"Preterite"],["gèrent","ger",["v"],["v"],"Preterite"],["èçai","ecer",["v"],["v"],"Preterite"],["èças","ecer",["v"],["v"],"Preterite"],["èça","ecer",["v"],["v"],"Preterite"],["èçâmes","ecer",["v"],["v"],"Preterite"],["èçâtes","ecer",["v"],["v"],"Preterite"],["ècèrent","ecer",["v"],["v"],"Preterite"],["èvai","ever",["v"],["v"],"Preterite"],["èvas","ever",["v"],["v"],"Preterite"],["èva","ever",["v"],["v"],"Preterite"],["èvâmes","ever",["v"],["v"],"Preterite"],["èvâtes","ever",["v"],["v"],"Preterite"],["èvèrent","ever",["v"],["v"],"Preterite"],["ènai","ener",["v"],["v"],"Preterite"],["ènas","ener",["v"],["v"],"Preterite"],["èna","ener",["v"],["v"],"Preterite"],["ènâmes","ener",["v"],["v"],"Preterite"],["ènâtes","ener",["v"],["v"],"Preterite"],["ènèrent","ener",["v"],["v"],"Preterite"],["èpai","eper",["v"],["v"],"Preterite"],["èpas","eper",["v"],["v"],"Preterite"],["èpa","eper",["v"],["v"],"Preterite"],["èpâmes","eper",["v"],["v"],"Preterite"],["èpâtes","eper",["v"],["v"],"Preterite"],["èpèrent","eper",["v"],["v"],"Preterite"],["èrai","erer",["v"],["v"],"Preterite"],["èras","erer",["v"],["v"],"Preterite"],["èra","erer",["v"],["v"],"Preterite"],["èrâmes","erer",["v"],["v"],"Preterite"],["èrâtes","erer",["v"],["v"],"Preterite"],["èrèrent","erer",["v"],["v"],"Preterite"],["èmai","emer",["v"],["v"],"Preterite"],["èmas","emer",["v"],["v"],"Preterite"],["èma","emer",["v"],["v"],"Preterite"],["èmâmes","emer",["v"],["v"],"Preterite"],["èmâtes","emer",["v"],["v"],"Preterite"],["èmèrent","emer",["v"],["v"],"Preterite"],["èvrài","evrer",["v"],["v"],"Preterite"],["èvràs","evrer",["v"],["v"],"Preterite"],["èvrà","evrer",["v"],["v"],"Preterite"],["èvrâmes","evrer",["v"],["v"],"Preterite"],["èvrâtes","evrer",["v"],["v"],"Preterite"],["èvrèrent","evrer",["v"],["v"],"Preterite"],["èsai","eser",["v"],["v"],"Preterite"],["èsas","eser",["v"],["v"],"Preterite"],["èsa","eser",["v"],["v"],"Preterite"],["èsâmes","eser",["v"],["v"],"Preterite"],["èsâtes","eser",["v"],["v"],"Preterite"],["èsèrent","eser",["v"],["v"],"Preterite"],["édai","éder",["v"],["v"],"Preterite"],["édas","éder",["v"],["v"],"Preterite"],["éda","éder",["v"],["v"],"Preterite"],["édâmes","éder",["v"],["v"],"Preterite"],["édâtes","éder",["v"],["v"],"Preterite"],["édèrent","éder",["v"],["v"],"Preterite"],["ébrai","ébrer",["v"],["v"],"Preterite"],["ébras","ébrer",["v"],["v"],"Preterite"],["ébra","ébrer",["v"],["v"],"Preterite"],["ébrâmes","ébrer",["v"],["v"],"Preterite"],["ébrâtes","ébrer",["v"],["v"],"Preterite"],["ébrèrent","ébrer",["v"],["v"],"Preterite"],["échai","écher",["v"],["v"],"Preterite"],["échas","écher",["v"],["v"],"Preterite"],["écha","écher",["v"],["v"],"Preterite"],["échâmes","écher",["v"],["v"],"Preterite"],["échâtes","écher",["v"],["v"],"Preterite"],["échèrent","écher",["v"],["v"],"Preterite"],["aiyai","ayer",["v"],["v"],"Preterite"],["aiyas","ayer",["v"],["v"],"Preterite"],["aiya","ayer",["v"],["v"],"Preterite"],["aiyâmes","ayer",["v"],["v"],"Preterite"],["aiyâtes","ayer",["v"],["v"],"Preterite"],["aiyèrent","ayer",["v"],["v"],"Preterite"],["oiyai","oyer",["v"],["v"],"Preterite"],["oiyas","oyer",["v"],["v"],"Preterite"],["oiya","oyer",["v"],["v"],"Preterite"],["oiyâmes","oyer",["v"],["v"],"Preterite"],["oiyâtes","oyer",["v"],["v"],"Preterite"],["oiyèrent","oyer",["v"],["v"],"Preterite"],["uiyai","uyer",["v"],["v"],"Preterite"],["uiyas","uyer",["v"],["v"],"Preterite"],["uiya","uyer",["v"],["v"],"Preterite"],["uiyâmes","uyer",["v"],["v"],"Preterite"],["uiyâtes","uyer",["v"],["v"],"Preterite"],["uiyèrent","uyer",["v"],["v"],"Preterite"],["is","ir",["v"],["v"],"Preterite"],["it","ir",["v"],["v"],"Preterite"],["îmes","ir",["v"],["v"],"Preterite"],["îtes","ir",["v"],["v"],"Preterite"],["irent","ir",["v"],["v"],"Preterite"],["haïs","haïr",["v"],["v"],"Preterite"],["haït","haïr",["v"],["v"],"Preterite"],["haïmes","haïr",["v"],["v"],"Preterite"],["haïtes","haïr",["v"],["v"],"Preterite"],["haïrent","haïr",["v"],["v"],"Preterite"],["allai","aller",["v"],["v"],"Preterite"],["allas","aller",["v"],["v"],"Preterite"],["alla","aller",["v"],["v"],"Preterite"],["allâmes","aller",["v"],["v"],"Preterite"],["allâtes","aller",["v"],["v"],"Preterite"],["allèrent","aller",["v"],["v"],"Preterite"],["ins","enir",["v"],["v"],"Preterite"],["int","enir",["v"],["v"],"Preterite"],["înmes","enir",["v"],["v"],"Preterite"],["întes","enir",["v"],["v"],"Preterite"],["inrent","enir",["v"],["v"],"Preterite"],["éris","érir",["v"],["v"],"Preterite"],["érit","érir",["v"],["v"],"Preterite"],["érîmes","érir",["v"],["v"],"Preterite"],["érîtes","érir",["v"],["v"],"Preterite"],["érirent","érir",["v"],["v"],"Preterite"],["tis","tir",["v"],["v"],"Preterite"],["tit","tir",["v"],["v"],"Preterite"],["tîmes","tir",["v"],["v"],"Preterite"],["tîtes","tir",["v"],["v"],"Preterite"],["tirent","tir",["v"],["v"],"Preterite"],["êtis","êtir",["v"],["v"],"Preterite"],["êtit","êtir",["v"],["v"],"Preterite"],["êtîmes","êtir",["v"],["v"],"Preterite"],["êtîtes","êtir",["v"],["v"],"Preterite"],["êtirent","êtir",["v"],["v"],"Preterite"],["vris","vrir",["v"],["v"],"Preterite"],["vrit","vrir",["v"],["v"],"Preterite"],["vrîmes","vrir",["v"],["v"],"Preterite"],["vrîtes","vrir",["v"],["v"],"Preterite"],["vrirent","vrir",["v"],["v"],"Preterite"],["fris","frir",["v"],["v"],"Preterite"],["frit","frir",["v"],["v"],"Preterite"],["frîmes","frir",["v"],["v"],"Preterite"],["frîtes","frir",["v"],["v"],"Preterite"],["frirent","frir",["v"],["v"],"Preterite"],["ueillis","ueillir",["v"],["v"],"Preterite"],["ueillit","ueillir",["v"],["v"],"Preterite"],["ueillîmes","ueillir",["v"],["v"],"Preterite"],["ueillîtes","ueillir",["v"],["v"],"Preterite"],["ueillirent","ueillir",["v"],["v"],"Preterite"],["aillis","aillir",["v"],["v"],"Preterite"],["aillit","aillir",["v"],["v"],"Preterite"],["aillîmes","aillir",["v"],["v"],"Preterite"],["aillîtes","aillir",["v"],["v"],"Preterite"],["aillirent","aillir",["v"],["v"],"Preterite"],["bouillis","bouillir",["v"],["v"],"Preterite"],["bouillit","bouillir",["v"],["v"],"Preterite"],["bouillîmes","bouillir",["v"],["v"],"Preterite"],["bouillîtes","bouillir",["v"],["v"],"Preterite"],["bouillirent","bouillir",["v"],["v"],"Preterite"],["dormis","dormir",["v"],["v"],"Preterite"],["dormit","dormir",["v"],["v"],"Preterite"],["dormîmes","dormir",["v"],["v"],"Preterite"],["dormîtes","dormir",["v"],["v"],"Preterite"],["dormirent","dormir",["v"],["v"],"Preterite"],["courus","courir",["v"],["v"],"Preterite"],["courut","courir",["v"],["v"],"Preterite"],["courûmes","courir",["v"],["v"],"Preterite"],["courûtes","courir",["v"],["v"],"Preterite"],["coururent","courir",["v"],["v"],"Preterite"],["mourus","mourir",["v"],["v"],"Preterite"],["mourut","mourir",["v"],["v"],"Preterite"],["mourûmes","mourir",["v"],["v"],"Preterite"],["mourûtes","mourir",["v"],["v"],"Preterite"],["moururent","mourir",["v"],["v"],"Preterite"],["servis","servir",["v"],["v"],"Preterite"],["servit","servir",["v"],["v"],"Preterite"],["servîmes","servir",["v"],["v"],"Preterite"],["servîtes","servir",["v"],["v"],"Preterite"],["servirent","servir",["v"],["v"],"Preterite"],["fuis","fuir",["v"],["v"],"Preterite"],["fuit","fuir",["v"],["v"],"Preterite"],["fuîmes","fuir",["v"],["v"],"Preterite"],["fuîtes","fuir",["v"],["v"],"Preterite"],["fuirent","fuir",["v"],["v"],"Preterite"],["ouïs","ouïr",["v"],["v"],"Preterite"],["ouït","ouïr",["v"],["v"],"Preterite"],["ouïmes","ouïr",["v"],["v"],"Preterite"],["ouïtes","ouïr",["v"],["v"],"Preterite"],["ouïrent","ouïr",["v"],["v"],"Preterite"],["gis","gésir",["v"],["v"],"Preterite"],["git","gésir",["v"],["v"],"Preterite"],["gîmes","gésir",["v"],["v"],"Preterite"],["gîtes","gésir",["v"],["v"],"Preterite"],["gisirent","gésir",["v"],["v"],"Preterite"],["çus","cevoir",["v"],["v"],"Preterite"],["çut","cevoir",["v"],["v"],"Preterite"],["çûmes","cevoir",["v"],["v"],"Preterite"],["çûtes","cevoir",["v"],["v"],"Preterite"],["çurent","cevoir",["v"],["v"],"Preterite"],["vis","voir",["v"],["v"],"Preterite"],["vit","voir",["v"],["v"],"Preterite"],["vîmes","voir",["v"],["v"],"Preterite"],["vîtes","voir",["v"],["v"],"Preterite"],["virent","voir",["v"],["v"],"Preterite"],["sus","savoir",["v"],["v"],"Preterite"],["sut","savoir",["v"],["v"],"Preterite"],["sûmes","savoir",["v"],["v"],"Preterite"],["sûtes","savoir",["v"],["v"],"Preterite"],["surent","savoir",["v"],["v"],"Preterite"],["dus","devoir",["v"],["v"],"Preterite"],["dut","devoir",["v"],["v"],"Preterite"],["dûmes","devoir",["v"],["v"],"Preterite"],["dûtes","devoir",["v"],["v"],"Preterite"],["durent","devoir",["v"],["v"],"Preterite"],["pus","pouvoir",["v"],["v"],"Preterite"],["put","pouvoir",["v"],["v"],"Preterite"],["pûmes","pouvoir",["v"],["v"],"Preterite"],["pûtes","pouvoir",["v"],["v"],"Preterite"],["purent","pouvoir",["v"],["v"],"Preterite"],["mus","mouvoir",["v"],["v"],"Preterite"],["mut","mouvoir",["v"],["v"],"Preterite"],["mûmes","mouvoir",["v"],["v"],"Preterite"],["mûtes","mouvoir",["v"],["v"],"Preterite"],["murent","mouvoir",["v"],["v"],"Preterite"],["plut","pleuvoir",["v"],["v"],"Preterite"],["fallut","falloir",["v"],["v"],"Preterite"],["valus","valoir",["v"],["v"],"Preterite"],["valut","valoir",["v"],["v"],"Preterite"],["valûmes","valoir",["v"],["v"],"Preterite"],["valûtes","valoir",["v"],["v"],"Preterite"],["valurent","valoir",["v"],["v"],"Preterite"],["voulus","vouloir",["v"],["v"],"Preterite"],["voulut","vouloir",["v"],["v"],"Preterite"],["voulûmes","vouloir",["v"],["v"],"Preterite"],["voulûtes","vouloir",["v"],["v"],"Preterite"],["voulurent","vouloir",["v"],["v"],"Preterite"],["seus","seoir",["v"],["v"],"Preterite"],["seut","seoir",["v"],["v"],"Preterite"],["seûmes","seoir",["v"],["v"],"Preterite"],["seûtes","seoir",["v"],["v"],"Preterite"],["seurent","seoir",["v"],["v"],"Preterite"],["assis","asseoir",["v"],["v"],"Preterite"],["assit","asseoir",["v"],["v"],"Preterite"],["assîmes","asseoir",["v"],["v"],"Preterite"],["assîtes","asseoir",["v"],["v"],"Preterite"],["assirent","asseoir",["v"],["v"],"Preterite"],["chus","choir",["v"],["v"],"Preterite"],["chut","choir",["v"],["v"],"Preterite"],["chûmes","choir",["v"],["v"],"Preterite"],["chûtes","choir",["v"],["v"],"Preterite"],["churent","choir",["v"],["v"],"Preterite"],["andis","andre",["v"],["v"],"Preterite"],["andit","andre",["v"],["v"],"Preterite"],["andîmes","andre",["v"],["v"],"Preterite"],["andîtes","andre",["v"],["v"],"Preterite"],["andirent","andre",["v"],["v"],"Preterite"],["endis","endre",["v"],["v"],"Preterite"],["endit","endre",["v"],["v"],"Preterite"],["endîmes","endre",["v"],["v"],"Preterite"],["endîtes","endre",["v"],["v"],"Preterite"],["endirent","endre",["v"],["v"],"Preterite"],["ondis","ondre",["v"],["v"],"Preterite"],["ondit","ondre",["v"],["v"],"Preterite"],["ondîmes","ondre",["v"],["v"],"Preterite"],["ondîtes","ondre",["v"],["v"],"Preterite"],["ondirent","ondre",["v"],["v"],"Preterite"],["erdis","erdre",["v"],["v"],"Preterite"],["erdit","erdre",["v"],["v"],"Preterite"],["erdîmes","erdre",["v"],["v"],"Preterite"],["erdîtes","erdre",["v"],["v"],"Preterite"],["erdirent","erdre",["v"],["v"],"Preterite"],["ordis","ordre",["v"],["v"],"Preterite"],["ordit","ordre",["v"],["v"],"Preterite"],["ordîmes","ordre",["v"],["v"],"Preterite"],["ordîtes","ordre",["v"],["v"],"Preterite"],["ordirent","ordre",["v"],["v"],"Preterite"],["pris","prendre",["v"],["v"],"Preterite"],["prit","prendre",["v"],["v"],"Preterite"],["prîmes","prendre",["v"],["v"],"Preterite"],["prîtes","prendre",["v"],["v"],"Preterite"],["prirent","prendre",["v"],["v"],"Preterite"],["battis","battre",["v"],["v"],"Preterite"],["battit","battre",["v"],["v"],"Preterite"],["battîmes","battre",["v"],["v"],"Preterite"],["battîtes","battre",["v"],["v"],"Preterite"],["battirent","battre",["v"],["v"],"Preterite"],["mis","mettre",["v"],["v"],"Preterite"],["mit","mettre",["v"],["v"],"Preterite"],["mîmes","mettre",["v"],["v"],"Preterite"],["mîtes","mettre",["v"],["v"],"Preterite"],["mirent","mettre",["v"],["v"],"Preterite"],["eignis","eindre",["v"],["v"],"Preterite"],["eignit","eindre",["v"],["v"],"Preterite"],["eignîmes","eindre",["v"],["v"],"Preterite"],["eignîtes","eindre",["v"],["v"],"Preterite"],["eignirent","eindre",["v"],["v"],"Preterite"],["oignis","oindre",["v"],["v"],"Preterite"],["oignit","oindre",["v"],["v"],"Preterite"],["oignîmes","oindre",["v"],["v"],"Preterite"],["oignîtes","oindre",["v"],["v"],"Preterite"],["oignirent","oindre",["v"],["v"],"Preterite"],["aignis","aindre",["v"],["v"],"Preterite"],["aignit","aindre",["v"],["v"],"Preterite"],["aignîmes","aindre",["v"],["v"],"Preterite"],["aignîtes","aindre",["v"],["v"],"Preterite"],["aignirent","aindre",["v"],["v"],"Preterite"],["vainquis","vaincre",["v"],["v"],"Preterite"],["vainquit","vaincre",["v"],["v"],"Preterite"],["vainquîmes","vaincre",["v"],["v"],"Preterite"],["vainquîtes","vaincre",["v"],["v"],"Preterite"],["vainquirent","vaincre",["v"],["v"],"Preterite"],["rais","raire",["v"],["v"],"Preterite"],["rait","raire",["v"],["v"],"Preterite"],["rayons","raire",["v"],["v"],"Preterite"],["rayez","raire",["v"],["v"],"Preterite"],["raient","raire",["v"],["v"],"Preterite"],["fis","faire",["v"],["v"],"Preterite"],["fit","faire",["v"],["v"],"Preterite"],["fîmes","faire",["v"],["v"],"Preterite"],["fîtes","faire",["v"],["v"],"Preterite"],["firent","faire",["v"],["v"],"Preterite"],["plais","plaire",["v"],["v"],"Preterite"],["plut","plaire",["v"],["v"],"Preterite"],["plûmes","plaire",["v"],["v"],"Preterite"],["plûtes","plaire",["v"],["v"],"Preterite"],["plurent","plaire",["v"],["v"],"Preterite"],["naquis","naître",["v"],["v"],"Preterite"],["naquit","naître",["v"],["v"],"Preterite"],["naquîmes","naître",["v"],["v"],"Preterite"],["naquîtes","naître",["v"],["v"],"Preterite"],["naquirent","naître",["v"],["v"],"Preterite"],["perdis","perdre",["v"],["v"],"Preterite"],["perdit","perdre",["v"],["v"],"Preterite"],["perdîmes","perdre",["v"],["v"],"Preterite"],["perdîtes","perdre",["v"],["v"],"Preterite"],["perdirent","perdre",["v"],["v"],"Preterite"],["crus","croire",["v"],["v"],"Preterite"],["crut","croire",["v"],["v"],"Preterite"],["crûmes","croire",["v"],["v"],"Preterite"],["crûtes","croire",["v"],["v"],"Preterite"],["crurent","croire",["v"],["v"],"Preterite"],["bus","boire",["v"],["v"],"Preterite"],["but","boire",["v"],["v"],"Preterite"],["bûmes","boire",["v"],["v"],"Preterite"],["bûtes","boire",["v"],["v"],"Preterite"],["burent","boire",["v"],["v"],"Preterite"],["closis","clore",["v"],["v"],"Preterite"],["closit","clore",["v"],["v"],"Preterite"],["closîmes","clore",["v"],["v"],"Preterite"],["closîtes","clore",["v"],["v"],"Preterite"],["closirent","clore",["v"],["v"],"Preterite"],["clus","clure",["v"],["v"],"Preterite"],["clut","clure",["v"],["v"],"Preterite"],["clûmes","clure",["v"],["v"],"Preterite"],["clûtes","clure",["v"],["v"],"Preterite"],["clurent","clure",["v"],["v"],"Preterite"],["sous","soudre",["v"],["v"],"Preterite"],["sout","soudre",["v"],["v"],"Preterite"],["solvons","soudre",["v"],["v"],"Preterite"],["solvez","soudre",["v"],["v"],"Preterite"],["solvent","soudre",["v"],["v"],"Preterite"],["couds","coudre",["v"],["v"],"Preterite"],["coud","coudre",["v"],["v"],"Preterite"],["cousîmes","coudre",["v"],["v"],"Preterite"],["cousîtes","coudre",["v"],["v"],"Preterite"],["cousirent","coudre",["v"],["v"],"Preterite"],["mouds","moudre",["v"],["v"],"Preterite"],["moud","moudre",["v"],["v"],"Preterite"],["moulîmes","moudre",["v"],["v"],"Preterite"],["moulîtes","moudre",["v"],["v"],"Preterite"],["moulurent","moudre",["v"],["v"],"Preterite"],["vis","vivre",["v"],["v"],"Preterite"],["vit","vivre",["v"],["v"],"Preterite"],["vîmes","vivre",["v"],["v"],"Preterite"],["vîtes","vivre",["v"],["v"],"Preterite"],["virent","vivre",["v"],["v"],"Preterite"],["lis","lire",["v"],["v"],"Preterite"],["lit","lire",["v"],["v"],"Preterite"],["lîmes","lire",["v"],["v"],"Preterite"],["lîtes","lire",["v"],["v"],"Preterite"],["lurent","lire",["v"],["v"],"Preterite"],["dis","dire",["v"],["v"],"Preterite"],["dit","dire",["v"],["v"],"Preterite"],["dîmes","dire",["v"],["v"],"Preterite"],["dîtes","dire",["v"],["v"],"Preterite"],["dirent","dire",["v"],["v"],"Preterite"],["ris","rire",["v"],["v"],"Preterite"],["rit","rire",["v"],["v"],"Preterite"],["rîmes","rire",["v"],["v"],"Preterite"],["rîtes","rire",["v"],["v"],"Preterite"],["rirent","rire",["v"],["v"],"Preterite"],["maudis","maudire",["v"],["v"],"Preterite"],["maudit","maudire",["v"],["v"],"Preterite"],["maudîmes","maudire",["v"],["v"],"Preterite"],["maudîtes","maudire",["v"],["v"],"Preterite"],["maudissent","maudire",["v"],["v"],"Preterite"],["cris","crire",["v"],["v"],"Preterite"],["crit","crire",["v"],["v"],"Preterite"],["crîmes","crire",["v"],["v"],"Preterite"],["crîtes","crire",["v"],["v"],"Preterite"],["crirent","crire",["v"],["v"],"Preterite"],["fis","fire",["v"],["v"],"Preterite"],["fit","fire",["v"],["v"],"Preterite"],["fîmes","fire",["v"],["v"],"Preterite"],["fîtes","fire",["v"],["v"],"Preterite"],["fîrent","fire",["v"],["v"],"Preterite"],["cis","cire",["v"],["v"],"Preterite"],["cit","cire",["v"],["v"],"Preterite"],["cîmes","cire",["v"],["v"],"Preterite"],["cîtes","cire",["v"],["v"],"Preterite"],["cîrent","cire",["v"],["v"],"Preterite"],["fris","frire",["v"],["v"],"Preterite"],["frit","frire",["v"],["v"],"Preterite"],["frîmes","frire",["v"],["v"],"Preterite"],["frîtes","frire",["v"],["v"],"Preterite"],["frîrent","frire",["v"],["v"],"Preterite"],["uis","uire",["v"],["v"],"Preterite"],["uit","uire",["v"],["v"],"Preterite"],["ûmes","uire",["v"],["v"],"Preterite"],["ûtes","uire",["v"],["v"],"Preterite"],["urent","uire",["v"],["v"],"Preterite"],["s","",["n"],["n"],"plural"],["aux","au",["n"],["n"],"plural"],["eaux","eau",["n"],["n"],"plural"],["eux","eu",["n"],["n"],"plural"],["oux","ou",["n"],["n"],"plural"],["aux","al",["n"],["n"],"plural"],["aux","ail",["n"],["n"],"plural"],["ant","er",["v"],["v"],"present participle"],["geant","ger",["v"],["v"],"present participle"],["issant","ir",["v"],["v"],"present participle"],["ant","ir",["v"],["v"],"present participle"],["ant","re",["v"],["v"],"present participle"],["ant","oir",["v"],["v"],"present participle"],["ignant","indre",["v"],["v"],"present participle"],["solvant","soudre",["v"],["v"],"present participle"],["ant","dre",["v"],["v"],"present participle"],["rait","raire",["v"],["v"],"present participle"],["ant","oir",["v"],["v"],"present participle"],["ayant","avoir",["v"],["v"],"present participle"],["étant","être",["v"],["v"],"present participle"],["faisant","faire",["v"],["v"],"present participle"],["disant","dire",["v"],["v"],"present participle"],["lisant","lire",["v"],["v"],"present participle"],["voyant","voir",["v"],["v"],"present participle"],["sachant","savoir",["v"],["v"],"present participle"],["e","er",["v"],["v"],"present subjunctive"],["es","er",["v"],["v"],"present subjunctive"],["e","er",["v"],["v"],"present subjunctive"],["ions","er",["v"],["v"],"present subjunctive"],["iez","er",["v"],["v"],"present subjunctive"],["ent","er",["v"],["v"],"present subjunctive"],["sse","ir",["v"],["v"],"present subjunctive"],["sses","ir",["v"],["v"],"present subjunctive"],["t","ir",["v"],["v"],"present subjunctive"],["ssions","ir",["v"],["v"],"present subjunctive"],["ssiez","ir",["v"],["v"],"present subjunctive"],["ssent","ir",["v"],["v"],"present subjunctive"],["sois","être",["v"],["v"],"present subjunctive"],["sois","être",["v"],["v"],"present subjunctive"],["soit","être",["v"],["v"],"present subjunctive"],["soyons","être",["v"],["v"],"present subjunctive"],["soyez","être",["v"],["v"],"present subjunctive"],["soient","être",["v"],["v"],"present subjunctive"],["aie","avoir",["v"],["v"],"present subjunctive"],["aies","avoir",["v"],["v"],"present subjunctive"],["ait","avoir",["v"],["v"],"present subjunctive"],["ayons","avoir",["v"],["v"],"present subjunctive"],["ayez","avoir",["v"],["v"],"present subjunctive"],["aient","avoir",["v"],["v"],"present subjunctive"],["fasse","faire",["v"],["v"],"present subjunctive"],["fasses","faire",["v"],["v"],"present subjunctive"],["fasse","faire",["v"],["v"],"present subjunctive"],["fassions","faire",["v"],["v"],"present subjunctive"],["fassiez","faire",["v"],["v"],"present subjunctive"],["fassent","faire",["v"],["v"],"present subjunctive"],["aille","aller",["v"],["v"],"present subjunctive"],["ailles","aller",["v"],["v"],"present subjunctive"],["aille","aller",["v"],["v"],"present subjunctive"],["allions","aller",["v"],["v"],"present subjunctive"],["alliez","aller",["v"],["v"],"present subjunctive"],["aillent","aller",["v"],["v"],"present subjunctive"],["sache","savoir",["v"],["v"],"present subjunctive"],["saches","savoir",["v"],["v"],"present subjunctive"],["sache","savoir",["v"],["v"],"present subjunctive"],["sachions","savoir",["v"],["v"],"present subjunctive"],["sachiez","savoir",["v"],["v"],"present subjunctive"],["sachent","savoir",["v"],["v"],"present subjunctive"],["puisse","pouvoir",["v"],["v"],"present subjunctive"],["puisses","pouvoir",["v"],["v"],"present subjunctive"],["puisse","pouvoir",["v"],["v"],"present subjunctive"],["puissions","pouvoir",["v"],["v"],"present subjunctive"],["puissiez","pouvoir",["v"],["v"],"present subjunctive"],["puissent","pouvoir",["v"],["v"],"present subjunctive"],["sse","re",["v"],["v"],"present subjunctive"],["sses","re",["v"],["v"],"present subjunctive"],["t","re",["v"],["v"],"present subjunctive"],["ssions","re",["v"],["v"],"present subjunctive"],["ssiez","re",["v"],["v"],"present subjunctive"],["ssent","re",["v"],["v"],"present subjunctive"],["ienne","ir",["v"],["v"],"present subjunctive"],["iennes","ir",["v"],["v"],"present subjunctive"],["ienne","ir",["v"],["v"],"present subjunctive"],["nions","ir",["v"],["v"],"present subjunctive"],["niez","ir",["v"],["v"],"present subjunctive"],["iennent","ir",["v"],["v"],"present subjunctive"],["sse","indre",["v"],["v"],"present subjunctive"],["sses","indre",["v"],["v"],"present subjunctive"],["t","indre",["v"],["v"],"present subjunctive"],["nions","indre",["v"],["v"],"present subjunctive"],["niez","indre",["v"],["v"],"present subjunctive"],["ngent","indre",["v"],["v"],"present subjunctive"],["sse","oudre",["v"],["v"],"present subjunctive"],["sses","oudre",["v"],["v"],"present subjunctive"],["t","oudre",["v"],["v"],"present subjunctive"],["dions","oudre",["v"],["v"],"present subjunctive"],["diez","oudre",["v"],["v"],"present subjunctive"],["dent","oudre",["v"],["v"],"present subjunctive"],["se","uire",["v"],["v"],"present subjunctive"],["ses","uire",["v"],["v"],"present subjunctive"],["t","uire",["v"],["v"],"present subjunctive"],["sions","uire",["v"],["v"],"present subjunctive"],["siez","uire",["v"],["v"],"present subjunctive"],["sent","uire",["v"],["v"],"present subjunctive"],["sse","ir",["v"],["v"],"present subjunctive"],["sses","ir",["v"],["v"],"present subjunctive"],["t","ir",["v"],["v"],"present subjunctive"],["ssions","ir",["v"],["v"],"present subjunctive"],["ssiez","ir",["v"],["v"],"present subjunctive"],["ssent","ir",["v"],["v"],"present subjunctive"]];
 
-const IINATAN_FRENCH_LANGUAGE = (() => {
-  const common = IINATAN_LANGUAGE_COMMON;
-  const deinflect = IINATAN_DEINFLECTION;
-  const YOMITAN_RULES = typeof IINATAN_FRENCH_YOMITAN_SUFFIX_RULES !== "undefined" ? IINATAN_FRENCH_YOMITAN_SUFFIX_RULES : [];
+const HOSHITAN_FRENCH_LANGUAGE = (() => {
+  const common = HOSHITAN_LANGUAGE_COMMON;
+  const deinflect = HOSHITAN_DEINFLECTION;
+  const YOMITAN_RULES = typeof HOSHITAN_FRENCH_YOMITAN_SUFFIX_RULES !== "undefined" ? HOSHITAN_FRENCH_YOMITAN_SUFFIX_RULES : [];
   const ELIDED_PREFIXES = {
     c: true,
     d: true,
@@ -1038,7 +1046,7 @@ const IINATAN_FRENCH_LANGUAGE = (() => {
  * Copyright (C) 2024-2026 Yomitan Authors
  * License: GPL-3.0-or-later. See DEINFLECTION_NOTES.md for attribution notes.
  */
-const IINATAN_GERMAN_YOMITAN_SEPARABLE_PREFIXES = [
+const HOSHITAN_GERMAN_YOMITAN_SEPARABLE_PREFIXES = [
   "ab", "an", "auf", "aus", "auseinander", "bei", "da", "dabei", "dar", "daran",
   "dazwischen", "durch", "ein", "empor", "entgegen", "entlang", "entzwei",
   "fehl", "fern", "fest", "fort", "frei", "gegenüber", "gleich", "heim", "her",
@@ -1049,8 +1057,8 @@ const IINATAN_GERMAN_YOMITAN_SEPARABLE_PREFIXES = [
   "vorüber", "vorweg", "weg", "weiter", "wieder", "zu", "zurecht", "zurück",
   "zusammen"
 ];
-const IINATAN_GERMAN_LOCAL_SEPARABLE_PREFIXES = ["hinüber", "teil"];
-const IINATAN_GERMAN_YOMITAN_SUFFIX_RULES = [
+const HOSHITAN_GERMAN_LOCAL_SEPARABLE_PREFIXES = ["hinüber", "teil"];
+const HOSHITAN_GERMAN_YOMITAN_SUFFIX_RULES = [
   ["ung", "en", [], ["v"], "nominalization"],
   ["lung", "eln", [], ["v"], "nominalization"],
   ["rung", "rn", [], ["v"], "nominalization"],
@@ -1059,21 +1067,21 @@ const IINATAN_GERMAN_YOMITAN_SUFFIX_RULES = [
   ["heit", "", ["n"], ["adj", "n"], "-heit"],
   ["keit", "", ["n"], ["adj", "n"], "-heit"]
 ];
-const IINATAN_GERMAN_LOCAL_SUFFIX_RULES = [
+const HOSHITAN_GERMAN_LOCAL_SUFFIX_RULES = [
   ["ungen", "en", ["n"], ["v"], "local plural nominalization -ungen"]
 ];
-const IINATAN_GERMAN_YOMITAN_PREFIX_RULES = [
+const HOSHITAN_GERMAN_YOMITAN_PREFIX_RULES = [
   ["un", "", [], ["adj"], "negative"]
 ];
 
-const IINATAN_GERMAN_LANGUAGE = (() => {
-  const common = IINATAN_LANGUAGE_COMMON;
-  const deinflect = IINATAN_DEINFLECTION;
-  const YOMITAN_SEPARABLE_PREFIXES = typeof IINATAN_GERMAN_YOMITAN_SEPARABLE_PREFIXES !== "undefined" ? IINATAN_GERMAN_YOMITAN_SEPARABLE_PREFIXES : [];
-  const LOCAL_SEPARABLE_PREFIXES = typeof IINATAN_GERMAN_LOCAL_SEPARABLE_PREFIXES !== "undefined" ? IINATAN_GERMAN_LOCAL_SEPARABLE_PREFIXES : [];
-  const YOMITAN_SUFFIX_RULES = typeof IINATAN_GERMAN_YOMITAN_SUFFIX_RULES !== "undefined" ? IINATAN_GERMAN_YOMITAN_SUFFIX_RULES : [];
-  const LOCAL_SUFFIX_RULES = typeof IINATAN_GERMAN_LOCAL_SUFFIX_RULES !== "undefined" ? IINATAN_GERMAN_LOCAL_SUFFIX_RULES : [];
-  const YOMITAN_PREFIX_RULES = typeof IINATAN_GERMAN_YOMITAN_PREFIX_RULES !== "undefined" ? IINATAN_GERMAN_YOMITAN_PREFIX_RULES : [];
+const HOSHITAN_GERMAN_LANGUAGE = (() => {
+  const common = HOSHITAN_LANGUAGE_COMMON;
+  const deinflect = HOSHITAN_DEINFLECTION;
+  const YOMITAN_SEPARABLE_PREFIXES = typeof HOSHITAN_GERMAN_YOMITAN_SEPARABLE_PREFIXES !== "undefined" ? HOSHITAN_GERMAN_YOMITAN_SEPARABLE_PREFIXES : [];
+  const LOCAL_SEPARABLE_PREFIXES = typeof HOSHITAN_GERMAN_LOCAL_SEPARABLE_PREFIXES !== "undefined" ? HOSHITAN_GERMAN_LOCAL_SEPARABLE_PREFIXES : [];
+  const YOMITAN_SUFFIX_RULES = typeof HOSHITAN_GERMAN_YOMITAN_SUFFIX_RULES !== "undefined" ? HOSHITAN_GERMAN_YOMITAN_SUFFIX_RULES : [];
+  const LOCAL_SUFFIX_RULES = typeof HOSHITAN_GERMAN_LOCAL_SUFFIX_RULES !== "undefined" ? HOSHITAN_GERMAN_LOCAL_SUFFIX_RULES : [];
+  const YOMITAN_PREFIX_RULES = typeof HOSHITAN_GERMAN_YOMITAN_PREFIX_RULES !== "undefined" ? HOSHITAN_GERMAN_YOMITAN_PREFIX_RULES : [];
   const MAX_RIGHT_CONTEXT_CHARS = 96;
   const MAX_RIGHT_CONTEXT_WORDS = 12;
   const GERMAN_WORD_RE = /^[A-Za-zÀ-ÖØ-öø-ÿ]+$/;
@@ -1393,8 +1401,8 @@ const IINATAN_GERMAN_LANGUAGE = (() => {
   };
 })();
 
-const IINATAN_CHINESE_LANGUAGE = (() => {
-  const common = IINATAN_LANGUAGE_COMMON;
+const HOSHITAN_CHINESE_LANGUAGE = (() => {
+  const common = HOSHITAN_LANGUAGE_COMMON;
 
   function isHoverableChar(ch) {
     return common.CHINESE_CHAR_RE.test(String(ch || ""));
@@ -1454,8 +1462,8 @@ const IINATAN_CHINESE_LANGUAGE = (() => {
   };
 })();
 
-const IINATAN_KOREAN_LANGUAGE = (() => {
-  const common = IINATAN_LANGUAGE_COMMON;
+const HOSHITAN_KOREAN_LANGUAGE = (() => {
+  const common = HOSHITAN_LANGUAGE_COMMON;
 
   function isHoverableChar(ch) {
     return common.KOREAN_CHAR_RE.test(String(ch || ""));
@@ -1517,14 +1525,14 @@ const IINATAN_KOREAN_LANGUAGE = (() => {
   };
 })();
 
-const IINATAN_LANGUAGE_REGISTRY = (() => {
+const HOSHITAN_LANGUAGE_REGISTRY = (() => {
   const languages = [
-    IINATAN_JAPANESE_LANGUAGE,
-    IINATAN_ENGLISH_LANGUAGE,
-    IINATAN_FRENCH_LANGUAGE,
-    IINATAN_GERMAN_LANGUAGE,
-    IINATAN_CHINESE_LANGUAGE,
-    IINATAN_KOREAN_LANGUAGE
+    HOSHITAN_JAPANESE_LANGUAGE,
+    HOSHITAN_ENGLISH_LANGUAGE,
+    HOSHITAN_FRENCH_LANGUAGE,
+    HOSHITAN_GERMAN_LANGUAGE,
+    HOSHITAN_CHINESE_LANGUAGE,
+    HOSHITAN_KOREAN_LANGUAGE
   ];
   const byId = Object.create(null);
   languages.forEach(language => { byId[language.id] = language; });
@@ -1561,15 +1569,15 @@ const IINATAN_LANGUAGE_REGISTRY = (() => {
 })();
 
 function languageModuleById(id) {
-  return IINATAN_LANGUAGE_REGISTRY.get(id);
+  return HOSHITAN_LANGUAGE_REGISTRY.get(id);
 }
 
 function selectedLanguageModule() {
-  return IINATAN_LANGUAGE_REGISTRY.selected();
+  return HOSHITAN_LANGUAGE_REGISTRY.selected();
 }
 
 function selectedLanguageOverlayConfig() {
-  return IINATAN_LANGUAGE_REGISTRY.overlayConfig(selectedLanguageModule());
+  return HOSHITAN_LANGUAGE_REGISTRY.overlayConfig(selectedLanguageModule());
 }
 
 function decodeEntities(s) {
@@ -1757,6 +1765,8 @@ function overlayConfig() {
   const language = selectedLanguageModule();
   scheduleIINAAppearanceHintRefresh(false);
   return {
+    uiLanguage: configuredUiLanguage(),
+    resolvedUiLanguage: resolvedUiLanguage(),
     language: selectedLanguageOverlayConfig(),
     lookupLanguage: language.id,
     fontScale: prefNumber("fontScale", 1.0),
@@ -1771,6 +1781,8 @@ function overlayConfig() {
     maxGlossesPerEntry: Math.max(1, prefNumber("maxGlossesPerEntry", 4)),
     scanLength: Math.max(1, prefNumber("scanLength", 24)),
     hoverRequestTimeoutMs: Math.max(1500, prefNumber("hoverRequestTimeoutMs", 15000)),
+    audioAutoPlay: prefBool("audioAutoPlay", false),
+    audioSources: activeWordAudioSources(),
     etymologyCollapseDefault: String(pref("etymologyCollapseDefault", "collapsed") || "collapsed"),
     wiktionaryEtymologyCollapseOverride: String(pref("wiktionaryEtymologyCollapseOverride", "collapsed") || "collapsed"),
     customPopupCss: String(pref("customPopupCss", "") || ""),
@@ -1780,13 +1792,19 @@ function overlayConfig() {
   };
 }
 function readCurrentSubtitle() {
-  let sub = "";
-  try { sub = mpv.getString("sub-text") || ""; } catch (_) { sub = ""; }
-  return cleanSubtitleText(sub);
+  const properties = ["sub-text", "secondary-sub-text"];
+  for (const property of properties) {
+    let sub = "";
+    try { sub = mpv.getString(property) || ""; } catch (_) { sub = ""; }
+    const cleaned = cleanSubtitleText(sub);
+    if (cleaned) return cleaned;
+  }
+  return "";
 }
 function publishSubtitle(text) {
   const normalized = text || "";
   currentSubtitleLineId = ++subtitleLineSerial;
+  lastSubtitlePublishedAt = Date.now();
   const language = selectedLanguageModule();
   const dicts = activeDictionaryPaths(language);
   debugVerbose("publishSubtitle lineId=" + currentSubtitleLineId + " language=" + language.id + " activeDicts=" + dicts.length + " len=" + String(normalized || "").length + " text=" + JSON.stringify(String(normalized || "").slice(0, 80)));
@@ -1799,6 +1817,12 @@ function publishSubtitle(text) {
       debugLog("background worker warmup failed lineId=" + currentSubtitleLineId + ": " + compactError(error));
     });
   }
+}
+function replayCurrentSubtitle() {
+  if (!lastSubtitle || !currentSubtitleLineId) return;
+  lastSubtitlePublishedAt = Date.now();
+  debugVerbose("replaySubtitle lineId=" + currentSubtitleLineId + " len=" + lastSubtitle.length);
+  postToOverlay("subtitle", { text: lastSubtitle, config: overlayConfig(), lineId: currentSubtitleLineId });
 }
 function canHideNativeSubtitlesForCurrentLanguage() {
   if (!lookupBackendReadyForNativeHide) return false;
@@ -1820,22 +1844,307 @@ function syncNativeSubtitleVisibility() {
     }
   } catch (error) { console.warn("Could not update native subtitle visibility: " + compactError(error)); }
 }
-function pollSubtitle() {
+function pollSubtitle(options) {
   if (!enabled) return;
   refreshPollingInterval();
   syncNativeSubtitleVisibility();
   const sub = readCurrentSubtitle();
-  if (sub === lastSubtitle) return;
+  if (sub && !textSubtitleOverlayPrimed && refreshOverlayForTextSubtitleActivation()) {
+    textSubtitleOverlayPrimed = true;
+  }
+  const now = Date.now();
+  if (!sub && lastSubtitle) {
+    if (!subtitleEmptySince) subtitleEmptySince = now;
+    if (now - subtitleEmptySince < SUBTITLE_EMPTY_GRACE_MS) return;
+  } else {
+    subtitleEmptySince = 0;
+  }
+  if (sub === lastSubtitle) {
+    if (sub && ((options && options.forceReplay) || now - lastSubtitlePublishedAt >= SUBTITLE_REPLAY_INTERVAL_MS)) {
+      replayCurrentSubtitle();
+    }
+    return;
+  }
   lastSubtitle = sub;
   publishSubtitle(sub);
 }
 function charsOf(text) { return Array.from(String(text || "")); }
 
+const I18N_MESSAGES = {
+  en: {
+    "menu.settings": "Settings...",
+    "menu.profiles": "Profiles",
+    "menu.more": "More",
+    "menu.debug": "Debug",
+    "menu.benchmark": "Run Lookup Performance Benchmark",
+    "menu.parserTests": "Run Lookup Parser Unit Tests",
+    "menu.languageTests": "Run Language Unit Tests",
+    "menu.settingsTests": "Run Settings Audit Checks",
+    "menu.filePicker": "Test File Picker API",
+    "menu.lookupTest": "Test Dictionary Lookup",
+    "menu.restartLookup": "Restart Dictionary Lookup",
+    "menu.stopLookup": "Stop Dictionary Lookup",
+    "menu.taskTest": "Show Task Panel Test",
+    "menu.logTest": "Emit Debug Log Test Message",
+    "menu.revealLog": "Reveal Debug Log File",
+    "menu.revealData": "Reveal Plugin Data Folder",
+    "state.on": "Hoshitan: On",
+    "state.off": "Hoshitan: Off",
+    "lookup.ready": "Dictionary lookup ready for {language}.",
+    "settings.title": "Hoshitan Settings",
+    "anki.connected": "Connected to AnkiConnect.",
+    "anki.localhost": "AnkiConnect URL must point to localhost.",
+    "anki.connectFailed": "Could not connect to AnkiConnect: {error}",
+    "anki.httpError": "AnkiConnect HTTP error {status}",
+    "anki.invalidJson": "AnkiConnect returned invalid JSON.",
+    "anki.mediaTimeout": "Timed out waiting for media file: {path}",
+    "anki.screenshotFailed": "IINA could not capture the current frame: {error}",
+    "anki.localVideoRequired": "Audio export requires a local video file.",
+    "anki.ffmpegMissing": "FFmpeg was not found. Set its path in Hoshitan Settings.",
+    "anki.deckRequired": "Choose an Anki deck in Settings.",
+    "anki.modelRequired": "Choose an Anki note type in Settings.",
+    "anki.fieldRequired": "Configure at least one Anki text field.",
+    "anki.deckMissing": "Anki deck was not found: {deck}",
+    "anki.fieldsMissing": "Fields not found in note type {model}: {fields}",
+    "anki.busy": "Another Anki card is still being created.",
+    "anki.added": "Added Anki note {noteId}.",
+    "anki.failed": "Anki export failed: {error}",
+    "manager.connected": "Connected to AnkiConnect.",
+    "manager.busy": "Another dictionary action is already running.",
+    "manager.actionFailed": "{action} failed: {error}",
+    "manager.actionComplete": "{action} complete.",
+    "manager.actionCancelled": "{action} cancelled.",
+    "manager.pickerFailed": "Could not open dictionary ZIP picker: {error}",
+    "manager.importCancelled": "Dictionary import cancelled.",
+    "manager.importing": "Importing {count}...",
+    "manager.imported": "Imported {count}.",
+    "manager.importFailed": "Importing dictionary failed: {error}",
+    "manager.refreshed": "Dictionary list refreshed.",
+    "manager.selectionSaved": "Dictionary selection saved.",
+    "manager.orderSaved": "Dictionary order saved.",
+    "manager.deletingDictionary": "Deleting dictionary",
+    "manager.downloading": "Downloading recommended dictionaries",
+    "manager.switchingProfile": "Switching profile",
+    "manager.creatingProfile": "Creating profile",
+    "manager.profileRenamed": "Profile renamed.",
+    "manager.renameFailed": "Renaming profile failed: {error}",
+    "manager.deletingProfile": "Deleting profile",
+    "manager.profileSaved": "Profile settings saved.",
+    "manager.profileSaveFailed": "Saving profile settings failed: {error}",
+    "manager.globalSaved": "Global settings saved.",
+    "manager.globalSaveFailed": "Saving global settings failed: {error}",
+    "manager.connecting": "Connecting to AnkiConnect...",
+    "manager.ankiError": "AnkiConnect: {error}",
+    "manager.unavailable": "This IINA build does not expose standalone windows.",
+    "manager.openFailed": "Could not open Hoshitan Settings: {error}",
+    "manager.oneDictionary": "dictionary",
+    "manager.manyDictionaries": "{count} dictionaries",
+    "dict.noInstalled": "No dictionaries installed/enabled. Open Hoshitan Settings to import a Yomitan dictionary ZIP.",
+    "dict.noInstalledForLanguage": "No dictionaries installed/enabled for {language}. Import or enable a Yomitan dictionary ZIP.",
+    "dict.imported": "Added {title} ({count} terms).",
+    "dict.importTime": "Import took about {seconds} seconds.",
+    "dict.importCancelled": "Dictionary import cancelled.",
+    "dict.multipleImported": "Imported {count} dictionaries.",
+    "dict.adding": "Adding dictionary",
+    "dict.preparingImport": "Preparing import...",
+    "dict.importing": "Importing dictionary...",
+    "dict.largeImport": "Large dictionaries can take several minutes.",
+    "dict.savingList": "Saving dictionary list...",
+    "dict.refreshingList": "Refreshing installed dictionaries.",
+    "dict.refreshingWorker": "Refreshing lookup worker...",
+    "dict.workerAvailable": "The new dictionary will be available for hover popups.",
+    "dict.downloadTitle": "Downloading recommended dictionaries",
+    "dict.downloading": "Downloading dictionary...",
+    "dict.downloadingJitendex": "Downloading Jitendex...",
+    "dict.downloadComplete": "Download complete. Importing...",
+    "dict.hoverReady": "You can now hover Japanese subtitles for dictionary popups.",
+    "dict.downloadFailed": "Could not download recommended dictionaries.",
+    "dict.lookupReady": "Dictionary lookup ready.",
+    "dict.preparingLookup": "Preparing dictionary lookup...",
+    "dict.chooseZip": "Choose Yomitan dictionary ZIPs",
+    "dict.noZip": "No dictionary ZIP was selected.",
+    "dict.notZip": "Selected file is not a .zip dictionary: {path}",
+    "dict.missingZip": "Selected dictionary ZIP does not exist: {path}",
+    "dict.compatibilityWarning": "No enabled dictionary is marked compatible with {language}; lookup will still try the enabled dictionaries.",
+    "dict.enabled": "Enabled dictionary: {name}",
+    "dict.disabled": "Disabled dictionary: {name}",
+    "dict.orderUpdated": "Updated dictionary order.",
+    "dict.workerRestartFailed": "Dictionary imported, but the lookup worker could not restart. Restart Hoshitan or use Debug -> Restart Dictionary Lookup.",
+    "dict.manifestUpdateFailed": "Manifest update failed.",
+    "dict.backendImportFailed": "Backend import command failed.",
+    "dict.importStageFailed": "Dictionary import failed.",
+    "dict.couldNotAdd": "Could not add dictionary.",
+    "dict.couldNotAddDetail": "Could not add dictionary: {error}",
+    "recommended.jitendexLanguage": "Japanese",
+    "recommended.jitendexDescription": "JMdict-based Japanese-English dictionary with structured Yomitan data."
+  },
+  "zh-CN": {
+    "menu.settings": "设置...",
+    "menu.profiles": "配置方案",
+    "menu.more": "更多",
+    "menu.debug": "调试",
+    "menu.benchmark": "运行查词性能测试",
+    "menu.parserTests": "运行查词解析器单元测试",
+    "menu.languageTests": "运行语言单元测试",
+    "menu.settingsTests": "运行设置检查",
+    "menu.filePicker": "测试文件选择器",
+    "menu.lookupTest": "测试词典查词",
+    "menu.restartLookup": "重启词典查词",
+    "menu.stopLookup": "停止词典查词",
+    "menu.taskTest": "显示任务面板测试",
+    "menu.logTest": "写入调试日志测试消息",
+    "menu.revealLog": "在访达中显示调试日志",
+    "menu.revealData": "在访达中显示插件数据目录",
+    "state.on": "Hoshitan：已开启",
+    "state.off": "Hoshitan：已关闭",
+    "lookup.ready": "{language}词典查词已就绪。",
+    "settings.title": "Hoshitan 设置",
+    "anki.connected": "已连接到 AnkiConnect。",
+    "anki.localhost": "AnkiConnect 地址必须指向本机。",
+    "anki.connectFailed": "无法连接 AnkiConnect：{error}",
+    "anki.httpError": "AnkiConnect HTTP 错误 {status}",
+    "anki.invalidJson": "AnkiConnect 返回了无效的 JSON。",
+    "anki.mediaTimeout": "等待媒体文件超时：{path}",
+    "anki.screenshotFailed": "IINA 无法截取当前画面：{error}",
+    "anki.localVideoRequired": "导出音频需要本地视频文件。",
+    "anki.ffmpegMissing": "未找到 FFmpeg，请在 Hoshitan 设置中填写路径。",
+    "anki.deckRequired": "请在设置中选择 Anki 牌组。",
+    "anki.modelRequired": "请在设置中选择 Anki 笔记类型。",
+    "anki.fieldRequired": "请至少配置一个 Anki 文本字段。",
+    "anki.deckMissing": "未找到 Anki 牌组：{deck}",
+    "anki.fieldsMissing": "笔记类型 {model} 中不存在这些字段：{fields}",
+    "anki.busy": "上一张 Anki 卡片仍在创建中。",
+    "anki.added": "已添加 Anki 笔记 {noteId}。",
+    "anki.failed": "Anki 导出失败：{error}",
+    "manager.connected": "已连接到 AnkiConnect。",
+    "manager.busy": "另一个词典操作仍在进行中。",
+    "manager.actionFailed": "{action}失败：{error}",
+    "manager.actionComplete": "{action}已完成。",
+    "manager.actionCancelled": "已取消{action}。",
+    "manager.pickerFailed": "无法打开词典 ZIP 选择器：{error}",
+    "manager.importCancelled": "已取消词典导入。",
+    "manager.importing": "正在导入{count}...",
+    "manager.imported": "已导入{count}。",
+    "manager.importFailed": "词典导入失败：{error}",
+    "manager.refreshed": "词典列表已刷新。",
+    "manager.selectionSaved": "词典选择已保存。",
+    "manager.orderSaved": "词典顺序已保存。",
+    "manager.deletingDictionary": "正在删除词典",
+    "manager.downloading": "正在下载推荐词典",
+    "manager.switchingProfile": "正在切换配置方案",
+    "manager.creatingProfile": "正在创建配置方案",
+    "manager.profileRenamed": "配置方案已重命名。",
+    "manager.renameFailed": "重命名配置方案失败：{error}",
+    "manager.deletingProfile": "正在删除配置方案",
+    "manager.profileSaved": "配置方案设置已保存。",
+    "manager.profileSaveFailed": "保存配置方案设置失败：{error}",
+    "manager.globalSaved": "全局设置已保存。",
+    "manager.globalSaveFailed": "保存全局设置失败：{error}",
+    "manager.connecting": "正在连接 AnkiConnect...",
+    "manager.ankiError": "AnkiConnect：{error}",
+    "manager.unavailable": "当前 IINA 版本不支持插件独立窗口。",
+    "manager.openFailed": "无法打开 Hoshitan 设置：{error}",
+    "manager.oneDictionary": "词典",
+    "manager.manyDictionaries": "{count} 个词典",
+    "dict.noInstalled": "没有已安装并启用的词典。请打开 Hoshitan 设置导入 Yomitan 词典 ZIP。",
+    "dict.noInstalledForLanguage": "没有为{language}安装并启用词典。请导入或启用 Yomitan 词典 ZIP。",
+    "dict.imported": "已添加 {title}（{count} 个词条）。",
+    "dict.importTime": "导入耗时约 {seconds} 秒。",
+    "dict.importCancelled": "已取消词典导入。",
+    "dict.multipleImported": "已导入 {count} 个词典。",
+    "dict.adding": "正在添加词典",
+    "dict.preparingImport": "正在准备导入...",
+    "dict.importing": "正在导入词典...",
+    "dict.largeImport": "大型词典可能需要几分钟。",
+    "dict.savingList": "正在保存词典列表...",
+    "dict.refreshingList": "正在刷新已安装词典。",
+    "dict.refreshingWorker": "正在刷新查词进程...",
+    "dict.workerAvailable": "新词典很快即可用于字幕悬停查词。",
+    "dict.downloadTitle": "正在下载推荐词典",
+    "dict.downloading": "正在下载词典...",
+    "dict.downloadingJitendex": "正在下载 Jitendex...",
+    "dict.downloadComplete": "下载完成，正在导入...",
+    "dict.hoverReady": "现在可以在日语字幕上悬停查词。",
+    "dict.downloadFailed": "无法下载推荐词典。",
+    "dict.lookupReady": "词典查词已就绪。",
+    "dict.preparingLookup": "正在准备词典查词...",
+    "dict.chooseZip": "选择 Yomitan 词典 ZIP",
+    "dict.noZip": "未选择词典 ZIP。",
+    "dict.notZip": "所选文件不是 .zip 词典：{path}",
+    "dict.missingZip": "所选词典 ZIP 不存在：{path}",
+    "dict.compatibilityWarning": "没有标记为兼容{language}的已启用词典；仍会尝试使用当前启用的词典查词。",
+    "dict.enabled": "已启用词典：{name}",
+    "dict.disabled": "已停用词典：{name}",
+    "dict.orderUpdated": "词典顺序已更新。",
+    "dict.workerRestartFailed": "词典已导入，但查词进程重启失败。请重启 Hoshitan，或使用“调试 -> 重启词典查词”。",
+    "dict.manifestUpdateFailed": "更新词典清单失败。",
+    "dict.backendImportFailed": "词典后端导入命令失败。",
+    "dict.importStageFailed": "词典导入失败。",
+    "dict.couldNotAdd": "无法添加词典。",
+    "dict.couldNotAddDetail": "无法添加词典：{error}",
+    "recommended.jitendexLanguage": "日语",
+    "recommended.jitendexDescription": "基于 JMdict 的日英词典，包含结构化 Yomitan 数据。"
+  }
+};
+
+let detectedSystemUiLanguage = "en";
+
+function normalizeUiLanguage(value) {
+  const raw = String(value || "").trim().toLowerCase().replace(/_/g, "-");
+  if (raw === "zh-cn" || raw === "zh-hans" || raw.indexOf("zh-hans-") === 0 || raw.indexOf("zh-cn-") === 0) return "zh-CN";
+  if (raw === "en" || raw.indexOf("en-") === 0) return "en";
+  return raw === "auto" || !raw ? "auto" : "en";
+}
+function configuredUiLanguage() {
+  return normalizeUiLanguage(pref("uiLanguage", "auto"));
+}
+function resolvedUiLanguage() {
+  const configured = configuredUiLanguage();
+  return configured === "auto" ? detectedSystemUiLanguage : configured;
+}
+function t(key, values) {
+  const language = resolvedUiLanguage();
+  const table = I18N_MESSAGES[language] || I18N_MESSAGES.en;
+  let text = table[key] || I18N_MESSAGES.en[key] || String(key || "");
+  Object.keys(values || {}).forEach(name => {
+    text = text.split("{" + name + "}").join(String(values[name]));
+  });
+  return text;
+}
+function languageLabelForUi(language) {
+  const id = String(language && language.id || "");
+  const labels = {
+    en: { ja: "Japanese", en: "English", fr: "French", de: "German", zh: "Chinese", ko: "Korean" },
+    "zh-CN": { ja: "日语", en: "英语", fr: "法语", de: "德语", zh: "中文", ko: "韩语" }
+  };
+  return (labels[resolvedUiLanguage()] || labels.en)[id] || String(language && language.label || id);
+}
+async function refreshSystemUiLanguage() {
+  if (configuredUiLanguage() !== "auto") return resolvedUiLanguage();
+  let detected = "en";
+  try {
+    const result = await utils.exec("/usr/bin/defaults", ["read", "-g", "AppleLanguages"], dataRoot());
+    const output = String(result && result.stdout || "");
+    if (/zh[-_](?:Hans|CN)|\"zh\"/i.test(output)) detected = "zh-CN";
+  } catch (_) {}
+  if (detected !== detectedSystemUiLanguage) {
+    detectedSystemUiLanguage = detected;
+    try { rebuildMenu(); } catch (_) {}
+    try { if (initialized) postToOverlay("config", overlayConfig()); } catch (_) {}
+    try { postDictionaryManagerState(); } catch (_) {}
+  }
+  return detectedSystemUiLanguage;
+}
+
 const DEFAULT_PROFILE_ID = "default";
+const DEFAULT_AUDIO_SOURCE_URL = "https://hoshi-reader.manhhaoo-do.workers.dev/?term={term}&reading={reading}";
+const DEFAULT_AUDIO_SOURCES_JSON = JSON.stringify([{ name: "Hoshi Reader", url: DEFAULT_AUDIO_SOURCE_URL }]);
 const PROFILE_PREFERENCE_DEFAULTS = {
   enabledByDefault: true,
   hideNativeSubtitles: true,
   pauseWhilePopupVisible: true,
+  audioAutoPlay: false,
+  audioSourcesJson: DEFAULT_AUDIO_SOURCES_JSON,
   lookupLanguage: "ja",
   scanLength: 24,
   maxEntries: 3,
@@ -1863,10 +2172,80 @@ const PROFILE_PREFERENCE_DEFAULTS = {
 const PROFILE_PREFERENCE_KEYS = Object.keys(PROFILE_PREFERENCE_DEFAULTS);
 const GLOBAL_SETTINGS_DEFAULTS = {
   lowRamImport: true,
-  importTimeoutMs: 1800000
+  importTimeoutMs: 1800000,
+  uiLanguage: "auto",
+  ankiConnectUrl: "http://127.0.0.1:8765",
+  ankiApiKey: "",
+  ankiDeckName: "Default",
+  ankiModelName: "Basic",
+  ankiFieldMappingsJson: "{}",
+  ankiFieldSentence: "Front",
+  ankiFieldExpression: "",
+  ankiFieldReading: "",
+  ankiFieldDefinition: "Back",
+  ankiFieldImage: "",
+  ankiFieldAudio: "",
+  ankiFieldSource: "",
+  ankiTags: "hoshitan",
+  ankiAllowDuplicate: false,
+  ankiIncludeScreenshot: true,
+  ankiIncludeAudio: true,
+  ankiAudioPaddingMs: 120,
+  ankiFfmpegPath: "/opt/homebrew/bin/ffmpeg",
+  localAudioEnabled: false,
+  localAudioDatabasePath: ""
 };
 const GLOBAL_SETTINGS_KEYS = Object.keys(GLOBAL_SETTINGS_DEFAULTS);
 
+function normalizeAudioSourceUrl(value) {
+  const url = String(value || "").trim();
+  if (!url || !/^https?:\/\//i.test(url)) return "";
+  return url;
+}
+function normalizeAudioSourceItem(source) {
+  const raw = typeof source === "string" ? { url: source } : (source && typeof source === "object" ? source : {});
+  const url = normalizeAudioSourceUrl(raw.url);
+  if (!url) return null;
+  const name = String(raw.name || "").trim();
+  return name ? { name, url } : { url };
+}
+function normalizeAudioSources(value) {
+  let raw = value;
+  if (typeof raw === "string") {
+    const text = raw.trim();
+    if (!text) return [];
+    try { raw = JSON.parse(text); } catch (_) { raw = text; }
+  }
+  if (raw && typeof raw === "object" && Array.isArray(raw.audioSources)) raw = raw.audioSources;
+  const values = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+  const seen = Object.create(null);
+  const out = [];
+  values.forEach(item => {
+    const normalized = normalizeAudioSourceItem(item);
+    if (!normalized || seen[normalized.url]) return;
+    seen[normalized.url] = true;
+    out.push(normalized);
+  });
+  return out;
+}
+function normalizeAudioSourcesJsonPreference(value, useDefaultWhenEmpty) {
+  const sources = normalizeAudioSources(value);
+  if (!sources.length && useDefaultWhenEmpty) return DEFAULT_AUDIO_SOURCES_JSON;
+  return JSON.stringify(sources);
+}
+function normalizeProfilePreferenceBoolValue(value, fallback) {
+  if (typeof preferenceValueToBool === "function") return preferenceValueToBool(value, fallback);
+  if (value === undefined || value === null || value === "") return !!fallback;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return !!fallback;
+    if (["true", "1", "yes", "on"].indexOf(normalized) >= 0) return true;
+    if (["false", "0", "no", "off"].indexOf(normalized) >= 0) return false;
+  }
+  return !!value;
+}
 function emptyManifest() {
   return { dictionaries: {}, disabled: {}, dictionaryOrder: [], activeProfileId: DEFAULT_PROFILE_ID, profiles: {} };
 }
@@ -1895,9 +2274,12 @@ function normalizeProfilePreferences(prefs) {
   const out = {};
   PROFILE_PREFERENCE_KEYS.forEach(key => { out[key] = PROFILE_PREFERENCE_DEFAULTS[key]; });
   if (!prefs || typeof prefs !== "object") return out;
+  const hasAudioSources = Object.prototype.hasOwnProperty.call(prefs, "audioSourcesJson");
   PROFILE_PREFERENCE_KEYS.forEach(key => {
     if (Object.prototype.hasOwnProperty.call(prefs, key)) out[key] = prefs[key];
   });
+  out.audioAutoPlay = normalizeProfilePreferenceBoolValue(out.audioAutoPlay, PROFILE_PREFERENCE_DEFAULTS.audioAutoPlay);
+  out.audioSourcesJson = normalizeAudioSourcesJsonPreference(out.audioSourcesJson, !hasAudioSources);
   return out;
 }
 function makeDefaultProfile(id, name) {
@@ -2178,10 +2560,10 @@ function activeDictionaryPaths(language) {
 }
 function dictionarySetupMessage(language, dicts) {
   const lang = language || selectedLanguageModule();
-  const label = lang.label || lang.id || "selected language";
+  const label = typeof languageLabelForUi === "function" ? languageLabelForUi(lang) : (lang.label || lang.id || "selected language");
   if (dicts && dicts.length) return "";
-  if (lang.id === "ja") return "No dictionaries installed/enabled. Use Plugins -> iinatan -> Settings... to download recommended dictionaries.";
-  return "No dictionaries installed/enabled for " + label.replace(/\s*\(experimental\)\s*/i, "") + ". Import or enable a Yomitan dictionary ZIP.";
+  if (lang.id === "ja") return t("dict.noInstalled");
+  return t("dict.noInstalledForLanguage", { language: label.replace(/\s*\(experimental\)\s*/i, "") });
 }
 function dictionaryCompatibilityWarning(language, entries) {
   const lang = language || selectedLanguageModule();
@@ -2189,7 +2571,8 @@ function dictionaryCompatibilityWarning(language, entries) {
   if (!lang || lang.id === "ja" || !dicts.length || typeof lang.dictionaryMatches !== "function") return "";
   const details = dictionaryCompatibilityDetails(lang, dicts);
   if (details.compatible.length || details.unknown.length) return "";
-  return "No enabled dictionary is marked compatible with " + (lang.label || lang.id) + "; lookup will still try the enabled dictionaries.";
+  const label = typeof languageLabelForUi === "function" ? languageLabelForUi(lang) : (lang.label || lang.id);
+  return t("dict.compatibilityWarning", { language: label });
 }
 function workerFingerprint(dicts, language) {
   const lang = language || selectedLanguageModule();
@@ -2208,7 +2591,7 @@ function setDictionaryEnabled(name, enabledNow) {
   stopBackendWorker().catch(() => {});
   rebuildMenu();
   if (typeof postDictionaryManagerState === "function") postDictionaryManagerState();
-  showOSD((enabledNow ? "Enabled" : "Disabled") + " dictionary: " + name);
+  showOSD(t(enabledNow ? "dict.enabled" : "dict.disabled", { name }));
 }
 function setDictionaryOrder(names) {
   const installedNames = unorderedDictionaryDirs().map(d => d.name);
@@ -2222,7 +2605,7 @@ function setDictionaryOrder(names) {
   stopBackendWorker().catch(() => {});
   rebuildMenu();
   if (typeof postDictionaryManagerState === "function") postDictionaryManagerState();
-  showOSD("Updated dictionary order.");
+  showOSD(t("dict.orderUpdated"));
 }
 function dictionaryRemovalNameMap(names) {
   const out = Object.create(null);
@@ -2470,6 +2853,7 @@ function readGlobalSettingsSnapshot() {
 }
 function updateGlobalSettings(prefs) {
   const values = prefs && typeof prefs === "object" ? prefs : {};
+  const previousUiLanguage = configuredUiLanguage();
   GLOBAL_SETTINGS_KEYS.forEach(key => {
     try {
       if (Object.prototype.hasOwnProperty.call(values, key) && typeof preferences !== "undefined" && preferences && typeof preferences.set === "function") {
@@ -2478,6 +2862,11 @@ function updateGlobalSettings(prefs) {
     } catch (_) {}
   });
   try { if (typeof preferences !== "undefined" && preferences && preferences.sync) preferences.sync(); } catch (_) {}
+  if (configuredUiLanguage() !== previousUiLanguage) {
+    refreshSystemUiLanguage().catch(() => {});
+    try { rebuildMenu(); } catch (_) {}
+    try { if (initialized) postToOverlay("config", overlayConfig()); } catch (_) {}
+  }
   if (typeof postDictionaryManagerState === "function") postDictionaryManagerState();
   return readGlobalSettingsSnapshot();
 }
@@ -2496,7 +2885,7 @@ function setActiveDictionaryProfile(profileId) {
   refreshRuntimeAfterProfileChange(true);
   rebuildMenu();
   if (typeof postDictionaryManagerState === "function") postDictionaryManagerState();
-  showOSD("Switched iinatan profile: " + activeDictionaryProfile(normalized).name);
+  showOSD("Switched Hoshitan profile: " + activeDictionaryProfile(normalized).name);
 }
 function addSubMenuItemCompat(parent, item) {
   if (!parent) throw new Error("No parent menu item");
@@ -2512,16 +2901,16 @@ function addMenuItemSafe(item) {
 function dictionaryZipValidation(zipPath, existsFn) {
   const raw = zipPath === undefined || zipPath === null ? "" : String(zipPath).trim();
   if (!raw || raw === "[object Promise]") {
-    return { ok: false, reason: "empty", message: "No dictionary ZIP was selected." };
+    return { ok: false, reason: "empty", message: t("dict.noZip") };
   }
   if (!/\.zip$/i.test(raw)) {
-    return { ok: false, reason: "extension", path: raw, message: "Selected file is not a .zip dictionary: " + raw };
+    return { ok: false, reason: "extension", path: raw, message: t("dict.notZip", { path: raw }) };
   }
   if (typeof existsFn === "function") {
     let exists = false;
     try { exists = !!existsFn(raw); } catch (_) { exists = false; }
     if (!exists) {
-      return { ok: false, reason: "missing", path: raw, message: "Selected dictionary ZIP does not exist: " + raw };
+      return { ok: false, reason: "missing", path: raw, message: t("dict.missingZip", { path: raw }) };
     }
   }
   return { ok: true, path: raw };
@@ -2549,18 +2938,18 @@ async function ensureBundledBackendInstalled() {
   await ensureDataDirs();
   if (!file.exists(bundledBinPath())) {
     if (backendInstalled()) return;
-    throw new Error("iinatan's lookup engine is missing. Install a packaged Apple Silicon build or run scripts/build_native_backend.sh while developing.");
+    throw new Error("Hoshitan's lookup engine is missing. Install a packaged Apple Silicon build or run scripts/build_native_backend.sh while developing.");
   }
   if (await backendBinaryMatchesBundled()) return;
   const tmpPath = binPath() + ".tmp-" + String(Date.now());
   safeDelete(tmpPath);
   const result = await utils.exec("/bin/cp", [bundledBinPath(), tmpPath], dataRoot());
-  if (!result || result.status !== 0) throw new Error("Could not install iinatan lookup engine: " + ((result && (result.stderr || result.stdout)) || "copy failed"));
+  if (!result || result.status !== 0) throw new Error("Could not install Hoshitan lookup engine: " + ((result && (result.stderr || result.stdout)) || "copy failed"));
   await execChecked("/bin/chmod", ["755", tmpPath]);
   const moved = await utils.exec("/bin/mv", ["-f", tmpPath, binPath()], dataRoot());
   if (!moved || moved.status !== 0) {
     safeDelete(tmpPath);
-    throw new Error("Could not activate iinatan lookup engine: " + ((moved && (moved.stderr || moved.stdout)) || "move failed"));
+    throw new Error("Could not activate Hoshitan lookup engine: " + ((moved && (moved.stderr || moved.stdout)) || "move failed"));
   }
 }
 async function extractFirstJsonObject(raw) {
@@ -2702,8 +3091,8 @@ async function importDictionaryZip(zipPath, existingTaskId) {
   const importArgs = ["import", zipPath, dictRoot(), prefBool("lowRamImport", true) ? "--low-ram" : "--normal-ram"];
   try {
     await ensureBundledBackendInstalled();
-    if (!taskId) taskId = startOverlayTask("dictionary-import", "Adding dictionary", "Preparing import...");
-    updateOverlayTask(taskId, { title: "Adding dictionary", message: "Importing dictionary...", detail: "Large dictionaries can take several minutes." });
+    if (!taskId) taskId = startOverlayTask("dictionary-import", t("dict.adding"), t("dict.preparingImport"));
+    updateOverlayTask(taskId, { title: t("dict.adding"), message: t("dict.importing"), detail: t("dict.largeImport") });
     const started = Date.now();
     const selected = selectedLanguageModule();
     debugLog("dictionary import start language=" + String(selected && selected.id || "") + " zipPath=" + JSON.stringify(String(zipPath || "")) + " zipExists=" + String(file.exists(zipPath)) + " zipFilename=" + JSON.stringify(filenameFromPath(zipPath)) + " args=" + JSON.stringify(importArgs));
@@ -2713,7 +3102,7 @@ async function importDictionaryZip(zipPath, existingTaskId) {
       error.importStage = "backend-import";
       throw error;
     }
-    updateOverlayTask(taskId, { title: "Adding dictionary", message: "Saving dictionary list...", detail: "Refreshing installed dictionaries." });
+    updateOverlayTask(taskId, { title: t("dict.adding"), message: t("dict.savingList"), detail: t("dict.refreshingList") });
     try {
       updateManifestAfterImport(result, zipPath);
     } catch (error) {
@@ -2721,19 +3110,23 @@ async function importDictionaryZip(zipPath, existingTaskId) {
       throw error;
     }
     activeWorkerFingerprint = null;
-    updateOverlayTask(taskId, { title: "Adding dictionary", message: "Refreshing lookup worker...", detail: "The new dictionary will be available for hover popups." });
+    updateOverlayTask(taskId, { title: t("dict.adding"), message: t("dict.refreshingWorker"), detail: t("dict.workerAvailable") });
     try {
       await stopBackendWorker();
     } catch (error) {
       debugWarn("dictionary imported but worker refresh failed: " + compactError(error));
-      setOverlayStatus("Dictionary imported, but worker restart failed. Restart iinatan or use Debug -> Restart Dictionary Lookup.", "error", 12000);
+      setOverlayStatus(t("dict.workerRestartFailed"), "error", 12000);
     }
     rebuildMenu();
     if (typeof postDictionaryManagerState === "function") postDictionaryManagerState();
     const elapsed = Math.round((Date.now() - started) / 1000);
-    const msg = "Added " + titleFromImportResult(result, zipPath) + " (" + numericImportField(result, "term_count", "termCount") + " terms).";
-    if (ownsTask) finishOverlayTask(taskId, true, msg, "Import took about " + elapsed + " seconds.");
-    else updateOverlayTask(taskId, { title: "Adding dictionary", message: msg, detail: "Import took about " + elapsed + " seconds." });
+    const msg = t("dict.imported", {
+      title: titleFromImportResult(result, zipPath),
+      count: numericImportField(result, "term_count", "termCount")
+    });
+    const detail = t("dict.importTime", { seconds: elapsed });
+    if (ownsTask) finishOverlayTask(taskId, true, msg, detail);
+    else updateOverlayTask(taskId, { title: t("dict.adding"), message: msg, detail });
     debugLog("dictionary import complete title=" + JSON.stringify(titleFromImportResult(result, zipPath)) + " language=" + String((readManifest().dictionaries[titleFromImportResult(result, zipPath)] || {}).language || "unknown") + " elapsedSec=" + elapsed);
     return result;
   } catch (error) {
@@ -2752,10 +3145,10 @@ async function importDictionaryZip(zipPath, existingTaskId) {
       " parsedJson=" + JSON.stringify((error && error.backendParsedJson) || null) +
       " postImportLookupAttempted=false" +
       " error=" + compactError(error));
-    const userStage = stage === "manifest-update" ? "Manifest update failed." :
-      String(stage).indexOf("Dictionary import command") >= 0 || stage === "backend-import" ? "Backend import command failed." :
-      "Dictionary import failed.";
-    if (ownsTask) finishOverlayTask(taskId, false, "Could not add dictionary.", userStage + " " + compactError(error));
+    const userStage = stage === "manifest-update" ? t("dict.manifestUpdateFailed") :
+      String(stage).indexOf("Dictionary import command") >= 0 || stage === "backend-import" ? t("dict.backendImportFailed") :
+      t("dict.importStageFailed");
+    if (ownsTask) finishOverlayTask(taskId, false, t("dict.couldNotAdd"), userStage + " " + compactError(error));
     throw error;
   }
 }
@@ -2764,12 +3157,12 @@ async function chooseAndImportDictionary() {
   try {
     const zipPaths = await chooseDictionaryZipPaths();
     if (!zipPaths.length) {
-      notify("Dictionary import cancelled.", "info", 3500);
+      notify(t("dict.importCancelled"), "info", 3500);
       return;
     }
     await validateAndImportDictionaryZips(zipPaths, "manual-picker");
   } catch (error) {
-    const msg = "Could not add dictionary: " + compactError(error);
+    const msg = t("dict.couldNotAddDetail", { error: compactError(error) });
     debugError("manual dictionary import failed: " + compactError(error));
     setOverlayStatus(msg, "error", 12000);
     alert(msg);
@@ -2806,7 +3199,7 @@ async function chooseDictionaryZipPaths() {
   };
   debugLog("manual dictionary import: opening file chooser with zip filter and multi-select");
   try {
-    const selected = await resolveMaybePromise(utils.chooseFile("Choose Yomitan dictionary ZIPs", options));
+    const selected = await resolveMaybePromise(utils.chooseFile(t("dict.chooseZip"), options));
     const paths = normalizeChosenFilePaths(selected);
     debugLog("manual dictionary import: filtered chooser returned count=" + paths.length + " sample=" + JSON.stringify(paths.slice(0, 5)));
     return paths;
@@ -2820,7 +3213,7 @@ async function chooseDictionaryZipPaths() {
 
   debugLog("manual dictionary import: opening fallback unfiltered file chooser");
   try {
-    const selected = await resolveMaybePromise(utils.chooseFile("Choose Yomitan dictionary ZIPs", { allowsMultipleSelection: true, allowMultipleSelection: true, multiple: true }));
+    const selected = await resolveMaybePromise(utils.chooseFile(t("dict.chooseZip"), { allowsMultipleSelection: true, allowMultipleSelection: true, multiple: true }));
     const paths = normalizeChosenFilePaths(selected);
     debugLog("manual dictionary import: unfiltered chooser returned count=" + paths.length + " sample=" + JSON.stringify(paths.slice(0, 5)));
     return paths;
@@ -2833,12 +3226,32 @@ async function chooseDictionaryZipPaths() {
   }
 }
 
+async function chooseLocalAudioDatabasePath() {
+  if (!utils || typeof utils.chooseFile !== "function") {
+    throw new Error("This IINA build does not expose utils.chooseFile.");
+  }
+  const options = {
+    allowedFileTypes: ["db", "sqlite", "sqlite3"],
+    allowsMultipleSelection: false,
+    allowMultipleSelection: false,
+    multiple: false
+  };
+  try {
+    const selected = await resolveMaybePromise(utils.chooseFile("Choose Hoshi Reader android.db", options));
+    const paths = normalizeChosenFilePaths(selected);
+    return paths.length ? paths[0] : "";
+  } catch (error) {
+    if (isFilePickerCancelError(error)) return "";
+    throw new Error("IINA file picker failed: " + compactError(error));
+  }
+}
+
 async function validateAndImportDictionaryZip(zipPath, source) {
   const validation = dictionaryZipValidation(zipPath, p => file.exists(p));
   debugLog("manual dictionary import validation source=" + String(source || "") + " ok=" + String(validation.ok) + " reason=" + String(validation.reason || "") + " path=" + JSON.stringify(String(validation.path || zipPath || "").slice(0, 260)));
   if (!validation.ok) {
     if (validation.reason === "empty") {
-      notify("Dictionary import cancelled.", "info", 3500);
+      notify(t("dict.importCancelled"), "info", 3500);
       return null;
     }
     throw new Error(validation.message);
@@ -2851,7 +3264,7 @@ async function validateAndImportDictionaryZips(zipPaths, source) {
   const paths = normalizeChosenFilePaths(zipPaths);
   const label = String(source || "manual-picker");
   if (!paths.length) {
-    notify("Dictionary import cancelled.", "info", 3500);
+    notify(t("dict.importCancelled"), "info", 3500);
     return [];
   }
   const imported = [];
@@ -2859,7 +3272,7 @@ async function validateAndImportDictionaryZips(zipPaths, source) {
     const result = await validateAndImportDictionaryZip(paths[i], label + "-" + String(i + 1));
     if (result) imported.push(result);
   }
-  if (imported.length > 1) notify("Imported " + imported.length + " dictionaries.", "info", 6500);
+  if (imported.length > 1) notify(t("dict.multipleImported", { count: imported.length }), "info", 6500);
   return imported;
 }
 
@@ -2880,16 +3293,16 @@ async function getRecommendedDictionaries() {
   let taskId = null;
   try {
     await ensureDataDirs();
-    taskId = startOverlayTask("recommended-dictionary", "Downloading recommended dictionaries", "Downloading dictionary...");
+    taskId = startOverlayTask("recommended-dictionary", t("dict.downloadTitle"), t("dict.downloading"));
     const dest = pathJoin(downloadRoot(), "jitendex-yomitan.zip");
-    updateOverlayTask(taskId, { title: "Downloading recommended dictionaries", message: "Downloading Jitendex...", detail: RECOMMENDED_JITENDEX_URL });
+    updateOverlayTask(taskId, { title: t("dict.downloadTitle"), message: t("dict.downloadingJitendex"), detail: RECOMMENDED_JITENDEX_URL });
     await http.download(RECOMMENDED_JITENDEX_URL, dest);
-    updateOverlayTask(taskId, { title: "Downloading recommended dictionaries", message: "Download complete. Importing...", detail: dest });
+    updateOverlayTask(taskId, { title: t("dict.downloadTitle"), message: t("dict.downloadComplete"), detail: dest });
     const result = await importDictionaryZip(dest, taskId);
-    const msg = "Added " + result.title + " (" + (result.term_count || 0) + " terms).";
-    finishOverlayTask(taskId, true, msg, "You can now hover Japanese subtitles for dictionary popups.");
+    const msg = t("dict.imported", { title: result.title, count: result.term_count || 0 });
+    finishOverlayTask(taskId, true, msg, t("dict.hoverReady"));
   } catch (error) {
-    const msg = "Could not download recommended dictionaries.";
+    const msg = t("dict.downloadFailed");
     finishOverlayTask(taskId, false, msg, compactError(error));
     alert(msg + " Details: " + compactError(error));
   }
@@ -2991,7 +3404,7 @@ async function waitForWorkerReady(fingerprint, timeoutMs) {
     if (ready && ready.fingerprint === fingerprint) {
       activeWorkerFingerprint = fingerprint;
       activeWorkerReady = ready;
-      setOverlayStatus("Dictionary lookup ready.", "info", 2500);
+      setOverlayStatus(t("dict.lookupReady"), "info", 2500);
       return ready;
     }
     if (ready && (!last || ready.fingerprint !== last.fingerprint)) {
@@ -3022,7 +3435,7 @@ async function ensureBackendWorker(dicts, language) {
   if (workerStartInFlight) return workerStartInFlight;
   workerStartInFlight = (async () => {
     await stopBackendWorker().catch(() => {});
-    setOverlayStatus("Preparing dictionary lookup...", "info", 4000);
+    setOverlayStatus(t("dict.preparingLookup"), "info", 4000);
     await startBackendWorkerProcess(dicts, lang);
     return await waitForWorkerReady(fingerprint, Math.max(8000, prefNumber("backendTimeoutMs", 30000)));
   })();
@@ -3404,8 +3817,12 @@ function ensureOverlayBridge() {
 	          handleLookupPopupVisibility(payload);
 	        } else if (payload && typeof payload === "object" && payload.type === "lookup") {
 	          handleBridgeLookup(payload);
+	        } else if (payload && typeof payload === "object" && payload.type === "audio-source") {
+	          handleBridgeAudioSource(payload);
 	        } else if (payload && typeof payload === "object" && payload.type === "open-url") {
 	          openExternalUrlFromOverlay(payload.url);
+	        } else if (payload && typeof payload === "object" && payload.type === "anki-add") {
+	          handleAnkiAddRequest(payload);
 	        } else if (payload && typeof payload === "object" && payload.type === "overlay-log") {
 	          debugVerbose("[overlay] " + String(payload.message || ""));
         } else if (raw === "popup:show" || raw === "show" || raw === "visible") {
@@ -3422,6 +3839,89 @@ function ensureOverlayBridge() {
   } catch (error) {
     debugLog("overlay bridge start failed: " + compactError(error));
 	  }
+	}
+
+	function fallbackResolveAudioCandidateUrl(value, baseUrl) {
+	  if (/^https?:\/\/[^\s<>"']+$/i.test(value)) return value;
+	  if (/[\s<>"']/.test(value)) return "";
+	  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return "";
+	  const base = String(baseUrl || "").trim();
+	  const baseMatch = /^(https?:)\/\/([^\/?#]+)(\/[^?#]*)?/i.exec(base);
+	  if (!baseMatch) return "";
+	  if (/^\/\//.test(value)) return baseMatch[1] + value;
+	  const origin = baseMatch[1] + "//" + baseMatch[2];
+	  if (value.charAt(0) === "/") return origin + value;
+	  const basePath = baseMatch[3] || "/";
+	  const baseDir = basePath.charAt(basePath.length - 1) === "/" ? basePath : basePath.slice(0, basePath.lastIndexOf("/") + 1) || "/";
+	  return origin + baseDir + value;
+	}
+	function safeAudioCandidateUrl(rawUrl, baseUrl) {
+	  const value = String(rawUrl || "").trim();
+	  if (!value) return "";
+	  if (/^data:audio\/(?:mpeg|mp3|mp4|aac|ogg|opus|wav|flac);base64,[A-Za-z0-9+/=\s]+$/i.test(value)) {
+	    return value.replace(/\s+/g, "");
+	  }
+	  try {
+	    if (typeof URL === "function") {
+	      const parsed = new URL(value, baseUrl || undefined);
+	      if (parsed.protocol === "http:" || parsed.protocol === "https:") return parsed.href;
+	      return "";
+	    }
+	  } catch (_) {
+	    return "";
+	  }
+	  return fallbackResolveAudioCandidateUrl(value, baseUrl);
+	}
+	function audioCandidatesFromSourceJson(rawJson, sourceUrl) {
+	  let parsed = null;
+	  try { parsed = JSON.parse(String(rawJson || "")); } catch (error) {
+	    throw new Error("Audio source did not return JSON: " + compactError(error));
+	  }
+	  if (!parsed || parsed.type !== "audioSourceList" || !Array.isArray(parsed.audioSources)) {
+	    throw new Error("Audio source JSON was not a Yomitan audioSourceList.");
+	  }
+	  const out = [];
+	  parsed.audioSources.forEach(item => {
+	    const url = safeAudioCandidateUrl(item && item.url, sourceUrl);
+	    if (!url) return;
+	    const name = String((item && item.name) || "").trim();
+	    out.push(name ? { name, url } : { url });
+	  });
+	  return out;
+	}
+	async function fetchAudioSourceCandidates(sourceUrl) {
+	  if (typeof isLocalAudioSourceUrl === "function" && isLocalAudioSourceUrl(sourceUrl)) {
+	    return await localAudioCandidatesForUrl(sourceUrl);
+	  }
+	  const url = safeExternalHttpUrl(sourceUrl);
+	  if (!url) throw new Error("Invalid audio source URL.");
+	  const result = await utils.exec("/usr/bin/curl", [
+	    "--silent",
+	    "--show-error",
+	    "--location",
+	    "--max-time",
+	    "8",
+	    url
+	  ], dataRoot());
+	  if (!result || result.status !== 0) {
+	    throw new Error("Audio source request failed: " + String((result && (result.stderr || result.stdout)) || "curl failed").slice(0, 500));
+	  }
+	  return audioCandidatesFromSourceJson(result.stdout, url);
+	}
+	function handleBridgeAudioSource(payload) {
+	  const requestId = payload && payload.requestId !== undefined ? String(payload.requestId) : "";
+	  const sourceUrl = String((payload && payload.url) || "");
+	  (async () => {
+	    try {
+	      const candidates = await fetchAudioSourceCandidates(sourceUrl);
+	      debugVerbose("audio source resolved requestId=" + requestId + " url=" + JSON.stringify(sourceUrl) + " candidates=" + candidates.length);
+	      postToOverlay("audio-source-result", { requestId, ok: true, candidates });
+	    } catch (error) {
+	      const msg = compactError(error);
+	      debugWarn("audio source request failed requestId=" + requestId + " url=" + JSON.stringify(sourceUrl) + ": " + msg);
+	      postToOverlay("audio-source-result", { requestId, ok: false, error: msg });
+	    }
+	  })();
 	}
 
 	function safeExternalHttpUrl(rawUrl) {
@@ -3691,29 +4191,258 @@ function resetLookupPopupPause() {
   lookupPopupSessionId = "";
 }
 
+const LOCAL_AUDIO_SOURCE_URL = "http://127.0.0.1:19742/localaudio/?term={term}&reading={reading}";
+const LOCAL_AUDIO_SOURCE_PRIORITY = [
+  "nhk16",
+  "daijisen",
+  "shinmeikai8",
+  "jpod",
+  "jpod_alternate",
+  "taas",
+  "ozk5",
+  "forvo",
+  "forvo_ext",
+  "forvo_ext2"
+];
+
+function localAudioEnabled() {
+  return prefBool("localAudioEnabled", false);
+}
+function localAudioDatabasePath() {
+  return String(pref("localAudioDatabasePath", "") || "").trim();
+}
+function isLocalAudioSourceUrl(value) {
+  return /^http:\/\/127\.0\.0\.1:19742\/localaudio\/?\?/i.test(String(value || ""));
+}
+function activeWordAudioSources() {
+  const sources = normalizeAudioSources(pref("audioSourcesJson", DEFAULT_AUDIO_SOURCES_JSON));
+  const databasePath = localAudioDatabasePath();
+  if (!localAudioEnabled() || !databasePath) return sources;
+  return [{ name: "Local Audio", url: LOCAL_AUDIO_SOURCE_URL }].concat(sources);
+}
+function audioSourceUrlForTerm(template, term, reading) {
+  return String(template || "")
+    .replace(/\{term\}/g, encodeURIComponent(String(term || "")))
+    .replace(/\{reading\}/g, encodeURIComponent(String(reading || "")));
+}
+function audioSqlString(value) {
+  return "'" + String(value || "").replace(/'/g, "''") + "'";
+}
+function katakanaToHiragana(value) {
+  return String(value || "").replace(/[\u30a1-\u30f6]/g, character =>
+    String.fromCharCode(character.charCodeAt(0) - 0x60)
+  );
+}
+function localAudioSourceOrderSql() {
+  return "CASE lower(e.source) " + LOCAL_AUDIO_SOURCE_PRIORITY.map((source, index) =>
+    "WHEN " + audioSqlString(source) + " THEN " + String(index)
+  ).join(" ") + " ELSE 999 END";
+}
+function localAudioExtension(filename) {
+  const match = /\.([A-Za-z0-9]{2,5})$/.exec(String(filename || ""));
+  const extension = match ? match[1].toLowerCase() : "mp3";
+  return ["mp3", "opus", "ogg", "m4a", "aac", "wav", "flac"].indexOf(extension) >= 0 ? extension : "mp3";
+}
+function localAudioMimeType(extension) {
+  const types = {
+    mp3: "audio/mpeg",
+    opus: "audio/ogg",
+    ogg: "audio/ogg",
+    m4a: "audio/mp4",
+    aac: "audio/aac",
+    wav: "audio/wav",
+    flac: "audio/flac"
+  };
+  return types[String(extension || "").toLowerCase()] || "audio/mpeg";
+}
+async function findLocalAudioRecord(term, reading) {
+  const databasePath = localAudioDatabasePath();
+  if (!databasePath) {
+    debugVerbose("local audio lookup skipped: database path is empty");
+    return null;
+  }
+  const expression = String(term || "").trim();
+  const normalizedReading = katakanaToHiragana(String(reading || "").trim());
+  if (!expression) return null;
+  const readingClause = normalizedReading
+    ? "CASE WHEN e.reading = " + audioSqlString(normalizedReading) + " THEN 0 WHEN e.reading = '' THEN 1 ELSE 2 END,"
+    : "CASE WHEN e.reading = '' THEN 0 ELSE 1 END,";
+  const sql = [
+    "SELECT a.id, e.source, a.file",
+    "FROM entries e JOIN android a ON a.file = e.file AND a.source = e.source",
+    "WHERE e.expression = " + audioSqlString(expression),
+    "ORDER BY " + readingClause + " " + localAudioSourceOrderSql() + ", a.id",
+    "LIMIT 1;"
+  ].join(" ");
+  const result = await utils.exec("/usr/bin/sqlite3", ["-readonly", "-separator", "\t", databasePath, sql], dataRoot());
+  if (!result || result.status !== 0) {
+    throw new Error("Local audio database query failed: " + String((result && result.stderr) || "sqlite3 failed").slice(0, 500));
+  }
+  const line = String(result.stdout || "").trim().split(/\r?\n/)[0] || "";
+  debugVerbose("local audio lookup term=" + JSON.stringify(expression) + " reading=" + JSON.stringify(normalizedReading) + " matched=" + String(!!line));
+  const columns = line.split("\t");
+  if (columns.length < 3 || !columns[0]) return null;
+  return {
+    id: Number(columns[0]),
+    source: columns[1] || "Local Audio",
+    filename: columns.slice(2).join("\t"),
+    databasePath
+  };
+}
+async function extractLocalAudioRecord(record, outputRoot, stem) {
+  if (!record) return null;
+  const extension = localAudioExtension(record.filename);
+  const outputPath = pathJoin(outputRoot, ankiSafeFileStem(stem || "word-audio") + "." + extension);
+  await execChecked("/bin/mkdir", ["-p", outputRoot]);
+  const sql = "SELECT writefile(" + audioSqlString(outputPath) + ", data) FROM android WHERE id = " + String(record.id) + " LIMIT 1;";
+  const result = await utils.exec("/usr/bin/sqlite3", [record.databasePath, sql], dataRoot());
+  if (!result || result.status !== 0 || !file.exists(outputPath)) {
+    throw new Error("Local audio extraction failed: " + String((result && result.stderr) || "sqlite3 failed").slice(0, 500));
+  }
+  return {
+    path: outputPath,
+    extension,
+    source: record.source,
+    filename: String(record.filename || "")
+  };
+}
+async function extractLocalWordAudio(term, reading, outputRoot, stem) {
+  const record = await findLocalAudioRecord(term, reading);
+  return record ? await extractLocalAudioRecord(record, outputRoot, stem) : null;
+}
+function audioQueryParameter(sourceUrl, name) {
+  const raw = String(sourceUrl || "");
+  try {
+    if (typeof URL === "function") return new URL(raw).searchParams.get(name) || "";
+  } catch (_) {}
+  const query = raw.split("?").slice(1).join("?").split("#")[0];
+  const parts = query ? query.split("&") : [];
+  for (const part of parts) {
+    const pair = part.split("=");
+    let key = "";
+    try { key = decodeURIComponent(String(pair.shift() || "").replace(/\+/g, " ")); } catch (_) {}
+    if (key !== name) continue;
+    try { return decodeURIComponent(pair.join("=").replace(/\+/g, " ")); } catch (_) { return ""; }
+  }
+  return "";
+}
+async function localAudioCandidatesForUrl(sourceUrl) {
+  const term = audioQueryParameter(sourceUrl, "term");
+  const reading = audioQueryParameter(sourceUrl, "reading");
+  const root = dataPath("audio-cache");
+  const extracted = await extractLocalWordAudio(term, reading, root, "overlay-" + String(Date.now()));
+  if (!extracted) return [];
+  try {
+    const encoded = await utils.exec("/usr/bin/base64", ["-i", extracted.path], dataRoot());
+    if (!encoded || encoded.status !== 0) throw new Error("base64 failed");
+    return [{
+      name: extracted.source || "Local Audio",
+      url: "data:" + localAudioMimeType(extracted.extension) + ";base64," + String(encoded.stdout || "").replace(/\s+/g, "")
+    }];
+  } finally {
+    safeDelete(extracted.path);
+  }
+}
+function audioDownloadExtension(url) {
+  let pathname = String(url || "");
+  try { pathname = new URL(pathname).pathname; } catch (_) {}
+  return localAudioExtension(pathname);
+}
+async function downloadWordAudioCandidate(candidate, outputRoot, stem) {
+  const url = safeAudioCandidateUrl(candidate && candidate.url, "");
+  if (!url || /^data:/i.test(url)) return null;
+  const extension = audioDownloadExtension(url);
+  const outputPath = pathJoin(outputRoot, ankiSafeFileStem(stem || "word-audio") + "." + extension);
+  await execChecked("/bin/mkdir", ["-p", outputRoot]);
+  const result = await utils.exec("/usr/bin/curl", [
+    "--silent", "--show-error", "--fail", "--location", "--max-time", "12",
+    "--output", outputPath, url
+  ], dataRoot());
+  if (!result || result.status !== 0 || !file.exists(outputPath)) {
+    safeDelete(outputPath);
+    return null;
+  }
+  return { path: outputPath, extension, source: String((candidate && candidate.name) || "") };
+}
+async function resolveWordAudioToFile(term, reading, outputRoot, stem) {
+  const sources = activeWordAudioSources();
+  for (const source of sources) {
+    const sourceUrl = audioSourceUrlForTerm(source && source.url, term, reading);
+    if (!sourceUrl) continue;
+    if (isLocalAudioSourceUrl(sourceUrl)) {
+      const local = await extractLocalWordAudio(term, reading, outputRoot, stem);
+      if (local) return local;
+      continue;
+    }
+    let candidates = [];
+    try {
+      candidates = await fetchAudioSourceCandidates(sourceUrl);
+    } catch (_) {
+      candidates = [{ name: String((source && source.name) || ""), url: sourceUrl }];
+    }
+    for (const candidate of candidates) {
+      const downloaded = await downloadWordAudioCandidate(candidate, outputRoot, stem);
+      if (downloaded) return downloaded;
+    }
+  }
+  return null;
+}
+
+function synchronizeOverlayAfterLoad(reason) {
+  debugVerbose("synchronizing overlay state reason=" + String(reason || "unknown") + " generation=" + overlayLoadGeneration);
+  postToOverlay("config", overlayConfig());
+  postToOverlay("enabled", { enabled });
+  replayActiveOverlayTask();
+  if (enabled) pollSubtitle({ forceReplay: true });
+}
+function registerOverlayMessageHandlers() {
+  if (overlayMessageHandlersRegistered) return;
+  overlay.onMessage("ready", payload => {
+    overlayReadyGeneration = overlayLoadGeneration;
+    debugLog("overlay ready received payloadType=" + typeof payload);
+    handleLookupPopupOverlayReady(payload);
+    synchronizeOverlayAfterLoad("ready");
+  });
+  overlay.onMessage("lookup-at", payload => { handleLookupAt(payload); });
+  overlay.onMessage("lookup-at-lite", payload => { handleLookupAt(payload); });
+  overlay.onMessage("lookup-popup-visibility", payload => { handleLookupPopupVisibility(payload); });
+  overlay.onMessage("lookup-popup-visible", payload => { handleLookupPopupVisibility(payload); });
+  overlay.onMessage("open-external-url", payload => { openExternalUrlFromOverlay(payload && payload.url !== undefined ? payload.url : payload); });
+  overlay.onMessage("anki-add", payload => { handleAnkiAddRequest(payload); });
+  overlayMessageHandlersRegistered = true;
+}
+function scheduleOverlayLoadFallbacks(generation) {
+  [180, 700, 1600].forEach(delayMs => {
+    setTimeout(() => {
+      if (!initialized || generation !== overlayLoadGeneration || overlayReadyGeneration === generation) return;
+      debugVerbose("overlay ready not received; applying startup fallback generation=" + generation + " delayMs=" + delayMs);
+      synchronizeOverlayAfterLoad("fallback-" + delayMs);
+    }, delayMs);
+  });
+}
+function loadOverlayDocument(reason) {
+  registerOverlayMessageHandlers();
+  const generation = ++overlayLoadGeneration;
+  debugVerbose("loading overlay document reason=" + String(reason || "unknown") + " generation=" + generation);
+  overlay.loadFile("overlay.html");
+  scheduleOverlayLoadFallbacks(generation);
+}
 function initializeOverlay() {
   ensureOverlayBridge();
   if (initialized) return;
   debugLog("initializeOverlay v" + VERSION + " initialized=" + initialized + " enabled=" + enabled);
-  overlay.loadFile("overlay.html");
-  overlay.setOpacity(1);
-  overlay.setClickable(true);
-  overlay.show();
+  registerOverlayMessageHandlers();
   initialized = true;
-  overlay.onMessage("ready", payload => {
-    debugLog("overlay ready received payloadType=" + typeof payload);
-    handleLookupPopupOverlayReady(payload);
-    postToOverlay("config", overlayConfig());
-    postToOverlay("enabled", { enabled });
-    replayActiveOverlayTask();
-    if (enabled) pollSubtitle();
-  });
-  overlay.onMessage("lookup-at", payload => { handleLookupAt(payload); });
-	  overlay.onMessage("lookup-at-lite", payload => { handleLookupAt(payload); });
-	  overlay.onMessage("lookup-popup-visibility", payload => { handleLookupPopupVisibility(payload); });
-	  overlay.onMessage("lookup-popup-visible", payload => { handleLookupPopupVisibility(payload); });
-	  overlay.onMessage("open-external-url", payload => { openExternalUrlFromOverlay(payload && payload.url !== undefined ? payload.url : payload); });
-	}
+  try {
+    loadOverlayDocument("initial");
+    overlay.setOpacity(1);
+    overlay.setClickable(true);
+    overlay.show();
+  } catch (error) {
+    initialized = false;
+    throw error;
+  }
+}
 function prepareRuntimeAfterProfileChange() {
   lookupBackendReadyForNativeHide = false;
   lookupInFlight = Object.create(null);
@@ -3721,6 +4450,8 @@ function prepareRuntimeAfterProfileChange() {
   pendingHoverLookup = null;
   hoverLookupActiveKey = "";
   lastSubtitle = null;
+  subtitleEmptySince = 0;
+  lastSubtitlePublishedAt = 0;
   resetLookupPopupPause();
 }
 function warmActiveProfileBackend() {
@@ -3731,7 +4462,7 @@ function warmActiveProfileBackend() {
     if (!enabled) return;
     lookupBackendReadyForNativeHide = true;
     syncNativeSubtitleVisibility();
-    setOverlayStatus("Dictionary lookup ready for " + language.label + ".", "info", 3500);
+    setOverlayStatus(t("lookup.ready", { language: languageLabelForUi(language) }), "info", 3500);
   }).catch(error => {
     lookupBackendReadyForNativeHide = false;
     debugError("Dictionary lookup startup failed after profile change language=" + language.id + ": " + compactError(error));
@@ -3755,6 +4486,24 @@ function videoWindowAvailableForOverlayLoad() {
   try { return !!(core && core.window && core.window.loaded); }
   catch (_) { return false; }
 }
+function refreshOverlayForTextSubtitleActivation() {
+  if (!videoWindowAvailableForOverlayLoad()) return false;
+  try {
+    debugLog("refreshing overlay for first text subtitle in current media");
+    if (!initialized) {
+      initializeOverlay();
+    } else {
+      loadOverlayDocument("text-subtitle-activation");
+      overlay.setOpacity(1);
+      overlay.setClickable(enabled);
+      overlay.show();
+    }
+    return true;
+  } catch (error) {
+    debugWarn("overlay refresh for text subtitle activation failed: " + compactError(error));
+    return false;
+  }
+}
 function reloadOverlayForProfileChange() {
   prepareRuntimeAfterProfileChange();
   if (!videoWindowAvailableForOverlayLoad()) {
@@ -3766,7 +4515,7 @@ function reloadOverlayForProfileChange() {
   } else {
     try {
       debugLog("reloading overlay for active profile language=" + selectedLanguageModule().id);
-      overlay.loadFile("overlay.html");
+      loadOverlayDocument("profile-change");
       overlay.setOpacity(1);
       overlay.setClickable(enabled);
       if (enabled) overlay.show();
@@ -3813,6 +4562,9 @@ function stopPolling() {
   pollTimer = null;
   activeSubtitlePollMs = 0;
   lastSubtitle = null;
+  subtitleEmptySince = 0;
+  lastSubtitlePublishedAt = 0;
+  textSubtitleOverlayPrimed = false;
   lookupInFlight = Object.create(null);
 }
 async function prepareLookupBackendForEnabledOverlay(language, dicts) {
@@ -3843,12 +4595,12 @@ function setEnabled(next) {
     } catch (error) { console.warn("Could not update native subtitle visibility: " + compactError(error)); }
     overlay.show();
     startPolling();
-    showOSD("iinatan: On");
+    showOSD(t("state.on"));
     prepareLookupBackendForEnabledOverlay(language, dicts).then(() => {
       if (!enabled) return;
       lookupBackendReadyForNativeHide = true;
       syncNativeSubtitleVisibility();
-      setOverlayStatus("Dictionary lookup ready for " + language.label + ".", "info", 3500);
+      setOverlayStatus(t("lookup.ready", { language: languageLabelForUi(language) }), "info", 3500);
     }).catch(error => {
       lookupBackendReadyForNativeHide = false;
       debugError("Dictionary lookup startup failed language=" + language.id + ": " + compactError(error));
@@ -3861,7 +4613,7 @@ function setEnabled(next) {
     stopPolling();
     publishSubtitle("");
     try { if (nativeSubVisibilityBeforeEnable !== null) mpv.set("sub-visibility", nativeSubVisibilityBeforeEnable); } catch (_) {}
-    showOSD("iinatan: Off");
+    showOSD(t("state.off"));
   }
 }
 function toggleFromShortcut(data) {
@@ -3951,8 +4703,8 @@ function dictionaryManagerState() {
       {
         id: "jitendex-ja-en",
         title: "Jitendex",
-        language: "Japanese",
-        description: "JMdict-based Japanese-English dictionary with structured Yomitan data.",
+        language: t("recommended.jitendexLanguage"),
+        description: t("recommended.jitendexDescription"),
         downloadUrl: RECOMMENDED_JITENDEX_URL,
         installed: hasJitendex
       }
@@ -3971,11 +4723,29 @@ function postDictionaryManagerStatus(message, kind, busy) {
     updatedAt: Date.now()
   });
 }
+function postAnkiManagerState(modelName) {
+  (async () => {
+    try {
+      const state = await ankiConnectionMetadata(modelName);
+      postToDictionaryManager("dictionary-manager-anki-state", state);
+      postDictionaryManagerStatus(t("manager.connected"), "info", false);
+    } catch (error) {
+      postToDictionaryManager("dictionary-manager-anki-state", {
+        connected: false,
+        error: compactError(error),
+        deckNames: [],
+        modelNames: [],
+        fieldNames: []
+      });
+      postDictionaryManagerStatus(t("manager.ankiError", { error: compactError(error) }), "error", false);
+    }
+  })();
+}
 function runDictionaryManagerAction(label, action) {
   (async () => {
     const actionLabel = label || "Working";
     if (dictionaryManagerActionInFlight) {
-      postDictionaryManagerStatus("Another dictionary action is already running.", "info", true);
+      postDictionaryManagerStatus(t("manager.busy"), "info", true);
       return;
     }
     dictionaryManagerActionInFlight = true;
@@ -3984,12 +4754,12 @@ function runDictionaryManagerAction(label, action) {
       const result = await action();
       postDictionaryManagerState();
       if (result && result.cancelled) {
-        postDictionaryManagerStatus(result.message || actionLabel + " cancelled.", "info", false);
+        postDictionaryManagerStatus(result.message || t("manager.actionCancelled", { action: actionLabel }), "info", false);
         return;
       }
-      postDictionaryManagerStatus(actionLabel + " complete.", "info", false);
+      postDictionaryManagerStatus(t("manager.actionComplete", { action: actionLabel }), "info", false);
     } catch (error) {
-      const msg = actionLabel + " failed: " + compactError(error);
+      const msg = t("manager.actionFailed", { action: actionLabel, error: compactError(error) });
       debugError("dictionary manager action failed label=" + actionLabel + " error=" + compactError(error));
       postDictionaryManagerState();
       postDictionaryManagerStatus(msg, "error", false);
@@ -4002,14 +4772,14 @@ function runDictionaryManagerAction(label, action) {
 function runDictionaryManagerZipImport() {
   (async () => {
     if (dictionaryManagerActionInFlight) {
-      postDictionaryManagerStatus("Another dictionary action is already running.", "info", true);
+      postDictionaryManagerStatus(t("manager.busy"), "info", true);
       return;
     }
     let zipPaths = [];
     try {
       zipPaths = await chooseDictionaryZipPaths();
     } catch (error) {
-      const msg = "Could not open dictionary ZIP picker: " + compactError(error);
+      const msg = t("manager.pickerFailed", { error: compactError(error) });
       debugError("dictionary manager file picker failed: " + compactError(error));
       postDictionaryManagerState();
       postDictionaryManagerStatus(msg, "error", false);
@@ -4017,21 +4787,23 @@ function runDictionaryManagerZipImport() {
       return;
     }
     if (!zipPaths.length) {
-      notify("Dictionary import cancelled.", "info", 3500);
+      notify(t("manager.importCancelled"), "info", 3500);
       postDictionaryManagerState();
-      postDictionaryManagerStatus("Dictionary import cancelled.", "info", false);
+      postDictionaryManagerStatus(t("manager.importCancelled"), "info", false);
       return;
     }
 
-    const countLabel = zipPaths.length === 1 ? "dictionary" : String(zipPaths.length) + " dictionaries";
+    const countLabel = zipPaths.length === 1
+      ? t("manager.oneDictionary")
+      : t("manager.manyDictionaries", { count: zipPaths.length });
     dictionaryManagerActionInFlight = true;
-    postDictionaryManagerStatus("Importing " + countLabel + "...", "info", true);
+    postDictionaryManagerStatus(t("manager.importing", { count: countLabel }), "info", true);
     try {
       await validateAndImportDictionaryZips(zipPaths, "dictionary-manager-picker");
       postDictionaryManagerState();
-      postDictionaryManagerStatus("Imported " + countLabel + ".", "info", false);
+      postDictionaryManagerStatus(t("manager.imported", { count: countLabel }), "info", false);
     } catch (error) {
-      const msg = "Importing dictionary failed: " + compactError(error);
+      const msg = t("manager.importFailed", { error: compactError(error) });
       debugError("dictionary manager import failed: " + compactError(error));
       postDictionaryManagerState();
       postDictionaryManagerStatus(msg, "error", false);
@@ -4056,29 +4828,30 @@ function registerDictionaryManagerHandlers() {
   onMessage("dictionary-manager-ready", () => {
     postDictionaryManagerState();
     postDictionaryManagerStatus("", "info", false);
+    postAnkiManagerState(ankiSettings().modelName);
   });
   onMessage("dictionary-manager-refresh", () => {
     postDictionaryManagerState();
-    postDictionaryManagerStatus("Dictionary list refreshed.", "info", false);
+    postDictionaryManagerStatus(t("manager.refreshed"), "info", false);
   });
   onMessage("dictionary-manager-set-enabled", payload => {
     const name = payload && payload.name;
     if (!name) return;
     setDictionaryEnabled(String(name), !!(payload && payload.enabled));
-    postDictionaryManagerStatus("Dictionary selection saved.", "info", false);
+    postDictionaryManagerStatus(t("manager.selectionSaved"), "info", false);
   });
   onMessage("dictionary-manager-set-order", payload => {
     const order = payload && Array.isArray(payload.order) ? payload.order : [];
     setDictionaryOrder(order);
-    postDictionaryManagerStatus("Dictionary order saved.", "info", false);
+    postDictionaryManagerStatus(t("manager.orderSaved"), "info", false);
   });
   onMessage("dictionary-manager-delete", payload => {
     const name = payload && payload.name;
     if (!name) return;
-    runDictionaryManagerAction("Deleting dictionary", () => deleteDictionary(String(name)));
+    runDictionaryManagerAction(t("manager.deletingDictionary"), () => deleteDictionary(String(name)));
   });
   onMessage("dictionary-manager-download-recommended", () => {
-    runDictionaryManagerAction("Downloading recommended dictionaries", () => getRecommendedDictionaries());
+    runDictionaryManagerAction(t("manager.downloading"), () => getRecommendedDictionaries());
   });
   onMessage("dictionary-manager-import-zip", () => {
     runDictionaryManagerZipImport();
@@ -4086,14 +4859,14 @@ function registerDictionaryManagerHandlers() {
   onMessage("dictionary-manager-switch-profile", payload => {
     const profileId = payload && payload.profileId;
     if (!profileId) return;
-    runDictionaryManagerAction("Switching profile", () => {
+    runDictionaryManagerAction(t("manager.switchingProfile"), () => {
       setActiveDictionaryProfile(profileId);
       return Promise.resolve();
     });
   });
   onMessage("dictionary-manager-create-profile", payload => {
     const name = payload && payload.name;
-    runDictionaryManagerAction("Creating profile", () => {
+    runDictionaryManagerAction(t("manager.creatingProfile"), () => {
       const profile = createDictionaryProfile(name || "", payload && payload.sourceProfileId);
       setActiveDictionaryProfile(profile.id);
       return Promise.resolve();
@@ -4102,16 +4875,16 @@ function registerDictionaryManagerHandlers() {
   onMessage("dictionary-manager-rename-profile", payload => {
     try {
       renameDictionaryProfile(payload && payload.profileId, payload && payload.name);
-      postDictionaryManagerStatus("Profile renamed.", "info", false);
+      postDictionaryManagerStatus(t("manager.profileRenamed"), "info", false);
     } catch (error) {
-      const msg = "Renaming profile failed: " + compactError(error);
+      const msg = t("manager.renameFailed", { error: compactError(error) });
       debugError(msg);
       postDictionaryManagerStatus(msg, "error", false);
       alert(msg);
     }
   });
   onMessage("dictionary-manager-delete-profile", payload => {
-    runDictionaryManagerAction("Deleting profile", () => {
+    runDictionaryManagerAction(t("manager.deletingProfile"), () => {
       deleteDictionaryProfile(payload && payload.profileId);
       return Promise.resolve();
     });
@@ -4119,9 +4892,9 @@ function registerDictionaryManagerHandlers() {
   onMessage("dictionary-manager-update-profile-preferences", payload => {
     try {
       updateDictionaryProfilePreferences(payload && payload.profileId, payload && payload.preferences);
-      postDictionaryManagerStatus("Profile settings saved.", "info", false);
+      postDictionaryManagerStatus(t("manager.profileSaved"), "info", false);
     } catch (error) {
-      const msg = "Saving profile settings failed: " + compactError(error);
+      const msg = t("manager.profileSaveFailed", { error: compactError(error) });
       debugError(msg);
       postDictionaryManagerStatus(msg, "error", false);
       alert(msg);
@@ -4130,34 +4903,458 @@ function registerDictionaryManagerHandlers() {
   onMessage("dictionary-manager-update-global-settings", payload => {
     try {
       updateGlobalSettings(payload && payload.settings);
-      postDictionaryManagerStatus("Dictionary import settings saved.", "info", false);
+      postDictionaryManagerStatus(t("manager.globalSaved"), "info", false);
     } catch (error) {
-      const msg = "Saving dictionary import settings failed: " + compactError(error);
+      const msg = t("manager.globalSaveFailed", { error: compactError(error) });
       debugError(msg);
       postDictionaryManagerStatus(msg, "error", false);
       alert(msg);
     }
   });
+  onMessage("dictionary-manager-anki-refresh", payload => {
+    postDictionaryManagerStatus(t("manager.connecting"), "info", true);
+    postAnkiManagerState(payload && payload.modelName);
+  });
+  onMessage("dictionary-manager-choose-local-audio-database", () => {
+    (async () => {
+      try {
+        const selectedPath = await chooseLocalAudioDatabasePath();
+        if (selectedPath) {
+          postToDictionaryManager("dictionary-manager-local-audio-path", { path: selectedPath });
+          postDictionaryManagerStatus("Local audio database selected.", "info", false);
+        } else {
+          postDictionaryManagerStatus("", "info", false);
+        }
+      } catch (error) {
+        postDictionaryManagerStatus(compactError(error), "error", false);
+      }
+    })();
+  });
 }
 function openDictionaryManager() {
   if (!dictionaryManagerAvailable()) {
-    alert("This IINA build does not expose standalone windows. Use the Dictionaries menu for import actions.");
+    alert(t("manager.unavailable"));
     return;
   }
   try {
     standaloneWindow.loadFile("dictionary-manager.html");
     registerDictionaryManagerHandlers();
     try {
-      if (typeof standaloneWindow.setProperty === "function") standaloneWindow.setProperty({ title: "iinatan Settings", resizable: true });
+      if (typeof standaloneWindow.setProperty === "function") standaloneWindow.setProperty({ title: t("settings.title"), resizable: true });
     } catch (_) {}
     if (typeof standaloneWindow.open === "function") standaloneWindow.open();
     else if (typeof standaloneWindow.show === "function") standaloneWindow.show();
     setTimeout(() => postDictionaryManagerState(), 120);
   } catch (error) {
-    const msg = "Could not open iinatan Settings: " + compactError(error);
+    const msg = t("manager.openFailed", { error: compactError(error) });
     debugError(msg);
     alert(msg);
   }
+}
+
+let ankiExportInFlight = false;
+
+function ankiSetting(key, fallback) {
+  try {
+    const value = pref(key, fallback);
+    return value === undefined || value === null || value === "" ? fallback : value;
+  } catch (_) {
+    return fallback;
+  }
+}
+function ankiSettings() {
+  const fieldMappings = ankiFieldMappings();
+  return {
+    url: String(ankiSetting("ankiConnectUrl", "http://127.0.0.1:8765") || "").replace(/\/+$/, ""),
+    apiKey: String(ankiSetting("ankiApiKey", "") || ""),
+    deckName: String(ankiSetting("ankiDeckName", "Default") || ""),
+    modelName: String(ankiSetting("ankiModelName", "Basic") || ""),
+    fieldMappings,
+    imageFields: ankiFieldsMappedTo(fieldMappings, "{image}"),
+    wordAudioFields: ankiFieldsMappedTo(fieldMappings, "{audio}"),
+    sentenceAudioFields: ankiFieldsMappedTo(fieldMappings, "{sentence-audio}"),
+    tags: String(ankiSetting("ankiTags", "hoshitan") || ""),
+    allowDuplicate: preferenceValueToBool(ankiSetting("ankiAllowDuplicate", false), false),
+    includeScreenshot: preferenceValueToBool(ankiSetting("ankiIncludeScreenshot", true), true),
+    includeAudio: preferenceValueToBool(ankiSetting("ankiIncludeAudio", true), true),
+    audioPaddingMs: Math.max(0, Math.min(5000, Number(ankiSetting("ankiAudioPaddingMs", 120)) || 0)),
+    ffmpegPath: String(ankiSetting("ankiFfmpegPath", "/opt/homebrew/bin/ffmpeg") || "")
+  };
+}
+function ankiFieldMappings() {
+  let parsed = {};
+  const raw = String(ankiSetting("ankiFieldMappingsJson", "") || "").trim();
+  if (raw) {
+    try { parsed = JSON.parse(raw); } catch (_) { parsed = {}; }
+  }
+  const out = {};
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    Object.keys(parsed).forEach(fieldName => {
+      const name = String(fieldName || "").trim();
+      const mapping = String(parsed[fieldName] || "").trim();
+      if (name && /^\{(?:expression|reading|sentence|definition|image|audio|sentence-audio|source|dictionary)\}$/.test(mapping)) {
+        out[name] = mapping;
+      }
+    });
+  }
+  if (Object.keys(out).length) return out;
+  const legacy = [
+    ["ankiFieldSentence", "Front", "{sentence}"],
+    ["ankiFieldExpression", "", "{expression}"],
+    ["ankiFieldReading", "", "{reading}"],
+    ["ankiFieldDefinition", "Back", "{definition}"],
+    ["ankiFieldImage", "", "{image}"],
+    ["ankiFieldAudio", "", "{sentence-audio}"],
+    ["ankiFieldSource", "", "{source}"]
+  ];
+  legacy.forEach(([key, fallback, mapping]) => {
+    const fieldName = String(ankiSetting(key, fallback) || "").trim();
+    if (fieldName) out[fieldName] = mapping;
+  });
+  return out;
+}
+function ankiFieldsMappedTo(mappings, placeholder) {
+  return Object.keys(mappings || {}).filter(fieldName => mappings[fieldName] === placeholder);
+}
+function ankiText(value, maxLength) {
+  const normalized = String(value || "").replace(/\u0000/g, "").replace(/\r/g, "").trim();
+  return normalized.slice(0, Math.max(1, Number(maxLength) || 50000));
+}
+function ankiEscapeHtml(value) {
+  return ankiText(value, 50000)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+    .replace(/\n/g, "<br>");
+}
+function ankiTags(value) {
+  const seen = Object.create(null);
+  return String(value || "").split(/[\s,]+/).map(tag => tag.trim()).filter(tag => {
+    if (!tag || seen[tag]) return false;
+    seen[tag] = true;
+    return true;
+  }).slice(0, 32);
+}
+function ankiFieldsFromPayload(payload, settings, sourceText) {
+  const fields = {};
+  const values = {
+    "{sentence}": payload && payload.sentence,
+    "{expression}": payload && payload.expression,
+    "{reading}": payload && payload.reading,
+    "{definition}": payload && payload.definition,
+    "{source}": sourceText,
+    "{dictionary}": payload && payload.dictionary,
+    "{image}": "",
+    "{audio}": "",
+    "{sentence-audio}": ""
+  };
+  Object.keys(settings.fieldMappings || {}).forEach(fieldName => {
+    fields[fieldName] = ankiEscapeHtml(values[settings.fieldMappings[fieldName]] || "");
+  });
+  return fields;
+}
+async function ankiInvoke(action, params, settingsOverride) {
+  const settings = settingsOverride || ankiSettings();
+  if (!settings.url || !/^https?:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?$/i.test(settings.url)) {
+    throw new Error(t("anki.localhost"));
+  }
+  const request = { action: String(action || ""), version: 6 };
+  if (params !== undefined) request.params = params;
+  if (settings.apiKey) request.key = settings.apiKey;
+  let response;
+  try {
+    response = await http.post(settings.url, {
+      params: {},
+      headers: { "Content-Type": "application/json" },
+      data: request
+    });
+  } catch (error) {
+    throw new Error(t("anki.connectFailed", { error: compactError(error) }));
+  }
+  if (!response || Number(response.statusCode || 0) < 200 || Number(response.statusCode || 0) >= 300) {
+    throw new Error(t("anki.httpError", { status: String(response && response.statusCode || "unknown") }));
+  }
+  let body = response.data;
+  if (!body || typeof body !== "object") {
+    try { body = JSON.parse(String(response.text || "")); }
+    catch (_) { body = null; }
+  }
+  if (!body || typeof body !== "object") throw new Error(t("anki.invalidJson"));
+  if (body.error) throw new Error(String(body.error));
+  return body.result;
+}
+async function ankiConnectionMetadata(modelName) {
+  const settings = ankiSettings();
+  const version = await ankiInvoke("version", undefined, settings);
+  const deckNames = await ankiInvoke("deckNames", undefined, settings);
+  const modelNames = await ankiInvoke("modelNames", undefined, settings);
+  const selectedModel = String(modelName || settings.modelName || "");
+  let fieldNames = [];
+  if (selectedModel) {
+    try {
+      fieldNames = await ankiInvoke("modelFieldNames", { modelName: selectedModel }, settings);
+    } catch (error) {
+      debugWarn("Could not load Anki fields for " + selectedModel + ": " + compactError(error));
+    }
+  }
+  return {
+    connected: true,
+    version,
+    deckNames: Array.isArray(deckNames) ? deckNames : [],
+    modelNames: Array.isArray(modelNames) ? modelNames : [],
+    modelName: selectedModel,
+    fieldNames: Array.isArray(fieldNames) ? fieldNames : []
+  };
+}
+function ankiNumberProperty(name, fallback) {
+  try {
+    const value = Number(mpv.getNumber(name));
+    return Number.isFinite(value) ? value : fallback;
+  } catch (_) {
+    try {
+      const value = Number(mpv.getString(name));
+      return Number.isFinite(value) ? value : fallback;
+    } catch (_) {
+      return fallback;
+    }
+  }
+}
+function ankiStringProperty(name, fallback) {
+  try {
+    const value = mpv.getString(name);
+    return value === undefined || value === null || value === "" ? fallback : String(value);
+  } catch (_) {
+    return fallback;
+  }
+}
+function ankiSubtitleTiming() {
+  const timePos = Math.max(0, ankiNumberProperty("time-pos", 0));
+  let start = ankiNumberProperty("sub-start", NaN);
+  let end = ankiNumberProperty("sub-end", NaN);
+  const subDelay = ankiNumberProperty("sub-delay", 0);
+  const audioDelay = ankiNumberProperty("audio-delay", 0);
+  if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
+    const correction = subDelay - audioDelay;
+    start += correction;
+    end += correction;
+  } else {
+    start = Math.max(0, timePos - 1.2);
+    end = timePos + 1.2;
+  }
+  return {
+    start: Math.max(0, start),
+    end: Math.max(Math.max(0, start) + 0.05, end),
+    timePos
+  };
+}
+function ankiSourcePath() {
+  const path = ankiStringProperty("path", "");
+  if (!path || /^(?:https?|ytdl):/i.test(path)) return "";
+  return normalizeFileUrlPath(path);
+}
+function ankiSourceLabel(timing) {
+  const filename = ankiStringProperty("filename", "") || ankiSourcePath().split("/").pop() || "video";
+  const seconds = Math.max(0, Number(timing && timing.timePos) || 0);
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+  const millis = Math.floor((seconds - Math.floor(seconds)) * 1000);
+  const stamp = (hours ? String(hours).padStart(2, "0") + ":" : "") +
+    String(minutes).padStart(2, "0") + ":" +
+    String(secs).padStart(2, "0") + "." +
+    String(millis).padStart(3, "0");
+  return filename + " @ " + stamp;
+}
+function ankiMediaRoot() { return dataPath("anki-media"); }
+function ankiSafeFileStem(value) {
+  const ascii = String(value || "").normalize ? String(value || "").normalize("NFKD") : String(value || "");
+  const stem = ascii.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48);
+  return stem || "card";
+}
+function ankiMediaBaseName(payload, timing) {
+  const term = ankiSafeFileStem(payload && payload.expression);
+  return "hoshitan-" + term + "-" + String(Math.round((timing && timing.timePos || 0) * 1000)) + "-" + String(Date.now());
+}
+async function waitForFile(path, timeoutMs) {
+  const deadline = Date.now() + Math.max(250, Number(timeoutMs) || 3000);
+  while (Date.now() < deadline) {
+    try { if (file.exists(path)) return path; } catch (_) {}
+    await sleep(50);
+  }
+  throw new Error(t("anki.mediaTimeout", { path }));
+}
+async function createAnkiScreenshot(outputPath) {
+  await execChecked("/bin/mkdir", ["-p", ankiMediaRoot()]);
+  try {
+    mpv.command("screenshot-to-file", [outputPath, "video"]);
+  } catch (error) {
+    throw new Error(t("anki.screenshotFailed", { error: compactError(error) }));
+  }
+  return await waitForFile(outputPath, 5000);
+}
+function activeAudioFfmpegMap() {
+  try {
+    const tracks = mpv.getNative("track-list");
+    if (Array.isArray(tracks)) {
+      const selected = tracks.find(track => track && track.type === "audio" && track.selected);
+      const index = Number(selected && (selected["ff-index"] !== undefined ? selected["ff-index"] : selected.ffIndex));
+      if (Number.isFinite(index) && index >= 0) return "0:" + String(index);
+    }
+  } catch (_) {}
+  return "0:a:0";
+}
+function resolveAnkiFfmpegPath(configured) {
+  const candidates = [
+    String(configured || ""),
+    "/opt/homebrew/bin/ffmpeg",
+    "/usr/local/bin/ffmpeg",
+    "/usr/bin/ffmpeg"
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    try { if (file.exists(candidate)) return candidate; } catch (_) {}
+  }
+  return "";
+}
+async function createAnkiAudio(outputPath, timing, settings) {
+  const source = ankiSourcePath();
+  if (!source) throw new Error(t("anki.localVideoRequired"));
+  const ffmpegPath = resolveAnkiFfmpegPath(settings.ffmpegPath);
+  if (!ffmpegPath) throw new Error(t("anki.ffmpegMissing"));
+  const padding = Math.max(0, Number(settings.audioPaddingMs) || 0) / 1000;
+  const start = Math.max(0, timing.start - padding);
+  const end = Math.max(start + 0.05, timing.end + padding);
+  await execChecked("/bin/mkdir", ["-p", ankiMediaRoot()]);
+  await execChecked(ffmpegPath, [
+    "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+    "-ss", start.toFixed(3),
+    "-i", source,
+    "-t", (end - start).toFixed(3),
+    "-map", activeAudioFfmpegMap(),
+    "-vn", "-ac", "1",
+    "-c:a", "libmp3lame", "-b:a", "64k",
+    outputPath
+  ], dataRoot());
+  return await waitForFile(outputPath, 1000);
+}
+function ankiMediaObject(path, filename, fieldNames) {
+  const fields = (Array.isArray(fieldNames) ? fieldNames : [fieldNames])
+    .map(name => String(name || "").trim())
+    .filter(Boolean);
+  return { path, filename, fields };
+}
+async function buildAnkiMedia(payload, settings, timing) {
+  const base = ankiMediaBaseName(payload, timing);
+  const media = { picture: [], audio: [], warnings: [], paths: [] };
+  if (settings.includeScreenshot && settings.imageFields.length) {
+    const imagePath = pathJoin(ankiMediaRoot(), base + ".jpg");
+    try {
+      await createAnkiScreenshot(imagePath);
+      media.picture.push(ankiMediaObject(imagePath, base + ".jpg", settings.imageFields));
+      media.paths.push(imagePath);
+    } catch (error) {
+      media.warnings.push(compactError(error));
+    }
+  }
+  if (settings.wordAudioFields.length) {
+    try {
+      const wordAudio = await resolveWordAudioToFile(
+        payload && payload.expression,
+        payload && payload.reading,
+        ankiMediaRoot(),
+        base + "-word"
+      );
+      if (wordAudio) {
+        const filename = base + "-word." + wordAudio.extension;
+        media.audio.push(ankiMediaObject(wordAudio.path, filename, settings.wordAudioFields));
+        media.paths.push(wordAudio.path);
+      }
+    } catch (error) {
+      media.warnings.push(compactError(error));
+    }
+  }
+  if (settings.includeAudio && settings.sentenceAudioFields.length) {
+    const audioPath = pathJoin(ankiMediaRoot(), base + ".mp3");
+    try {
+      await createAnkiAudio(audioPath, timing, settings);
+      media.audio.push(ankiMediaObject(audioPath, base + ".mp3", settings.sentenceAudioFields));
+      media.paths.push(audioPath);
+    } catch (error) {
+      media.warnings.push(compactError(error));
+    }
+  }
+  return media;
+}
+function cleanupAnkiMedia(paths) {
+  (paths || []).forEach(path => safeDelete(path));
+}
+function validateAnkiCardSettings(settings, fields) {
+  if (!settings.deckName) throw new Error(t("anki.deckRequired"));
+  if (!settings.modelName) throw new Error(t("anki.modelRequired"));
+  if (!Object.keys(fields || {}).length) throw new Error(t("anki.fieldRequired"));
+}
+async function validateAnkiDestination(settings, fields) {
+  const deckNames = await ankiInvoke("deckNames", undefined, settings);
+  if (!Array.isArray(deckNames) || deckNames.indexOf(settings.deckName) < 0) {
+    throw new Error(t("anki.deckMissing", { deck: settings.deckName }));
+  }
+  const fieldNames = await ankiInvoke("modelFieldNames", { modelName: settings.modelName }, settings);
+  const available = Object.create(null);
+  (Array.isArray(fieldNames) ? fieldNames : []).forEach(name => {
+    available[String(name).toLowerCase()] = true;
+  });
+  const configured = Object.keys(settings.fieldMappings || {});
+  const missing = configured.filter(name => !available[String(name).toLowerCase()]);
+  if (missing.length) {
+    throw new Error(t("anki.fieldsMissing", { model: settings.modelName, fields: missing.join(", ") }));
+  }
+}
+async function exportLookupEntryToAnki(payload) {
+  if (ankiExportInFlight) throw new Error(t("anki.busy"));
+  ankiExportInFlight = true;
+  const requestId = String(payload && payload.requestId || "");
+  let media = null;
+  try {
+    const settings = ankiSettings();
+    const timing = ankiSubtitleTiming();
+    const source = ankiSourceLabel(timing);
+    const fields = ankiFieldsFromPayload(payload || {}, settings, source);
+    validateAnkiCardSettings(settings, fields);
+    await validateAnkiDestination(settings, fields);
+    media = await buildAnkiMedia(payload || {}, settings, timing);
+    const note = {
+      deckName: settings.deckName,
+      modelName: settings.modelName,
+      fields,
+      options: {
+        allowDuplicate: !!settings.allowDuplicate,
+        duplicateScope: "deck"
+      },
+      tags: ankiTags(settings.tags)
+    };
+    if (media.picture.length) note.picture = media.picture;
+    if (media.audio.length) note.audio = media.audio;
+    const noteId = await ankiInvoke("addNote", { note }, settings);
+    const warning = media.warnings.length ? " " + media.warnings.join(" ") : "";
+    const message = t("anki.added", { noteId: String(noteId) }) + warning;
+    debugLog("Anki export succeeded requestId=" + requestId + " noteId=" + String(noteId) + " media=" + String(media.paths.length));
+    postToOverlay("anki-export-result", { requestId, ok: true, noteId, message, warnings: media.warnings });
+    notify(message, media.warnings.length ? "error" : "info", 7000);
+    return { noteId, message, warnings: media.warnings };
+  } catch (error) {
+    const message = t("anki.failed", { error: compactError(error) });
+    debugError(message + " requestId=" + requestId);
+    postToOverlay("anki-export-result", { requestId, ok: false, error: compactError(error), message });
+    notify(message, "error", 10000);
+    throw error;
+  } finally {
+    if (media) cleanupAnkiMedia(media.paths);
+    ankiExportInFlight = false;
+  }
+}
+function handleAnkiAddRequest(payload) {
+  exportLookupEntryToAnki(payload || {}).catch(() => {});
 }
 
 function mockLongestRightwardLookup(text, position, dictionary, scanLength) {
@@ -4381,7 +5578,7 @@ function logTimingSummary(summary) {
 async function runLookupPerformanceBenchmark() {
   try {
     debugLog("BENCH starting lookup performance benchmark directIpc=" + String(prefBool("directWorkerIpc", true)) + " fallback=" + String(prefBool("fallbackToClientExec", true)));
-    showOSD("iinatan lookup benchmark started");
+    showOSD("Hoshitan lookup benchmark started");
     const language = selectedLanguageModule();
     const dicts = activeDictionaryPaths(language);
     if (!dicts.length) throw new Error("No enabled dictionaries installed.");
@@ -4425,7 +5622,7 @@ async function runLookupPerformanceBenchmark() {
 
     const failed = seqSamples.concat(burstSamples).filter(s => !s.ok).slice(0, 5);
     if (failed.length) debugWarn("BENCH failures sample=" + JSON.stringify(failed));
-    showOSD("iinatan benchmark done: seq median " + seqSummary.median + "ms, burst p95 " + burstSummary.p95 + "ms");
+    showOSD("Hoshitan benchmark done: seq median " + seqSummary.median + "ms, burst p95 " + burstSummary.p95 + "ms");
     alert("Lookup benchmark complete.\n\nSequential median: " + seqSummary.median + " ms\nSequential p95: " + seqSummary.p95 + " ms\nBurst p95: " + burstSummary.p95 + " ms\n\nSee debug.log / IINA Log Viewer for full details.");
   } catch (error) {
     const msg = "Lookup benchmark failed: " + compactError(error);
@@ -4468,10 +5665,10 @@ function addDebugMenuItem(parent, title, action, options) {
 function rebuildMenu() {
   try { menu.removeAllItems(); } catch (_) {}
   try {
-    const rootMenu = menu.item("iinatan");
-    addMenuCommand(rootMenu, "Settings...", () => { openDictionaryManager(); });
+    const rootMenu = menu.item("Hoshitan");
+    addMenuCommand(rootMenu, t("menu.settings"), () => { openDictionaryManager(); });
     addSubMenuItemCompat(rootMenu, menu.separator());
-    addSubMenuItemCompat(rootMenu, menu.item("Profiles", null, { enabled: false }));
+    addSubMenuItemCompat(rootMenu, menu.item(t("menu.profiles"), null, { enabled: false }));
     const profiles = profileSummaries(readManifest());
     const inlineProfileLimit = 5;
     const addProfileMenuItem = (parent, profile) => {
@@ -4481,7 +5678,7 @@ function rebuildMenu() {
       addProfileMenuItem(rootMenu, profile);
     });
     if (profiles.length > inlineProfileLimit) {
-      const moreMenu = menu.item("More");
+      const moreMenu = menu.item(t("menu.more"));
       profiles.slice(inlineProfileLimit).forEach(profile => {
         addProfileMenuItem(moreMenu, profile);
       });
@@ -4489,23 +5686,23 @@ function rebuildMenu() {
     }
 
     addSubMenuItemCompat(rootMenu, menu.separator());
-    const debugMenu = menu.item("Debug");
-    addDebugMenuItem(debugMenu, "Run Lookup Performance Benchmark", () => runLookupPerformanceBenchmark());
-    addDebugMenuItem(debugMenu, "Run Lookup Parser Unit Tests", () => runLookupParserUnitTests());
-    addDebugMenuItem(debugMenu, "Run Language Unit Tests", () => runLanguageUnitTests());
-    addDebugMenuItem(debugMenu, "Run Settings Audit Checks", () => runSettingsAuditChecks());
-    addDebugMenuItem(debugMenu, "Test File Picker API", () => testFilePickerApiFromMenu());
-    addDebugMenuItem(debugMenu, "Test Dictionary Lookup", () => testBackendLookup());
-    addDebugMenuItem(debugMenu, "Restart Dictionary Lookup", () => restartBackendWorkerFromMenu());
-    addDebugMenuItem(debugMenu, "Stop Dictionary Lookup", () => stopBackendWorkerFromMenu());
-    addDebugMenuItem(debugMenu, "Show Task Panel Test", () => showTaskPanelTest());
-    addDebugMenuItem(debugMenu, "Emit Debug Log Test Message", () => emitDebugLogTestMessage());
-    addDebugMenuItem(debugMenu, "Reveal Debug Log File", () => revealDebugLogFile());
-    addDebugMenuItem(debugMenu, "Reveal Plugin Data Folder", () => revealPluginDataFolder());
+    const debugMenu = menu.item(t("menu.debug"));
+    addDebugMenuItem(debugMenu, t("menu.benchmark"), () => runLookupPerformanceBenchmark());
+    addDebugMenuItem(debugMenu, t("menu.parserTests"), () => runLookupParserUnitTests());
+    addDebugMenuItem(debugMenu, t("menu.languageTests"), () => runLanguageUnitTests());
+    addDebugMenuItem(debugMenu, t("menu.settingsTests"), () => runSettingsAuditChecks());
+    addDebugMenuItem(debugMenu, t("menu.filePicker"), () => testFilePickerApiFromMenu());
+    addDebugMenuItem(debugMenu, t("menu.lookupTest"), () => testBackendLookup());
+    addDebugMenuItem(debugMenu, t("menu.restartLookup"), () => restartBackendWorkerFromMenu());
+    addDebugMenuItem(debugMenu, t("menu.stopLookup"), () => stopBackendWorkerFromMenu());
+    addDebugMenuItem(debugMenu, t("menu.taskTest"), () => showTaskPanelTest());
+    addDebugMenuItem(debugMenu, t("menu.logTest"), () => emitDebugLogTestMessage());
+    addDebugMenuItem(debugMenu, t("menu.revealLog"), () => revealDebugLogFile());
+    addDebugMenuItem(debugMenu, t("menu.revealData"), () => revealPluginDataFolder());
     addSubMenuItemCompat(rootMenu, debugMenu);
     addMenuItemSafe(rootMenu);
   } catch (error) {
-    console.error("Could not rebuild iinatan menu: " + compactError(error));
+    console.error("Could not rebuild Hoshitan menu: " + compactError(error));
   }
 }
 
@@ -4513,6 +5710,7 @@ function rebuildMenu() {
 registerShortcut();
 rebuildMenu();
 scheduleIINAAppearanceHintRefresh(true);
+refreshSystemUiLanguage().catch(() => {});
 ensureBundledBackendInstalled().catch(error => {
   debugWarn("lookup engine install check failed: " + compactError(error));
 });
@@ -4523,6 +5721,9 @@ event.on("iina.window-loaded", () => {
 });
 event.on("mpv.file-loaded", () => {
   lastSubtitle = null;
+  subtitleEmptySince = 0;
+  lastSubtitlePublishedAt = 0;
+  textSubtitleOverlayPrimed = false;
   lookupCache = Object.create(null);
   lookupInFlight = Object.create(null);
   if (enabled) startPolling();

@@ -1,7 +1,7 @@
-const IINATAN_FRENCH_LANGUAGE = (() => {
-  const common = IINATAN_LANGUAGE_COMMON;
-  const deinflect = IINATAN_DEINFLECTION;
-  const YOMITAN_RULES = typeof IINATAN_FRENCH_YOMITAN_SUFFIX_RULES !== "undefined" ? IINATAN_FRENCH_YOMITAN_SUFFIX_RULES : [];
+const HOSHITAN_FRENCH_LANGUAGE = (() => {
+  const common = HOSHITAN_LANGUAGE_COMMON;
+  const deinflect = HOSHITAN_DEINFLECTION;
+  const YOMITAN_RULES = typeof HOSHITAN_FRENCH_YOMITAN_SUFFIX_RULES !== "undefined" ? HOSHITAN_FRENCH_YOMITAN_SUFFIX_RULES : [];
   const ELIDED_PREFIXES = {
     c: true,
     d: true,

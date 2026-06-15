@@ -50,8 +50,8 @@ function dictionaryManagerState() {
       {
         id: "jitendex-ja-en",
         title: "Jitendex",
-        language: "Japanese",
-        description: "JMdict-based Japanese-English dictionary with structured Yomitan data.",
+        language: t("recommended.jitendexLanguage"),
+        description: t("recommended.jitendexDescription"),
         downloadUrl: RECOMMENDED_JITENDEX_URL,
         installed: hasJitendex
       }
@@ -70,11 +70,29 @@ function postDictionaryManagerStatus(message, kind, busy) {
     updatedAt: Date.now()
   });
 }
+function postAnkiManagerState(modelName) {
+  (async () => {
+    try {
+      const state = await ankiConnectionMetadata(modelName);
+      postToDictionaryManager("dictionary-manager-anki-state", state);
+      postDictionaryManagerStatus(t("manager.connected"), "info", false);
+    } catch (error) {
+      postToDictionaryManager("dictionary-manager-anki-state", {
+        connected: false,
+        error: compactError(error),
+        deckNames: [],
+        modelNames: [],
+        fieldNames: []
+      });
+      postDictionaryManagerStatus(t("manager.ankiError", { error: compactError(error) }), "error", false);
+    }
+  })();
+}
 function runDictionaryManagerAction(label, action) {
   (async () => {
     const actionLabel = label || "Working";
     if (dictionaryManagerActionInFlight) {
-      postDictionaryManagerStatus("Another dictionary action is already running.", "info", true);
+      postDictionaryManagerStatus(t("manager.busy"), "info", true);
       return;
     }
     dictionaryManagerActionInFlight = true;
@@ -83,12 +101,12 @@ function runDictionaryManagerAction(label, action) {
       const result = await action();
       postDictionaryManagerState();
       if (result && result.cancelled) {
-        postDictionaryManagerStatus(result.message || actionLabel + " cancelled.", "info", false);
+        postDictionaryManagerStatus(result.message || t("manager.actionCancelled", { action: actionLabel }), "info", false);
         return;
       }
-      postDictionaryManagerStatus(actionLabel + " complete.", "info", false);
+      postDictionaryManagerStatus(t("manager.actionComplete", { action: actionLabel }), "info", false);
     } catch (error) {
-      const msg = actionLabel + " failed: " + compactError(error);
+      const msg = t("manager.actionFailed", { action: actionLabel, error: compactError(error) });
       debugError("dictionary manager action failed label=" + actionLabel + " error=" + compactError(error));
       postDictionaryManagerState();
       postDictionaryManagerStatus(msg, "error", false);
@@ -101,14 +119,14 @@ function runDictionaryManagerAction(label, action) {
 function runDictionaryManagerZipImport() {
   (async () => {
     if (dictionaryManagerActionInFlight) {
-      postDictionaryManagerStatus("Another dictionary action is already running.", "info", true);
+      postDictionaryManagerStatus(t("manager.busy"), "info", true);
       return;
     }
     let zipPaths = [];
     try {
       zipPaths = await chooseDictionaryZipPaths();
     } catch (error) {
-      const msg = "Could not open dictionary ZIP picker: " + compactError(error);
+      const msg = t("manager.pickerFailed", { error: compactError(error) });
       debugError("dictionary manager file picker failed: " + compactError(error));
       postDictionaryManagerState();
       postDictionaryManagerStatus(msg, "error", false);
@@ -116,21 +134,23 @@ function runDictionaryManagerZipImport() {
       return;
     }
     if (!zipPaths.length) {
-      notify("Dictionary import cancelled.", "info", 3500);
+      notify(t("manager.importCancelled"), "info", 3500);
       postDictionaryManagerState();
-      postDictionaryManagerStatus("Dictionary import cancelled.", "info", false);
+      postDictionaryManagerStatus(t("manager.importCancelled"), "info", false);
       return;
     }
 
-    const countLabel = zipPaths.length === 1 ? "dictionary" : String(zipPaths.length) + " dictionaries";
+    const countLabel = zipPaths.length === 1
+      ? t("manager.oneDictionary")
+      : t("manager.manyDictionaries", { count: zipPaths.length });
     dictionaryManagerActionInFlight = true;
-    postDictionaryManagerStatus("Importing " + countLabel + "...", "info", true);
+    postDictionaryManagerStatus(t("manager.importing", { count: countLabel }), "info", true);
     try {
       await validateAndImportDictionaryZips(zipPaths, "dictionary-manager-picker");
       postDictionaryManagerState();
-      postDictionaryManagerStatus("Imported " + countLabel + ".", "info", false);
+      postDictionaryManagerStatus(t("manager.imported", { count: countLabel }), "info", false);
     } catch (error) {
-      const msg = "Importing dictionary failed: " + compactError(error);
+      const msg = t("manager.importFailed", { error: compactError(error) });
       debugError("dictionary manager import failed: " + compactError(error));
       postDictionaryManagerState();
       postDictionaryManagerStatus(msg, "error", false);
@@ -155,29 +175,30 @@ function registerDictionaryManagerHandlers() {
   onMessage("dictionary-manager-ready", () => {
     postDictionaryManagerState();
     postDictionaryManagerStatus("", "info", false);
+    postAnkiManagerState(ankiSettings().modelName);
   });
   onMessage("dictionary-manager-refresh", () => {
     postDictionaryManagerState();
-    postDictionaryManagerStatus("Dictionary list refreshed.", "info", false);
+    postDictionaryManagerStatus(t("manager.refreshed"), "info", false);
   });
   onMessage("dictionary-manager-set-enabled", payload => {
     const name = payload && payload.name;
     if (!name) return;
     setDictionaryEnabled(String(name), !!(payload && payload.enabled));
-    postDictionaryManagerStatus("Dictionary selection saved.", "info", false);
+    postDictionaryManagerStatus(t("manager.selectionSaved"), "info", false);
   });
   onMessage("dictionary-manager-set-order", payload => {
     const order = payload && Array.isArray(payload.order) ? payload.order : [];
     setDictionaryOrder(order);
-    postDictionaryManagerStatus("Dictionary order saved.", "info", false);
+    postDictionaryManagerStatus(t("manager.orderSaved"), "info", false);
   });
   onMessage("dictionary-manager-delete", payload => {
     const name = payload && payload.name;
     if (!name) return;
-    runDictionaryManagerAction("Deleting dictionary", () => deleteDictionary(String(name)));
+    runDictionaryManagerAction(t("manager.deletingDictionary"), () => deleteDictionary(String(name)));
   });
   onMessage("dictionary-manager-download-recommended", () => {
-    runDictionaryManagerAction("Downloading recommended dictionaries", () => getRecommendedDictionaries());
+    runDictionaryManagerAction(t("manager.downloading"), () => getRecommendedDictionaries());
   });
   onMessage("dictionary-manager-import-zip", () => {
     runDictionaryManagerZipImport();
@@ -185,14 +206,14 @@ function registerDictionaryManagerHandlers() {
   onMessage("dictionary-manager-switch-profile", payload => {
     const profileId = payload && payload.profileId;
     if (!profileId) return;
-    runDictionaryManagerAction("Switching profile", () => {
+    runDictionaryManagerAction(t("manager.switchingProfile"), () => {
       setActiveDictionaryProfile(profileId);
       return Promise.resolve();
     });
   });
   onMessage("dictionary-manager-create-profile", payload => {
     const name = payload && payload.name;
-    runDictionaryManagerAction("Creating profile", () => {
+    runDictionaryManagerAction(t("manager.creatingProfile"), () => {
       const profile = createDictionaryProfile(name || "", payload && payload.sourceProfileId);
       setActiveDictionaryProfile(profile.id);
       return Promise.resolve();
@@ -201,16 +222,16 @@ function registerDictionaryManagerHandlers() {
   onMessage("dictionary-manager-rename-profile", payload => {
     try {
       renameDictionaryProfile(payload && payload.profileId, payload && payload.name);
-      postDictionaryManagerStatus("Profile renamed.", "info", false);
+      postDictionaryManagerStatus(t("manager.profileRenamed"), "info", false);
     } catch (error) {
-      const msg = "Renaming profile failed: " + compactError(error);
+      const msg = t("manager.renameFailed", { error: compactError(error) });
       debugError(msg);
       postDictionaryManagerStatus(msg, "error", false);
       alert(msg);
     }
   });
   onMessage("dictionary-manager-delete-profile", payload => {
-    runDictionaryManagerAction("Deleting profile", () => {
+    runDictionaryManagerAction(t("manager.deletingProfile"), () => {
       deleteDictionaryProfile(payload && payload.profileId);
       return Promise.resolve();
     });
@@ -218,9 +239,9 @@ function registerDictionaryManagerHandlers() {
   onMessage("dictionary-manager-update-profile-preferences", payload => {
     try {
       updateDictionaryProfilePreferences(payload && payload.profileId, payload && payload.preferences);
-      postDictionaryManagerStatus("Profile settings saved.", "info", false);
+      postDictionaryManagerStatus(t("manager.profileSaved"), "info", false);
     } catch (error) {
-      const msg = "Saving profile settings failed: " + compactError(error);
+      const msg = t("manager.profileSaveFailed", { error: compactError(error) });
       debugError(msg);
       postDictionaryManagerStatus(msg, "error", false);
       alert(msg);
@@ -229,31 +250,50 @@ function registerDictionaryManagerHandlers() {
   onMessage("dictionary-manager-update-global-settings", payload => {
     try {
       updateGlobalSettings(payload && payload.settings);
-      postDictionaryManagerStatus("Dictionary import settings saved.", "info", false);
+      postDictionaryManagerStatus(t("manager.globalSaved"), "info", false);
     } catch (error) {
-      const msg = "Saving dictionary import settings failed: " + compactError(error);
+      const msg = t("manager.globalSaveFailed", { error: compactError(error) });
       debugError(msg);
       postDictionaryManagerStatus(msg, "error", false);
       alert(msg);
     }
   });
+  onMessage("dictionary-manager-anki-refresh", payload => {
+    postDictionaryManagerStatus(t("manager.connecting"), "info", true);
+    postAnkiManagerState(payload && payload.modelName);
+  });
+  onMessage("dictionary-manager-choose-local-audio-database", () => {
+    (async () => {
+      try {
+        const selectedPath = await chooseLocalAudioDatabasePath();
+        if (selectedPath) {
+          postToDictionaryManager("dictionary-manager-local-audio-path", { path: selectedPath });
+          postDictionaryManagerStatus("Local audio database selected.", "info", false);
+        } else {
+          postDictionaryManagerStatus("", "info", false);
+        }
+      } catch (error) {
+        postDictionaryManagerStatus(compactError(error), "error", false);
+      }
+    })();
+  });
 }
 function openDictionaryManager() {
   if (!dictionaryManagerAvailable()) {
-    alert("This IINA build does not expose standalone windows. Use the Dictionaries menu for import actions.");
+    alert(t("manager.unavailable"));
     return;
   }
   try {
     standaloneWindow.loadFile("dictionary-manager.html");
     registerDictionaryManagerHandlers();
     try {
-      if (typeof standaloneWindow.setProperty === "function") standaloneWindow.setProperty({ title: "iinatan Settings", resizable: true });
+      if (typeof standaloneWindow.setProperty === "function") standaloneWindow.setProperty({ title: t("settings.title"), resizable: true });
     } catch (_) {}
     if (typeof standaloneWindow.open === "function") standaloneWindow.open();
     else if (typeof standaloneWindow.show === "function") standaloneWindow.show();
     setTimeout(() => postDictionaryManagerState(), 120);
   } catch (error) {
-    const msg = "Could not open iinatan Settings: " + compactError(error);
+    const msg = t("manager.openFailed", { error: compactError(error) });
     debugError(msg);
     alert(msg);
   }

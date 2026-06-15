@@ -10,7 +10,8 @@ const { context, overlay } = loadOverlayForTest([
   'renderPlainGlossaryText',
   'renderEntryMetadata',
   'displayHeaderForResult',
-  'safeExternalUrl'
+  'safeExternalUrl',
+  'placePopup'
 ]);
 
 overlay.applyConfig({
@@ -32,6 +33,18 @@ assert(/\btheme-light\b/.test(context.document.documentElement.className), 'Inhe
 assert(!/\btheme-inherit\b/.test(context.document.documentElement.className), 'Inherited mode should resolve without its own theme class');
 overlay.applyConfig({ popupTheme: 'inherit', popupThemeHint: 'dark' });
 assert(/\btheme-dark\b/.test(context.document.documentElement.className), 'Inherited dark hint should resolve to the concrete dark theme');
+
+context.window.innerWidth = 2560;
+context.window.innerHeight = 1440;
+context.__elements.subtitle._rect = { left: 0, top: 1000, right: 2560, bottom: 1080, width: 2560, height: 80 };
+context.__elements.popup._rect = { left: 0, top: 0, right: 528, bottom: 360, width: 528, height: 360 };
+const scaledPlacementAnchor = context.document.createElement('span');
+scaledPlacementAnchor._rect = { left: 1400, top: 1008, right: 1460, bottom: 1080, width: 60, height: 72 };
+overlay.applyConfig({ popupScale: 1.2, popupMaxHeightVh: 34, popupSubtitleGapPx: 34 });
+overlay.placePopup(scaledPlacementAnchor);
+const scaledPopupTop = Number.parseFloat(context.__elements.popup.style.top);
+assert(scaledPopupTop + context.__elements.popup._rect.height <= context.__elements.subtitle._rect.top - 34 + 0.001, 'Scaled popup should stay above the subtitle-safe region');
+assert(context.document.documentElement.style['--popup-max-height'] === '407px', 'Scaled popup max-height should reserve visual room after CSS transform');
 
 const header = overlay.displayHeaderForResult({
   text: 'I was juster',
@@ -370,6 +383,8 @@ assert(!/\.dict-details \{[^}]*border-left:/s.test(css), 'Collapsed details shou
 assert(/\.dict-details\[open\] \{[^}]*border-left:/s.test(css), 'Expanded details should keep the left border');
 assert(/\.dict-details summary \{[^}]*list-style-position: inside;[^}]*\}/.test(css), 'Collapsed details marker should be inset');
 assert(/\.dict-term \{[^}]*font-size: 30px;[^}]*\}/.test(css), 'Secondary entry headwords should match the main popup headword size');
+assert(/\.dict-term \{[^}]*position: relative;[^}]*padding-right: 38px;[^}]*\}/.test(css), 'Secondary entry headword rows should reserve space for the speaker button');
+assert(/\.dict-term \.audio-button \{[^}]*position: absolute;[^}]*top: 1px;[^}]*right: 0;[^}]*\}/.test(css), 'Secondary entry speaker buttons should be pinned to the row top-right');
 assert(/\.pitch-group \{[^}]*flex: 0 0 100%;[^}]*width: 100%;[^}]*\}/.test(css), 'Pitch accent group should start on a new metadata row');
 assert(!/\.pitch-group \{[^}]*flex-direction: column;/s.test(css), 'Pitch source chip and accent pattern should stay side by side');
 assert(/\.pitch-patterns \{[^}]*font-size: 15px;[^}]*\}/.test(css), 'Pitch accent pattern should be larger than the source chip');

@@ -1,5 +1,5 @@
-const IINATAN_CHINESE_LANGUAGE = (() => {
-  const common = IINATAN_LANGUAGE_COMMON;
+const HOSHITAN_CHINESE_LANGUAGE = (() => {
+  const common = HOSHITAN_LANGUAGE_COMMON;
 
   function isHoverableChar(ch) {
     return common.CHINESE_CHAR_RE.test(String(ch || ""));

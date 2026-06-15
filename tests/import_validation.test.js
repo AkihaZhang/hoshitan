@@ -3,7 +3,20 @@ const path = require('path');
 const vm = require('vm');
 
 const root = path.resolve(__dirname, '..');
-const context = {};
+const context = {
+  t(key, values) {
+    const table = {
+      'dict.noZip': 'No dictionary ZIP was selected.',
+      'dict.notZip': 'Selected file is not a .zip dictionary: {path}',
+      'dict.missingZip': 'Selected dictionary ZIP does not exist: {path}'
+    };
+    let text = table[key] || key;
+    Object.keys(values || {}).forEach(name => {
+      text = text.replace('{' + name + '}', String(values[name]));
+    });
+    return text;
+  }
+};
 vm.createContext(context);
 vm.runInContext(
   fs.readFileSync(path.join(root, 'src/main/25_import_validation.js'), 'utf8') +

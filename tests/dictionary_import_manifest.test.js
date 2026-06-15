@@ -14,6 +14,25 @@ const context = {
   console,
   Date,
   VERSION: '1.6.0',
+  t(key, values) {
+    const table = {
+      'dict.adding': 'Adding dictionary',
+      'dict.preparingImport': 'Preparing import...',
+      'dict.importing': 'Importing dictionary...',
+      'dict.largeImport': 'Large dictionaries can take several minutes.',
+      'dict.savingList': 'Saving dictionary list...',
+      'dict.refreshingList': 'Refreshing installed dictionaries.',
+      'dict.refreshingWorker': 'Refreshing lookup worker...',
+      'dict.workerAvailable': 'The new dictionary will be available for hover popups.',
+      'dict.imported': 'Added {title} ({count} terms).',
+      'dict.importTime': 'Import took about {seconds} seconds.'
+    };
+    let text = table[key] || key;
+    Object.keys(values || {}).forEach(name => {
+      text = text.replace('{' + name + '}', String(values[name]));
+    });
+    return text;
+  },
   activeWorkerFingerprint: 'old-worker',
   dictRoot() { return '/data/dictionaries'; },
   manifestPath() { return '/data/manifest.json'; },

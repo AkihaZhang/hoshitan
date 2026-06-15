@@ -8,7 +8,7 @@ const { loadOverlayForTest } = require('./helpers/overlay_test_context');
 const root = path.resolve(__dirname, '..');
 const defaultDataRoot = path.join(
   os.homedir(),
-  'Library/Application Support/com.colliderli.iina/plugins/.data/com.afn478.iinatan'
+  'Library/Application Support/com.colliderli.iina/plugins/.data/io.github.akihazhang.hoshitan'
 );
 const defaultSrtPath = '/Volumes/Media Files/anime/MARRIAGETOXIN/Season 01/MARRIAGETOXIN (2026) - S01E01 - The Poison Masters Search for a Bride [HDTV-1080p][AAC 2.0][x265]-DKB.ja.hi.srt';
 
@@ -160,7 +160,7 @@ function parseSrtCues(text, cutoffMs) {
 }
 
 function readSubtitleFixture() {
-  const requested = process.env.IINATAN_PERF_SRT || defaultSrtPath;
+  const requested = process.env.HOSHITAN_PERF_SRT || defaultSrtPath;
   if (requested && fs.existsSync(requested)) return fs.readFileSync(requested, 'utf8');
   return FIRST_MINUTE_SRT;
 }
@@ -173,7 +173,7 @@ function lookupTextForCase(text, position, scanLength) {
 }
 
 function buildLookupCases(cues, scanLength) {
-  const limit = Math.max(1, Number(process.env.IINATAN_PERF_CASE_LIMIT || 240));
+  const limit = Math.max(1, Number(process.env.HOSHITAN_PERF_CASE_LIMIT || 240));
   const out = [];
   for (let cueIndex = 0; cueIndex < cues.length; cueIndex++) {
     const cue = cues[cueIndex];
@@ -268,7 +268,7 @@ class HoshiWorker {
   constructor(binary, dicts) {
     this.binary = binary;
     this.dicts = dicts;
-    this.root = fs.mkdtempSync(path.join(os.tmpdir(), 'iinatan-perf-worker-'));
+    this.root = fs.mkdtempSync(path.join(os.tmpdir(), 'hoshitan-perf-worker-'));
     this.proc = null;
     this.stderr = '';
   }
@@ -458,8 +458,8 @@ async function runOverlayPass(worker, cases, scanLength) {
 }
 
 async function main() {
-  const dataRoot = process.env.IINATAN_PERF_DATA_ROOT || defaultDataRoot;
-  const binary = process.env.IINATAN_PERF_BIN || path.join(root, 'bin', 'iina-hoshi-dicts');
+  const dataRoot = process.env.HOSHITAN_PERF_DATA_ROOT || defaultDataRoot;
+  const binary = process.env.HOSHITAN_PERF_BIN || path.join(root, 'bin', 'iina-hoshi-dicts');
   if (!fs.existsSync(binary)) {
     console.log(`lookup performance tests skipped: missing backend binary at ${binary}`);
     return;
@@ -473,7 +473,7 @@ async function main() {
     console.log(`lookup performance tests skipped: no enabled dictionaries in ${dataRoot}`);
     return;
   }
-  const scanLength = Math.max(1, Number(process.env.IINATAN_PERF_SCAN_LENGTH || 24));
+  const scanLength = Math.max(1, Number(process.env.HOSHITAN_PERF_SCAN_LENGTH || 24));
   const cues = parseSrtCues(readSubtitleFixture(), 60000);
   const cases = buildLookupCases(cues, scanLength);
   if (!cases.length) throw new Error('no Japanese lookup cases were parsed from the first-minute subtitles');

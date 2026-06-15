@@ -214,6 +214,8 @@
     #popup::-webkit-scrollbar-thumb { background: var(--popup-scroll-thumb); border-radius: 999px; border: 2px solid var(--popup-scroll-thumb-border); }
     #popup::-webkit-scrollbar-thumb:hover { background: var(--popup-scroll-thumb-hover); }
     #popup .head { padding: 14px 18px 12px; }
+    #popup .head-main { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-width: 0; }
+    #popup .head-title { flex: 1 1 auto; min-width: 0; }
     #popup .term { font-size: 30px; font-weight: 800; line-height: 1.15; }
     #popup .reading { margin-left: 10px; color: var(--popup-reading); font-size: 16px; font-weight: 650; }
     #popup .lookup-source { margin-top: 4px; color: var(--popup-faint); font-size: 12px; font-weight: 650; line-height: 1.25; }
@@ -224,8 +226,110 @@
     .dict { color: var(--popup-muted); font-size: 13px; font-weight: 700; margin-bottom: 4px; }
     .gloss { margin: 5px 0; white-space: pre-line; overflow-wrap: anywhere; }
     .trace { margin-top: 6px; color: var(--popup-soft); font-size: 12px; }
-    .dict-term { color: var(--popup-heading); font-size: 30px; font-weight: 800; line-height: 1.15; margin: 0 0 8px; }
+    .dict-term { position: relative; min-width: 0; min-height: 28px; padding-right: 38px; color: var(--popup-heading); font-size: 30px; font-weight: 800; line-height: 1.15; margin: 0 0 8px; }
+    .dict-term-text { display: block; min-width: 0; }
     .dict-reading { color: var(--popup-reading); font-weight: 650; margin-left: 10px; font-size: 16px; }
+    .audio-button {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 auto;
+      width: 26px;
+      height: 26px;
+      margin: 1px 0 0 auto;
+      border: 1px solid var(--popup-divider);
+      border-radius: 999px;
+      padding: 0;
+      color: var(--popup-muted);
+      background: var(--popup-subtle-chip-bg);
+      font: inherit;
+      cursor: pointer;
+      pointer-events: auto;
+    }
+    .audio-button:hover { color: var(--popup-heading); border-color: var(--popup-border); background: var(--popup-chip-bg); }
+    .dict-term .audio-button { position: absolute; top: 1px; right: 0; margin: 0; }
+    .audio-button[data-audio-state="loading"] { opacity: 0.72; }
+    .audio-button[data-audio-state="loading"] .audio-icon { animation: audio-pulse 0.82s ease-in-out infinite alternate; }
+    .audio-button[data-audio-state="missing"] { color: var(--popup-error); border-color: var(--popup-error-border); }
+    .audio-button[data-audio-state="missing"]::after {
+      content: "x";
+      position: absolute;
+      left: -3px;
+      bottom: -3px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 12px;
+      height: 12px;
+      border-radius: 999px;
+      background: var(--popup-bg);
+      color: var(--popup-error);
+      border: 1px solid var(--popup-error-border);
+      font-size: 10px;
+      font-weight: 900;
+      line-height: 1;
+    }
+    .audio-icon {
+      display: block;
+      width: 16px;
+      height: 16px;
+      color: currentColor;
+      overflow: visible;
+    }
+    .audio-speaker-body { fill: currentColor; }
+    .audio-wave {
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .audio-source-menu {
+      z-index: 80;
+      display: flex;
+      flex-direction: column;
+      min-width: 210px;
+      max-width: 260px;
+      max-height: 48vh;
+      overflow: auto;
+      padding: 8px;
+      border: 1px solid var(--popup-border);
+      border-radius: 8px;
+      background: var(--popup-bg);
+      color: var(--popup-heading);
+      box-shadow: var(--popup-shadow);
+      pointer-events: auto;
+      user-select: none;
+    }
+    .audio-source-menu-item {
+      display: block;
+      width: 100%;
+      min-height: 38px;
+      border: 0;
+      border-radius: 6px;
+      padding: 7px 12px;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      font-size: 16px;
+      font-weight: 750;
+      line-height: 1.25;
+      text-align: left;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+    .audio-source-menu-item:hover,
+    .audio-source-menu-item:focus-visible {
+      outline: none;
+      background: var(--popup-chip-bg);
+    }
+    @keyframes audio-pulse {
+      from { opacity: 0.45; }
+      to { opacity: 1; }
+    }
     .dict-section + .dict-section { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--popup-section-divider); }
     .dict-header { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; margin-bottom: 8px; min-width: 0; }
     .dict-header .dict-name { color: var(--popup-muted); font-size: 13px; font-weight: 800; }
@@ -423,6 +527,37 @@
       width: 100%;
       animation: none;
       background: rgba(255,140,140,0.88);
+    }
+    .entry-actions {
+      display: flex;
+      justify-content: flex-end;
+      margin: 0 0 5px;
+    }
+    .anki-add-button {
+      border: 1px solid var(--popup-border);
+      border-radius: 6px;
+      padding: 4px 8px;
+      background: var(--popup-subtle-chip-bg);
+      color: var(--popup-text);
+      font: inherit;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .anki-add-button:hover:not(:disabled) {
+      border-color: var(--popup-accent);
+      color: var(--popup-heading);
+    }
+    .anki-add-button:disabled {
+      cursor: default;
+      opacity: 0.68;
+    }
+    .anki-add-button.success {
+      color: var(--popup-green);
+    }
+    .anki-add-button.error {
+      color: var(--popup-error);
+      border-color: var(--popup-error-border);
     }
     @keyframes task-indeterminate {
       0% { left: -38%; }
