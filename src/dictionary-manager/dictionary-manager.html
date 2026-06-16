@@ -234,12 +234,9 @@
       overflow-wrap: anywhere;
       font-weight: 600;
     }
-    .anki-field-row select {
+    .anki-field-row input {
       width: 100%;
-      appearance: menulist;
-      -webkit-appearance: menulist;
-      padding-right: 8px;
-      cursor: pointer;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     }
     .empty {
       padding: 22px 16px;
@@ -417,12 +414,12 @@
           <input id="popupScale" data-profile-pref="popupScale" type="number" min="0.6" max="1.4" step="0.05">
         </div>
         <div class="field">
-          <label for="popupMaxWidth">Popup maximum width</label>
+          <label for="popupMaxWidth">Popup width (px)</label>
           <input id="popupMaxWidth" data-profile-pref="popupMaxWidth" type="number" min="260" max="900" step="10">
         </div>
         <div class="field">
-          <label for="popupMaxHeightVh">Popup maximum height (% of window)</label>
-          <input id="popupMaxHeightVh" data-profile-pref="popupMaxHeightVh" type="number" min="20" max="60" step="1">
+          <label for="popupMaxHeight">Popup height (px)</label>
+          <input id="popupMaxHeight" data-profile-pref="popupMaxHeight" type="number" min="180" max="1000" step="10">
         </div>
         <div class="field">
           <label for="popupSubtitleGapPx">Gap above subtitles (px)</label>
@@ -516,7 +513,7 @@
       <h3>Fields</h3>
       <div class="toolbar">
         <button id="ankiAutoMap" type="button">Auto-map fields</button>
-        <span class="hint">Fields are loaded from the selected Anki note type. Field names and mapping values always remain in English.</span>
+        <span class="hint">Fields are loaded from the selected Anki note type. Choose a suggestion or type an English placeholder manually.</span>
       </div>
       <section id="ankiFieldMappings" class="anki-field-mappings" data-no-i18n></section>
       <div class="form-grid" style="margin-top: 12px;">
@@ -589,11 +586,11 @@
         <label class="check-field"><input data-profile-pref="fallbackToClientExec" type="checkbox"><span>Fall back to client executable lookup</span></label>
         <div class="field">
           <label for="directIpcPollMs">Direct IPC poll interval (ms)</label>
-          <input id="directIpcPollMs" data-profile-pref="directIpcPollMs" type="number" min="1" max="100" step="1">
+          <input id="directIpcPollMs" data-profile-pref="directIpcPollMs" type="number" min="16" max="250" step="1">
         </div>
         <div class="field">
           <label for="workerIdleSleepMs">Worker idle sleep interval (ms)</label>
-          <input id="workerIdleSleepMs" data-profile-pref="workerIdleSleepMs" type="number" min="1" max="100" step="1">
+          <input id="workerIdleSleepMs" data-profile-pref="workerIdleSleepMs" type="number" min="30" max="250" step="1">
         </div>
       </div>
 
@@ -648,8 +645,8 @@
         'Light': '浅色',
         'Subtitle size': '字幕大小',
         'Popup size': '弹窗大小',
-        'Popup maximum width': '弹窗最大宽度',
-        'Popup maximum height (% of window)': '弹窗最大高度（窗口百分比）',
+        'Popup width (px)': '弹窗宽度（像素）',
+        'Popup height (px)': '弹窗高度（像素）',
         'Gap above subtitles (px)': '字幕上方间距（像素）',
         'Subtitle refresh interval (ms)': '字幕刷新间隔（毫秒）',
         'Entry Sections': '词条分区',
@@ -679,7 +676,7 @@
         'Note type': '笔记类型',
         'Fields': '字段',
         'Auto-map fields': '自动映射字段',
-        'Fields are loaded from the selected Anki note type. Field names and mapping values always remain in English.': '字段会从所选 Anki 笔记类型自动加载。字段名和映射值始终保持英文。',
+        'Fields are loaded from the selected Anki note type. Choose a suggestion or type an English placeholder manually.': '字段会从所选 Anki 笔记类型自动加载。可以选择建议，也可以手动输入英文占位符。',
         'Tags': '标签',
         'Separate tags with spaces or commas.': '使用空格或逗号分隔标签。',
         'Media': '媒体',
@@ -1301,33 +1298,49 @@
         const label = document.createElement('div');
         label.className = 'anki-field-name';
         label.textContent = name;
-        const select = document.createElement('select');
-        select.dataset.noI18n = 'true';
-        select.dataset.busyControl = 'true';
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.setAttribute('list', 'ankiMappingSuggestions');
+        input.autocomplete = 'off';
+        input.spellcheck = false;
+        input.dataset.noI18n = 'true';
+        input.dataset.busyControl = 'true';
         const selectedMapping = String(state.ankiFieldMappings[name] || '');
-        const fieldOptions = options.slice();
-        if (selectedMapping && !fieldOptions.some(([value]) => value === selectedMapping)) {
-          fieldOptions.unshift([selectedMapping, selectedMapping]);
-        }
-        fieldOptions.forEach(([value, text]) => {
-          const option = document.createElement('option');
-          option.value = value;
-          option.textContent = text;
-          option.selected = value === selectedMapping;
-          select.appendChild(option);
-        });
+        input.value = selectedMapping;
+        input.placeholder = '-';
         const commitMapping = () => {
+          const value = String(input.value || '').trim();
+          input.value = value;
           const previous = String(state.ankiFieldMappings[name] || '');
-          if (previous === select.value) return;
-          if (select.value) state.ankiFieldMappings[name] = select.value;
+          if (previous === value) return;
+          if (value) state.ankiFieldMappings[name] = value;
           else delete state.ankiFieldMappings[name];
           saveAnkiFieldMappings();
         };
-        select.addEventListener('input', commitMapping);
-        select.addEventListener('change', commitMapping);
+        input.addEventListener('change', commitMapping);
+        input.addEventListener('blur', commitMapping);
+        input.addEventListener('keydown', event => {
+          if (event.key !== 'Enter') return;
+          commitMapping();
+          input.blur();
+        });
         row.appendChild(label);
-        row.appendChild(select);
+        row.appendChild(input);
         els.ankiFieldMappings.appendChild(row);
+      });
+      let suggestions = document.getElementById('ankiMappingSuggestions');
+      if (!suggestions) {
+        suggestions = document.createElement('datalist');
+        suggestions.id = 'ankiMappingSuggestions';
+        document.body.appendChild(suggestions);
+      }
+      suggestions.innerHTML = '';
+      options.forEach(([value, text]) => {
+        if (!value) return;
+        const option = document.createElement('option');
+        option.value = value;
+        option.label = text;
+        suggestions.appendChild(option);
       });
     }
     function renderAnkiMetadata() {

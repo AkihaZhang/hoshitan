@@ -1,6 +1,12 @@
 const DEFAULT_PROFILE_ID = "default";
 const DEFAULT_AUDIO_SOURCE_URL = "https://hoshi-reader.manhhaoo-do.workers.dev/?term={term}&reading={reading}";
 const DEFAULT_AUDIO_SOURCES_JSON = JSON.stringify([{ name: "Hoshi Reader", url: DEFAULT_AUDIO_SOURCE_URL }]);
+const DIRECT_IPC_POLL_MS_DEFAULT = 16;
+const DIRECT_IPC_POLL_MS_MIN = 16;
+const DIRECT_IPC_POLL_MS_MAX = 250;
+const WORKER_IDLE_SLEEP_MS_DEFAULT = 30;
+const WORKER_IDLE_SLEEP_MS_MIN = 30;
+const WORKER_IDLE_SLEEP_MS_MAX = 250;
 const PROFILE_PREFERENCE_DEFAULTS = {
   enabledByDefault: true,
   hideNativeSubtitles: true,
@@ -15,6 +21,7 @@ const PROFILE_PREFERENCE_DEFAULTS = {
   fontScale: 1.0,
   popupScale: 0.92,
   popupMaxWidth: 440,
+  popupMaxHeight: 520,
   popupMaxHeightVh: 34,
   popupSubtitleGapPx: 34,
   popupTheme: "inherit",
@@ -28,8 +35,8 @@ const PROFILE_PREFERENCE_DEFAULTS = {
   debugLogVerbose: false,
   directWorkerIpc: true,
   fallbackToClientExec: true,
-  directIpcPollMs: 2,
-  workerIdleSleepMs: 2
+  directIpcPollMs: DIRECT_IPC_POLL_MS_DEFAULT,
+  workerIdleSleepMs: WORKER_IDLE_SLEEP_MS_DEFAULT
 };
 const PROFILE_PREFERENCE_KEYS = Object.keys(PROFILE_PREFERENCE_DEFAULTS);
 const GLOBAL_SETTINGS_DEFAULTS = {
@@ -108,6 +115,17 @@ function normalizeProfilePreferenceBoolValue(value, fallback) {
   }
   return !!value;
 }
+function normalizeProfilePreferenceNumberValue(value, fallback, minValue, maxValue) {
+  const number = Number(value);
+  const fallbackNumber = Number(fallback);
+  const minNumber = Number(minValue);
+  const maxNumber = Number(maxValue);
+  let out = Number.isFinite(number) ? number : fallbackNumber;
+  if (!Number.isFinite(out)) out = 0;
+  if (Number.isFinite(minNumber)) out = Math.max(minNumber, out);
+  if (Number.isFinite(maxNumber)) out = Math.min(maxNumber, out);
+  return out;
+}
 function emptyManifest() {
   return { dictionaries: {}, disabled: {}, dictionaryOrder: [], activeProfileId: DEFAULT_PROFILE_ID, profiles: {} };
 }
@@ -142,6 +160,8 @@ function normalizeProfilePreferences(prefs) {
   });
   out.audioAutoPlay = normalizeProfilePreferenceBoolValue(out.audioAutoPlay, PROFILE_PREFERENCE_DEFAULTS.audioAutoPlay);
   out.audioSourcesJson = normalizeAudioSourcesJsonPreference(out.audioSourcesJson, !hasAudioSources);
+  out.directIpcPollMs = normalizeProfilePreferenceNumberValue(out.directIpcPollMs, DIRECT_IPC_POLL_MS_DEFAULT, DIRECT_IPC_POLL_MS_MIN, DIRECT_IPC_POLL_MS_MAX);
+  out.workerIdleSleepMs = normalizeProfilePreferenceNumberValue(out.workerIdleSleepMs, WORKER_IDLE_SLEEP_MS_DEFAULT, WORKER_IDLE_SLEEP_MS_MIN, WORKER_IDLE_SLEEP_MS_MAX);
   return out;
 }
 function makeDefaultProfile(id, name) {

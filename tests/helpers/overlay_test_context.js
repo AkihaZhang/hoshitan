@@ -29,6 +29,8 @@ class FakeElement {
     this._textContent = '';
     this._innerHTML = '';
     this.id = '';
+    this.scrollTop = 0;
+    this.scrollLeft = 0;
   }
   focus() { this.focused = true; }
   set textContent(value) {
@@ -63,9 +65,19 @@ class FakeElement {
   _materializePopupShell() {
     if (this.tagName !== 'popup') return;
     const html = this._innerHTML;
+    const actionOpen = html.indexOf('<div class="popup-action-bar">');
+    const scrollOpen = html.indexOf('<div class="popup-scroll">');
     const headOpen = html.indexOf('<div class="head">');
     const bodyOpen = html.indexOf('<div class="body">');
-    if (headOpen < 0 || bodyOpen < 0 || bodyOpen < headOpen) return;
+    if (actionOpen < 0 || scrollOpen < 0 || headOpen < 0 || bodyOpen < 0 || bodyOpen < headOpen) return;
+    const actionContentStart = actionOpen + '<div class="popup-action-bar">'.length;
+    const action = new FakeElement('div');
+    action.className = 'popup-action-bar';
+    action._innerHTML = html.slice(actionContentStart, scrollOpen);
+    action.parentNode = this;
+    const scroll = new FakeElement('div');
+    scroll.className = 'popup-scroll';
+    scroll.parentNode = this;
     const headContentStart = headOpen + '<div class="head">'.length;
     const headContentEnd = html.indexOf('</div>', headContentStart);
     if (headContentEnd < 0) return;
@@ -75,12 +87,13 @@ class FakeElement {
     const head = new FakeElement('div');
     head.className = 'head';
     head._innerHTML = html.slice(headContentStart, headContentEnd);
-    head.parentNode = this;
+    head.parentNode = scroll;
     const body = new FakeElement('div');
     body.className = 'body';
     body._innerHTML = html.slice(bodyContentStart, bodyContentEnd);
-    body.parentNode = this;
-    this.children = [head, body];
+    body.parentNode = scroll;
+    scroll.children = [head, body];
+    this.children = [action, scroll];
   }
   insertBefore(child, before) {
     child.parentNode = this;

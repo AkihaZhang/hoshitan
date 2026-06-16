@@ -27,33 +27,9 @@ function ankiSettings() {
     ffmpegPath: String(ankiSetting("ankiFfmpegPath", "/opt/homebrew/bin/ffmpeg") || "")
   };
 }
-function ankiMappingPlaceholderValid(mapping) {
-  if (/^\{single-glossary-.+\}$/.test(mapping)) return true;
-  return [
-    "{expression}",
-    "{reading}",
-    "{furigana-plain}",
-    "{audio}",
-    "{glossary}",
-    "{glossary-brief}",
-    "{glossary-first}",
-    "{selected-glossary}",
-    "{selected-glossary-fallback}",
-    "{popup-selection-text}",
-    "{sentence}",
-    "{frequencies}",
-    "{frequency-harmonic-rank}",
-    "{pitch-accent-positions}",
-    "{pitch-accent-categories}",
-    "{document-title}",
-    "{book-cover}",
-    "{sasayaki-audio}",
-    "{definition}",
-    "{image}",
-    "{sentence-audio}",
-    "{source}",
-    "{dictionary}"
-  ].indexOf(mapping) >= 0;
+function ankiMappingTemplateValid(mapping) {
+  const value = String(mapping || "").trim();
+  return !!value && value.length <= 4000;
 }
 function ankiFieldMappings() {
   let parsed = {};
@@ -66,7 +42,7 @@ function ankiFieldMappings() {
     Object.keys(parsed).forEach(fieldName => {
       const name = String(fieldName || "").trim();
       const mapping = String(parsed[fieldName] || "").trim();
-      if (name && ankiMappingPlaceholderValid(mapping)) {
+      if (name && ankiMappingTemplateValid(mapping)) {
         out[name] = mapping;
       }
     });
@@ -88,12 +64,15 @@ function ankiFieldMappings() {
   return out;
 }
 function ankiFieldsMappedTo(mappings, placeholder) {
-  return Object.keys(mappings || {}).filter(fieldName => mappings[fieldName] === placeholder);
+  return Object.keys(mappings || {}).filter(fieldName => String(mappings[fieldName] || "").indexOf(placeholder) >= 0);
 }
 function ankiFieldsMappedToAny(mappings, placeholders) {
   const allowed = Object.create(null);
   (placeholders || []).forEach(placeholder => { allowed[String(placeholder)] = true; });
-  return Object.keys(mappings || {}).filter(fieldName => allowed[mappings[fieldName]]);
+  return Object.keys(mappings || {}).filter(fieldName => {
+    const template = String(mappings[fieldName] || "");
+    return Object.keys(allowed).some(placeholder => template.indexOf(placeholder) >= 0);
+  });
 }
 function ankiSingleGlossaryValue(singleGlossaries, dictionaryTitle) {
   if (Object.prototype.hasOwnProperty.call(singleGlossaries, dictionaryTitle)) {
@@ -159,10 +138,13 @@ function ankiFieldsFromPayload(payload, settings, sourceText) {
     "{sasayaki-audio}": ""
   };
   Object.keys(settings.fieldMappings || {}).forEach(fieldName => {
-    const mapping = settings.fieldMappings[fieldName];
-    let value = values[mapping];
-    const singleMatch = /^\{single-glossary-(.+)\}$/.exec(mapping);
-    if (singleMatch) value = ankiSingleGlossaryValue(singleGlossaries, singleMatch[1]);
+    const mapping = String(settings.fieldMappings[fieldName] || "");
+    const value = mapping.replace(/\{.*?\}/g, placeholder => {
+      if (Object.prototype.hasOwnProperty.call(values, placeholder)) return String(values[placeholder] || "");
+      const singleMatch = /^\{single-glossary-(.+)\}$/.exec(placeholder);
+      if (singleMatch) return String(ankiSingleGlossaryValue(singleGlossaries, singleMatch[1]) || "");
+      return "";
+    });
     fields[fieldName] = ankiEscapeHtml(value || "");
   });
   return fields;

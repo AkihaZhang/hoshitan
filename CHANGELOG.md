@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.0-dev.7 - 2026-06-16
+
+- Reduced idle CPU use by moving dictionary worker polling from a 2ms busy loop to conservative bounded intervals.
+- Limited popup audio availability probing to the primary visible entry and cached probe results, avoiding repeated eager audio loads across all dictionary results.
+
+## 0.1.0-dev.6 - 2026-06-15
+
+- Reworked lookup popups with a fixed navigation bar, compact audio and Anki actions, collapsible dictionary groups, and configurable pixel height.
+- Word audio is checked for the primary entry when a popup appears, so unavailable audio is marked with a red cross before playback is requested.
+
+## 0.1.0-dev.5 - 2026-06-15
+
+- Anki field mappings are now editable templates with placeholder suggestions, so text and multiple parameters can be entered manually.
+- Preserved safe Yomitan structured-content colors, typography, spacing, and dictionary stylesheet rules in lookup popups.
+
 ## 0.1.0-dev.4 - 2026-06-15
 
 - Fixed an IINA crash when using video shortcuts. Shortcut handlers now avoid unsafe JavaScript array bridging in `mpv.command`.

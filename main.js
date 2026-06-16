@@ -10,7 +10,7 @@
 
 const { core, mpv, event, overlay, menu, input, ws, preferences, console, file, http, utils, standaloneWindow } = iina;
 
-const VERSION = "0.1.0-dev.4";
+const VERSION = "0.1.0-dev.7";
 const RECOMMENDED_JITENDEX_URL = "https://github.com/stephenmk/stephenmk.github.io/releases/latest/download/jitendex-yomitan.zip";
 
 let enabled = false;
@@ -1778,6 +1778,7 @@ function overlayConfig(options) {
     fontScale: prefNumber("fontScale", 1.0),
     popupScale: prefNumber("popupScale", 0.92),
     popupMaxWidth: Math.max(260, prefNumber("popupMaxWidth", 440)),
+    popupMaxHeight: Math.max(180, prefNumber("popupMaxHeight", 520)),
     popupMaxHeightVh: Math.max(20, prefNumber("popupMaxHeightVh", 34)),
     popupSubtitleGapPx: Math.max(12, prefNumber("popupSubtitleGapPx", 34)),
     popupTheme: normalizePopupThemePreference(pref("popupTheme", "inherit")),
@@ -2149,6 +2150,12 @@ async function refreshSystemUiLanguage() {
 const DEFAULT_PROFILE_ID = "default";
 const DEFAULT_AUDIO_SOURCE_URL = "https://hoshi-reader.manhhaoo-do.workers.dev/?term={term}&reading={reading}";
 const DEFAULT_AUDIO_SOURCES_JSON = JSON.stringify([{ name: "Hoshi Reader", url: DEFAULT_AUDIO_SOURCE_URL }]);
+const DIRECT_IPC_POLL_MS_DEFAULT = 16;
+const DIRECT_IPC_POLL_MS_MIN = 16;
+const DIRECT_IPC_POLL_MS_MAX = 250;
+const WORKER_IDLE_SLEEP_MS_DEFAULT = 30;
+const WORKER_IDLE_SLEEP_MS_MIN = 30;
+const WORKER_IDLE_SLEEP_MS_MAX = 250;
 const PROFILE_PREFERENCE_DEFAULTS = {
   enabledByDefault: true,
   hideNativeSubtitles: true,
@@ -2163,6 +2170,7 @@ const PROFILE_PREFERENCE_DEFAULTS = {
   fontScale: 1.0,
   popupScale: 0.92,
   popupMaxWidth: 440,
+  popupMaxHeight: 520,
   popupMaxHeightVh: 34,
   popupSubtitleGapPx: 34,
   popupTheme: "inherit",
@@ -2176,8 +2184,8 @@ const PROFILE_PREFERENCE_DEFAULTS = {
   debugLogVerbose: false,
   directWorkerIpc: true,
   fallbackToClientExec: true,
-  directIpcPollMs: 2,
-  workerIdleSleepMs: 2
+  directIpcPollMs: DIRECT_IPC_POLL_MS_DEFAULT,
+  workerIdleSleepMs: WORKER_IDLE_SLEEP_MS_DEFAULT
 };
 const PROFILE_PREFERENCE_KEYS = Object.keys(PROFILE_PREFERENCE_DEFAULTS);
 const GLOBAL_SETTINGS_DEFAULTS = {
@@ -2256,6 +2264,17 @@ function normalizeProfilePreferenceBoolValue(value, fallback) {
   }
   return !!value;
 }
+function normalizeProfilePreferenceNumberValue(value, fallback, minValue, maxValue) {
+  const number = Number(value);
+  const fallbackNumber = Number(fallback);
+  const minNumber = Number(minValue);
+  const maxNumber = Number(maxValue);
+  let out = Number.isFinite(number) ? number : fallbackNumber;
+  if (!Number.isFinite(out)) out = 0;
+  if (Number.isFinite(minNumber)) out = Math.max(minNumber, out);
+  if (Number.isFinite(maxNumber)) out = Math.min(maxNumber, out);
+  return out;
+}
 function emptyManifest() {
   return { dictionaries: {}, disabled: {}, dictionaryOrder: [], activeProfileId: DEFAULT_PROFILE_ID, profiles: {} };
 }
@@ -2290,6 +2309,8 @@ function normalizeProfilePreferences(prefs) {
   });
   out.audioAutoPlay = normalizeProfilePreferenceBoolValue(out.audioAutoPlay, PROFILE_PREFERENCE_DEFAULTS.audioAutoPlay);
   out.audioSourcesJson = normalizeAudioSourcesJsonPreference(out.audioSourcesJson, !hasAudioSources);
+  out.directIpcPollMs = normalizeProfilePreferenceNumberValue(out.directIpcPollMs, DIRECT_IPC_POLL_MS_DEFAULT, DIRECT_IPC_POLL_MS_MIN, DIRECT_IPC_POLL_MS_MAX);
+  out.workerIdleSleepMs = normalizeProfilePreferenceNumberValue(out.workerIdleSleepMs, WORKER_IDLE_SLEEP_MS_DEFAULT, WORKER_IDLE_SLEEP_MS_MIN, WORKER_IDLE_SLEEP_MS_MAX);
   return out;
 }
 function makeDefaultProfile(id, name) {
@@ -3417,6 +3438,14 @@ async function stopBackendWorker() {
   activeWorkerReady = null;
   await sleep(120);
 }
+function configuredWorkerIdleSleepMs() {
+  const value = prefNumber("workerIdleSleepMs", WORKER_IDLE_SLEEP_MS_DEFAULT);
+  return Math.min(WORKER_IDLE_SLEEP_MS_MAX, Math.max(WORKER_IDLE_SLEEP_MS_MIN, value));
+}
+function configuredDirectIpcPollMs() {
+  const value = prefNumber("directIpcPollMs", DIRECT_IPC_POLL_MS_DEFAULT);
+  return Math.min(DIRECT_IPC_POLL_MS_MAX, Math.max(DIRECT_IPC_POLL_MS_MIN, value));
+}
 async function startBackendWorkerProcess(dicts, language) {
   await ensureBundledBackendInstalled();
   await ensureDataDirs();
@@ -3430,7 +3459,7 @@ async function startBackendWorkerProcess(dicts, language) {
   debugLog("start backend worker language=" + lang.id + " dictCount=" + (dicts || []).length + " fingerprint=" + fingerprint);
   writeWorkerConfig(dicts, fingerprint, lang);
   await writeWorkerStartScript();
-  const sleepMs = Math.max(1, prefNumber("workerIdleSleepMs", 2));
+  const sleepMs = configuredWorkerIdleSleepMs();
   const res = await utils.exec("/bin/bash", [workerStartScriptPath(), dataRoot(), String(sleepMs)], dataRoot());
   if (!res || res.status !== 0) throw new Error("Could not start dictionary lookup: " + ((res && (res.stderr || res.stdout)) || "unknown error"));
 }
@@ -3527,7 +3556,7 @@ async function runWorkerQueueLookupDirect(suffix, dicts, scanLength, maxResults,
       safeDelete(req);
       throw new Error("Worker stopped before direct lookup completed");
     }
-    await sleep(Math.max(1, prefNumber("directIpcPollMs", 2)));
+    await sleep(configuredDirectIpcPollMs());
   }
   safeDelete(req);
   throw new Error("Direct worker lookup timed out after " + timeout + " ms");
@@ -5080,33 +5109,9 @@ function ankiSettings() {
     ffmpegPath: String(ankiSetting("ankiFfmpegPath", "/opt/homebrew/bin/ffmpeg") || "")
   };
 }
-function ankiMappingPlaceholderValid(mapping) {
-  if (/^\{single-glossary-.+\}$/.test(mapping)) return true;
-  return [
-    "{expression}",
-    "{reading}",
-    "{furigana-plain}",
-    "{audio}",
-    "{glossary}",
-    "{glossary-brief}",
-    "{glossary-first}",
-    "{selected-glossary}",
-    "{selected-glossary-fallback}",
-    "{popup-selection-text}",
-    "{sentence}",
-    "{frequencies}",
-    "{frequency-harmonic-rank}",
-    "{pitch-accent-positions}",
-    "{pitch-accent-categories}",
-    "{document-title}",
-    "{book-cover}",
-    "{sasayaki-audio}",
-    "{definition}",
-    "{image}",
-    "{sentence-audio}",
-    "{source}",
-    "{dictionary}"
-  ].indexOf(mapping) >= 0;
+function ankiMappingTemplateValid(mapping) {
+  const value = String(mapping || "").trim();
+  return !!value && value.length <= 4000;
 }
 function ankiFieldMappings() {
   let parsed = {};
@@ -5119,7 +5124,7 @@ function ankiFieldMappings() {
     Object.keys(parsed).forEach(fieldName => {
       const name = String(fieldName || "").trim();
       const mapping = String(parsed[fieldName] || "").trim();
-      if (name && ankiMappingPlaceholderValid(mapping)) {
+      if (name && ankiMappingTemplateValid(mapping)) {
         out[name] = mapping;
       }
     });
@@ -5141,12 +5146,15 @@ function ankiFieldMappings() {
   return out;
 }
 function ankiFieldsMappedTo(mappings, placeholder) {
-  return Object.keys(mappings || {}).filter(fieldName => mappings[fieldName] === placeholder);
+  return Object.keys(mappings || {}).filter(fieldName => String(mappings[fieldName] || "").indexOf(placeholder) >= 0);
 }
 function ankiFieldsMappedToAny(mappings, placeholders) {
   const allowed = Object.create(null);
   (placeholders || []).forEach(placeholder => { allowed[String(placeholder)] = true; });
-  return Object.keys(mappings || {}).filter(fieldName => allowed[mappings[fieldName]]);
+  return Object.keys(mappings || {}).filter(fieldName => {
+    const template = String(mappings[fieldName] || "");
+    return Object.keys(allowed).some(placeholder => template.indexOf(placeholder) >= 0);
+  });
 }
 function ankiSingleGlossaryValue(singleGlossaries, dictionaryTitle) {
   if (Object.prototype.hasOwnProperty.call(singleGlossaries, dictionaryTitle)) {
@@ -5212,10 +5220,13 @@ function ankiFieldsFromPayload(payload, settings, sourceText) {
     "{sasayaki-audio}": ""
   };
   Object.keys(settings.fieldMappings || {}).forEach(fieldName => {
-    const mapping = settings.fieldMappings[fieldName];
-    let value = values[mapping];
-    const singleMatch = /^\{single-glossary-(.+)\}$/.exec(mapping);
-    if (singleMatch) value = ankiSingleGlossaryValue(singleGlossaries, singleMatch[1]);
+    const mapping = String(settings.fieldMappings[fieldName] || "");
+    const value = mapping.replace(/\{.*?\}/g, placeholder => {
+      if (Object.prototype.hasOwnProperty.call(values, placeholder)) return String(values[placeholder] || "");
+      const singleMatch = /^\{single-glossary-(.+)\}$/.exec(placeholder);
+      if (singleMatch) return String(ankiSingleGlossaryValue(singleGlossaries, singleMatch[1]) || "");
+      return "";
+    });
     fields[fieldName] = ankiEscapeHtml(value || "");
   });
   return fields;
@@ -5607,7 +5618,7 @@ function runSettingsAuditChecks() {
   check(Number.isFinite(Number(cfg.scanLength)) && cfg.scanLength >= 1, "scanLength should be numeric");
   check(Number.isFinite(Number(cfg.maxEntries)) && cfg.maxEntries >= 1, "maxEntries should be numeric");
   check(Number.isFinite(Number(cfg.maxGlossesPerEntry)) && cfg.maxGlossesPerEntry >= 1, "maxGlossesPerEntry should be numeric");
-  check(Number.isFinite(Number(cfg.popupMaxHeightVh)) && cfg.popupMaxHeightVh >= 20, "popupMaxHeightVh should be sent to overlay");
+  check(Number.isFinite(Number(cfg.popupMaxHeight)) && cfg.popupMaxHeight >= 180, "popupMaxHeight should be sent to overlay");
   check(Number.isFinite(Number(cfg.popupSubtitleGapPx)) && cfg.popupSubtitleGapPx >= 12, "popupSubtitleGapPx should be sent to overlay");
   check(["dark", "light", "inherit"].indexOf(cfg.popupTheme) >= 0, "popupTheme should be sent to overlay");
   check(["dark", "light", ""].indexOf(cfg.popupThemeHint || "") >= 0, "popupThemeHint should resolve to a concrete hint when present");
@@ -5616,8 +5627,8 @@ function runSettingsAuditChecks() {
   check(typeof cfg.customPopupCss === "string", "customPopupCss should be sent to overlay as a string");
   check(typeof prefBool("directWorkerIpc", true) === "boolean", "directWorkerIpc should be boolean-readable");
   check(typeof prefBool("fallbackToClientExec", true) === "boolean", "fallbackToClientExec should be boolean-readable");
-  check(Number.isFinite(prefNumber("directIpcPollMs", 2)), "directIpcPollMs should be numeric");
-  check(Number.isFinite(prefNumber("workerIdleSleepMs", 2)), "workerIdleSleepMs should be numeric");
+  check(Number.isFinite(prefNumber("directIpcPollMs", DIRECT_IPC_POLL_MS_DEFAULT)), "directIpcPollMs should be numeric");
+  check(Number.isFinite(prefNumber("workerIdleSleepMs", WORKER_IDLE_SLEEP_MS_DEFAULT)), "workerIdleSleepMs should be numeric");
   if (failures.length) alert("Settings audit checks failed:\n" + failures.join("\n"));
   else alert("Settings audit checks passed.");
 }

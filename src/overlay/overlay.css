@@ -191,12 +191,12 @@
       position: absolute;
       z-index: 20;
       min-width: 250px;
+      width: min(var(--popup-max-width), calc(100vw - 24px));
       max-width: var(--popup-max-width);
       max-height: var(--popup-max-height);
-      overflow-y: auto;
-      overflow-x: hidden;
-      overscroll-behavior: contain;
-      -webkit-overflow-scrolling: touch;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
       transform: scale(var(--popup-scale));
       transform-origin: top left;
       background: var(--popup-bg);
@@ -209,10 +209,29 @@
       user-select: text;
     }
     #popup.hidden { display: none; }
-    #popup::-webkit-scrollbar { width: 10px; }
-    #popup::-webkit-scrollbar-track { background: var(--popup-scroll-track); border-radius: 999px; }
-    #popup::-webkit-scrollbar-thumb { background: var(--popup-scroll-thumb); border-radius: 999px; border: 2px solid var(--popup-scroll-thumb-border); }
-    #popup::-webkit-scrollbar-thumb:hover { background: var(--popup-scroll-thumb-hover); }
+    #popup .popup-action-bar {
+      display: flex;
+      align-items: center;
+      min-height: 38px;
+      flex: 0 0 auto;
+      border-bottom: 1px solid var(--popup-divider);
+      padding: 0 10px;
+      background: var(--popup-bg);
+      user-select: none;
+    }
+    #popup .popup-action-nav { display: flex; align-items: center; gap: 6px; }
+    #popup .popup-action-spacer { flex: 1 1 auto; }
+    #popup .popup-scroll {
+      min-height: 0;
+      overflow-y: auto;
+      overflow-x: hidden;
+      overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
+    }
+    #popup .popup-scroll::-webkit-scrollbar { width: 10px; }
+    #popup .popup-scroll::-webkit-scrollbar-track { background: var(--popup-scroll-track); border-radius: 999px; }
+    #popup .popup-scroll::-webkit-scrollbar-thumb { background: var(--popup-scroll-thumb); border-radius: 999px; border: 2px solid var(--popup-scroll-thumb-border); }
+    #popup .popup-scroll::-webkit-scrollbar-thumb:hover { background: var(--popup-scroll-thumb-hover); }
     #popup .head { padding: 14px 18px 12px; }
     #popup .head-main { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-width: 0; }
     #popup .head-title { flex: 1 1 auto; min-width: 0; }
@@ -227,7 +246,7 @@
     .dict { color: var(--popup-muted); font-size: 13px; font-weight: 700; margin-bottom: 4px; }
     .gloss { margin: 5px 0; white-space: pre-line; overflow-wrap: anywhere; }
     .trace { margin-top: 6px; color: var(--popup-soft); font-size: 12px; }
-    .dict-term { position: relative; min-width: 0; min-height: 28px; padding-right: 38px; color: var(--popup-heading); font-size: 30px; font-weight: 800; line-height: 1.15; margin: 0 0 8px; }
+    .dict-term { position: relative; min-width: 0; min-height: 28px; padding-right: 72px; color: var(--popup-heading); font-size: 30px; font-weight: 800; line-height: 1.15; margin: 0 0 8px; }
     .dict-term-text { display: block; min-width: 0; }
     .dict-reading { color: var(--popup-reading); font-weight: 650; margin-left: 10px; font-size: 16px; }
     .audio-button {
@@ -249,37 +268,49 @@
       pointer-events: auto;
     }
     .audio-button:hover { color: var(--popup-heading); border-color: var(--popup-border); background: var(--popup-chip-bg); }
-    .popup-control-button {
+    .head-actions .audio-button,
+    .dict-term-actions .audio-button {
+      width: 28px;
+      height: 28px;
+      margin: 0;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+    }
+    .popup-control-button,
+    .anki-add-button {
       display: inline-flex;
       align-items: center;
       justify-content: center;
       flex: 0 0 auto;
-      width: 26px;
-      height: 26px;
-      border: 1px solid var(--popup-divider);
-      border-radius: 999px;
+      width: 28px;
+      height: 28px;
+      border: 0;
+      border-radius: 6px;
       padding: 0;
       color: var(--popup-muted);
-      background: var(--popup-subtle-chip-bg);
+      background: transparent;
       font: inherit;
-      font-size: 22px;
       line-height: 1;
       cursor: pointer;
       pointer-events: auto;
     }
-    .popup-control-button:hover {
+    .popup-control-button:hover:not(:disabled),
+    .anki-add-button:hover:not(:disabled) {
       color: var(--popup-heading);
-      border-color: var(--popup-border);
       background: var(--popup-chip-bg);
     }
-    .popup-back-button { font-size: 26px; padding-bottom: 2px; }
-    .popup-close-button { font-size: 20px; padding-bottom: 2px; }
-    .dict-term .audio-button { position: absolute; top: 1px; right: 0; margin: 0; }
+    .popup-control-button:disabled { opacity: 0.32; cursor: default; }
+    .popup-control-button svg,
+    .anki-add-button svg { display: block; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .popup-close-button svg { width: 19px; height: 19px; }
+    .dict-term-actions { position: absolute; top: 1px; right: 0; display: flex; align-items: center; gap: 6px; }
+    .dict-term .audio-button { position: relative; top: auto; right: auto; margin: 0; }
     .audio-button[data-audio-state="loading"] { opacity: 0.72; }
     .audio-button[data-audio-state="loading"] .audio-icon { animation: audio-pulse 0.82s ease-in-out infinite alternate; }
     .audio-button[data-audio-state="missing"] { color: var(--popup-error); border-color: var(--popup-error-border); }
     .audio-button[data-audio-state="missing"]::after {
-      content: "x";
+      content: "×";
       position: absolute;
       left: -3px;
       bottom: -3px;
@@ -357,8 +388,14 @@
       to { opacity: 1; }
     }
     .dict-section + .dict-section { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--popup-section-divider); }
-    .dict-header { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; margin-bottom: 8px; min-width: 0; }
+    .dict-section > summary { list-style: none; }
+    .dict-section > summary::-webkit-details-marker { display: none; }
+    .dict-header { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; margin-bottom: 8px; min-width: 0; cursor: pointer; user-select: none; }
+    .dict-header::before { content: "▶"; flex: 0 0 auto; color: var(--popup-faint); font-size: 9px; }
+    .dict-section[open] > .dict-header::before { content: "▼"; }
     .dict-header .dict-name { color: var(--popup-muted); font-size: 13px; font-weight: 800; }
+    .dict-section-body { min-width: 0; }
+    .dict-glossary + .dict-glossary { margin-top: 8px; }
     .tag-row { display: flex; align-items: center; gap: 5px; margin: 0 0 6px; max-width: 100%; overflow-x: auto; overflow-y: hidden; white-space: nowrap; scrollbar-width: none; }
     .tag-row::-webkit-scrollbar { display: none; }
     .tag-chip { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; max-width: 180px; overflow: hidden; text-overflow: ellipsis; border-radius: 7px; background: var(--popup-chip-bg); color: var(--popup-chip-text); padding: 2px 7px; font-size: 11px; font-weight: 800; line-height: 1.45; text-transform: lowercase; }
@@ -554,36 +591,18 @@
       animation: none;
       background: rgba(255,140,140,0.88);
     }
-    .entry-actions {
-      display: flex;
-      justify-content: flex-end;
-      margin: 0 0 5px;
-    }
     .anki-add-button {
-      border: 1px solid var(--popup-border);
-      border-radius: 6px;
-      padding: 4px 8px;
-      background: var(--popup-subtle-chip-bg);
-      color: var(--popup-text);
-      font: inherit;
-      font-size: 11px;
-      font-weight: 700;
-      cursor: pointer;
-    }
-    .anki-add-button:hover:not(:disabled) {
-      border-color: var(--popup-accent);
-      color: var(--popup-heading);
+      color: var(--popup-muted);
     }
     .anki-add-button:disabled {
       cursor: default;
-      opacity: 0.68;
+      opacity: 0.5;
     }
     .anki-add-button.success {
       color: var(--popup-green);
     }
     .anki-add-button.error {
       color: var(--popup-error);
-      border-color: var(--popup-error-border);
     }
     @keyframes task-indeterminate {
       0% { left: -38%; }

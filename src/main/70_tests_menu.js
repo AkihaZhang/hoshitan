@@ -83,7 +83,7 @@ function runSettingsAuditChecks() {
   check(Number.isFinite(Number(cfg.scanLength)) && cfg.scanLength >= 1, "scanLength should be numeric");
   check(Number.isFinite(Number(cfg.maxEntries)) && cfg.maxEntries >= 1, "maxEntries should be numeric");
   check(Number.isFinite(Number(cfg.maxGlossesPerEntry)) && cfg.maxGlossesPerEntry >= 1, "maxGlossesPerEntry should be numeric");
-  check(Number.isFinite(Number(cfg.popupMaxHeightVh)) && cfg.popupMaxHeightVh >= 20, "popupMaxHeightVh should be sent to overlay");
+  check(Number.isFinite(Number(cfg.popupMaxHeight)) && cfg.popupMaxHeight >= 180, "popupMaxHeight should be sent to overlay");
   check(Number.isFinite(Number(cfg.popupSubtitleGapPx)) && cfg.popupSubtitleGapPx >= 12, "popupSubtitleGapPx should be sent to overlay");
   check(["dark", "light", "inherit"].indexOf(cfg.popupTheme) >= 0, "popupTheme should be sent to overlay");
   check(["dark", "light", ""].indexOf(cfg.popupThemeHint || "") >= 0, "popupThemeHint should resolve to a concrete hint when present");
@@ -92,8 +92,8 @@ function runSettingsAuditChecks() {
   check(typeof cfg.customPopupCss === "string", "customPopupCss should be sent to overlay as a string");
   check(typeof prefBool("directWorkerIpc", true) === "boolean", "directWorkerIpc should be boolean-readable");
   check(typeof prefBool("fallbackToClientExec", true) === "boolean", "fallbackToClientExec should be boolean-readable");
-  check(Number.isFinite(prefNumber("directIpcPollMs", 2)), "directIpcPollMs should be numeric");
-  check(Number.isFinite(prefNumber("workerIdleSleepMs", 2)), "workerIdleSleepMs should be numeric");
+  check(Number.isFinite(prefNumber("directIpcPollMs", DIRECT_IPC_POLL_MS_DEFAULT)), "directIpcPollMs should be numeric");
+  check(Number.isFinite(prefNumber("workerIdleSleepMs", WORKER_IDLE_SLEEP_MS_DEFAULT)), "workerIdleSleepMs should be numeric");
   if (failures.length) alert("Settings audit checks failed:\n" + failures.join("\n"));
   else alert("Settings audit checks passed.");
 }

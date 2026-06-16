@@ -445,6 +445,14 @@ async function stopBackendWorker() {
   activeWorkerReady = null;
   await sleep(120);
 }
+function configuredWorkerIdleSleepMs() {
+  const value = prefNumber("workerIdleSleepMs", WORKER_IDLE_SLEEP_MS_DEFAULT);
+  return Math.min(WORKER_IDLE_SLEEP_MS_MAX, Math.max(WORKER_IDLE_SLEEP_MS_MIN, value));
+}
+function configuredDirectIpcPollMs() {
+  const value = prefNumber("directIpcPollMs", DIRECT_IPC_POLL_MS_DEFAULT);
+  return Math.min(DIRECT_IPC_POLL_MS_MAX, Math.max(DIRECT_IPC_POLL_MS_MIN, value));
+}
 async function startBackendWorkerProcess(dicts, language) {
   await ensureBundledBackendInstalled();
   await ensureDataDirs();
@@ -458,7 +466,7 @@ async function startBackendWorkerProcess(dicts, language) {
   debugLog("start backend worker language=" + lang.id + " dictCount=" + (dicts || []).length + " fingerprint=" + fingerprint);
   writeWorkerConfig(dicts, fingerprint, lang);
   await writeWorkerStartScript();
-  const sleepMs = Math.max(1, prefNumber("workerIdleSleepMs", 2));
+  const sleepMs = configuredWorkerIdleSleepMs();
   const res = await utils.exec("/bin/bash", [workerStartScriptPath(), dataRoot(), String(sleepMs)], dataRoot());
   if (!res || res.status !== 0) throw new Error("Could not start dictionary lookup: " + ((res && (res.stderr || res.stdout)) || "unknown error"));
 }
@@ -555,7 +563,7 @@ async function runWorkerQueueLookupDirect(suffix, dicts, scanLength, maxResults,
       safeDelete(req);
       throw new Error("Worker stopped before direct lookup completed");
     }
-    await sleep(Math.max(1, prefNumber("directIpcPollMs", 2)));
+    await sleep(configuredDirectIpcPollMs());
   }
   safeDelete(req);
   throw new Error("Direct worker lookup timed out after " + timeout + " ms");

@@ -191,6 +191,7 @@ function overlayConfig(options) {
     fontScale: prefNumber("fontScale", 1.0),
     popupScale: prefNumber("popupScale", 0.92),
     popupMaxWidth: Math.max(260, prefNumber("popupMaxWidth", 440)),
+    popupMaxHeight: Math.max(180, prefNumber("popupMaxHeight", 520)),
     popupMaxHeightVh: Math.max(20, prefNumber("popupMaxHeightVh", 34)),
     popupSubtitleGapPx: Math.max(12, prefNumber("popupSubtitleGapPx", 34)),
     popupTheme: normalizePopupThemePreference(pref("popupTheme", "inherit")),

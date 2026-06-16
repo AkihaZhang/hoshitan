@@ -11,7 +11,7 @@ const info = JSON.parse(fs.readFileSync(path.join(root, 'Info.json'), 'utf8'));
 assert(info.name === 'Hoshitan', 'Plugin display name should use the Hoshitan brand');
 assert(info.identifier === 'io.github.akihazhang.hoshitan', 'Plugin identifier should be independent from upstream');
 assert(info.author && info.author.name === 'AkihaZhang', 'Plugin author metadata should name the fork maintainer');
-assert(info.version === '0.1.0-dev.4', 'Testing builds should use the Hoshitan development version');
+assert(info.version === '0.1.0-dev.7', 'Testing builds should use the Hoshitan development version');
 assert(info.ghRepo === 'AkihaZhang/hoshitan', 'GitHub updates should target the Hoshitan repository');
 assert(info.preferenceDefaults.etymologyCollapseDefault === 'collapsed', 'Etymology should default collapsed globally');
 assert(info.preferenceDefaults.wiktionaryEtymologyCollapseOverride === 'collapsed', 'Wiktionary/Kaikki override should default collapsed');
@@ -22,6 +22,8 @@ assert(info.preferenceDefaults.audioAutoPlay === false, 'Word audio auto-play sh
 assert(/hoshi-reader\.manhhaoo-do\.workers\.dev/.test(info.preferenceDefaults.audioSourcesJson), 'Word audio should default to the Hoshi Reader online source');
 assert(info.preferenceDefaults.localAudioEnabled === false, 'Local audio should be opt-in');
 assert(Object.prototype.hasOwnProperty.call(info.preferenceDefaults, 'localAudioDatabasePath'), 'Local audio database path should be configurable');
+assert(info.preferenceDefaults.directIpcPollMs >= 16, 'Direct worker IPC polling should not default to a busy 2ms loop');
+assert(info.preferenceDefaults.workerIdleSleepMs >= 30, 'Worker idle polling should not default to a busy 2ms loop');
 
 const preferencesHtml = fs.readFileSync(path.join(root, 'preferences.html'), 'utf8');
 assert(!/data-pref=/.test(preferencesHtml), 'IINA preferences page should not own profile settings');
@@ -42,7 +44,11 @@ assert(/url:\s*firstSource\s*\?\s*DEFAULT_AUDIO_SOURCE_URL\s*:\s*''/.test(addAud
 assert(/if\s*\(firstSource\)\s*saveAudioSources\(\)/.test(addAudioSourceSource), 'Restored default audio sources should be saved immediately');
 assert(/data-profile-pref="scanLength"/.test(managerHtml), 'Settings manager should expose per-profile scan length');
 assert(/data-profile-pref="popupTheme"/.test(managerHtml), 'Settings manager should expose per-profile popup color mode');
+assert(/data-profile-pref="popupMaxWidth"/.test(managerHtml), 'Settings manager should expose popup width in pixels');
+assert(/data-profile-pref="popupMaxHeight"/.test(managerHtml), 'Settings manager should expose popup height in pixels');
 assert(/data-profile-pref="customPopupCss"/.test(managerHtml), 'Settings manager should expose per-profile custom popup CSS');
+assert(/id="directIpcPollMs"[^>]*min="16"[^>]*max="250"/.test(managerHtml), 'Direct IPC polling setting should enforce a conservative lower bound');
+assert(/id="workerIdleSleepMs"[^>]*min="30"[^>]*max="250"/.test(managerHtml), 'Worker idle sleep setting should enforce a conservative lower bound');
 assert(/data-global-setting="lowRamImport"/.test(managerHtml), 'Settings manager should expose global dictionary import settings');
 assert(/data-global-setting="ankiDeckName"/.test(managerHtml), 'Settings manager should expose the Anki deck');
 assert(/data-global-setting="uiLanguage"/.test(managerHtml), 'Settings manager should expose UI language selection');
@@ -54,7 +60,10 @@ assert(/id="ankiFieldMappings"/.test(managerHtml), 'Settings manager should rend
 assert(/ankiFieldMappingsJson/.test(managerHtml), 'Settings manager should persist raw Anki field mappings');
 assert(/data-no-i18n/.test(managerHtml), 'Raw Anki fields should be excluded from UI translation');
 assert(/function saveAnkiFieldMappings\(\)/.test(managerHtml), 'Anki field mappings should save independently from unrelated settings');
-assert(/appearance:\s*menulist/.test(managerHtml), 'Anki field mapping controls should use native selectable menus');
+assert(/input\.setAttribute\('list', 'ankiMappingSuggestions'\)/.test(managerHtml), 'Anki field mappings should allow manual text entry with suggestions');
+assert(/document\.createElement\('datalist'\)/.test(managerHtml), 'Anki field mappings should retain selectable placeholder suggestions');
+assert(/input\.addEventListener\('blur', commitMapping\)/.test(managerHtml), 'Manual Anki field mappings should save when focus leaves the field');
+assert(/event\.key !== 'Enter'/.test(managerHtml), 'Manual Anki field mappings should save on Enter');
 assert(/dictionary-manager-anki-refresh/.test(managerHtml), 'Settings manager should load Anki deck and field metadata');
 assert(/function ankiMappingOptions\(\)/.test(managerHtml), 'Settings manager should centralize Hoshi-compatible Anki mapping options');
 assert(/single-glossary-/.test(managerHtml), 'Settings manager should add per-dictionary glossary mappings');
@@ -135,6 +144,12 @@ assert(/function runDictionaryManagerZipImport\(\)/.test(managerBridgeSource), '
 assert(!/postDictionaryManagerStatus\("Opening ZIP picker\.\.\."/.test(managerBridgeSource), 'ZIP picker opening status should be transient webview state only');
 assert(/t\("manager\.importCancelled"\)/.test(managerBridgeSource), 'Dictionary manager should acknowledge cancelled ZIP imports');
 assert(!/runDictionaryManagerAction\("Importing dictionary"/.test(managerBridgeSource), 'ZIP import should not enter busy state before file selection');
+
+const backendSource = fs.readFileSync(path.join(root, 'src/main/30_backend_import_worker_lookup.js'), 'utf8');
+assert(/function configuredWorkerIdleSleepMs\(\)/.test(backendSource), 'Worker startup should use a bounded idle sleep helper');
+assert(/WORKER_IDLE_SLEEP_MS_MIN/.test(backendSource), 'Worker idle sleep should clamp saved legacy values below the safe lower bound');
+assert(/function configuredDirectIpcPollMs\(\)/.test(backendSource), 'Direct IPC response polling should use a bounded helper');
+assert(/DIRECT_IPC_POLL_MS_MIN/.test(backendSource), 'Direct IPC polling should clamp saved legacy values below the safe lower bound');
 
 const lifecycleSource = fs.readFileSync(path.join(root, 'src/main/60_overlay_lifecycle_toggle.js'), 'utf8');
 assert(/function reloadOverlayForProfileChange\(\)/.test(lifecycleSource), 'Profile changes should be able to reload the overlay');

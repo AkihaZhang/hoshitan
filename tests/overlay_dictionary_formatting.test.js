@@ -29,6 +29,8 @@ overlay.applyConfig({
 });
 assert(context.__head.children.length === 2, 'Dictionary CSS should create a separate scoped style element');
 assert(/dict-section\[data-dictionary="Jitendex"\]/.test(context.__head.children[1].textContent), 'Dictionary CSS should be scoped to its dictionary section');
+assert(/data-dictionary="Jitendex"\] span\[data-sc-content="part-of-speech-info"\]\s*\{\s*color: red;/.test(context.__head.children[1].textContent), 'Dictionary CSS selectors should remain valid after scoping');
+assert(!/data-dictionary="Jitendex"\]\s*\{\s*span/.test(context.__head.children[1].textContent), 'Dictionary stylesheets should not be inserted as invalid declarations');
 
 overlay.applyConfig({ popupTheme: 'light' });
 assert(/\btheme-light\b/.test(context.document.documentElement.className), 'Forced light mode should apply the light theme class');
@@ -47,11 +49,11 @@ context.__elements.subtitle._rect = { left: 0, top: 1000, right: 2560, bottom: 1
 context.__elements.popup._rect = { left: 0, top: 0, right: 528, bottom: 360, width: 528, height: 360 };
 const scaledPlacementAnchor = context.document.createElement('span');
 scaledPlacementAnchor._rect = { left: 1400, top: 1008, right: 1460, bottom: 1080, width: 60, height: 72 };
-overlay.applyConfig({ popupScale: 1.2, popupMaxHeightVh: 34, popupSubtitleGapPx: 34 });
+overlay.applyConfig({ popupScale: 1.2, popupMaxHeight: 520, popupSubtitleGapPx: 34 });
 overlay.placePopup(scaledPlacementAnchor);
 const scaledPopupTop = Number.parseFloat(context.__elements.popup.style.top);
 assert(scaledPopupTop + context.__elements.popup._rect.height <= context.__elements.subtitle._rect.top - 34 + 0.001, 'Scaled popup should stay above the subtitle-safe region');
-assert(context.document.documentElement.style['--popup-max-height'] === '407px', 'Scaled popup max-height should reserve visual room after CSS transform');
+assert(context.document.documentElement.style['--popup-max-height'] === '433px', 'Scaled popup max-height should reserve visual room after CSS transform');
 
 const header = overlay.displayHeaderForResult({
   text: 'I was juster',
@@ -120,6 +122,31 @@ assert(/class="tag-chip tag-priority"/.test(structuredHtml), 'Priority tag shoul
 assert(!/>priority form</.test(structuredHtml), 'Priority tag text should not be visible');
 assert(/class="tag-chip tag-term">adjective</.test(structuredHtml), 'Term tags should render compact chips');
 assert(!/nonlemma-row/.test(structuredHtml), 'Structured Wiktionary entries should not be flattened into non-lemma rows');
+
+const meikyoStyledHtml = overlay.renderGlossaryPayload({
+  dict: '明鏡日汉双解辞典',
+  glossary: JSON.stringify([{
+    type: 'structured-content',
+    content: {
+      tag: 'div',
+      style: { marginLeft: '1.0em' },
+      content: [
+        { tag: 'span', content: '名', style: { color: 'OrangeRed', fontWeight: 'bold' } },
+        { tag: 'span', lang: 'zh', content: '秋，秋季。', style: { color: 'DodgerBlue' } }
+      ]
+    }
+  }])
+});
+assert(/style="margin-left:1\.0em"/.test(meikyoStyledHtml), 'Structured dictionary block spacing should be preserved');
+assert(/style="color:OrangeRed;font-weight:bold"/.test(meikyoStyledHtml), 'Structured dictionary emphasis styles should be preserved');
+assert(/style="color:DodgerBlue" lang="zh"/.test(meikyoStyledHtml), 'Structured dictionary language colors should be preserved');
+
+const unsafeStyledHtml = overlay.renderStructuredNode({
+  tag: 'span',
+  content: 'safe',
+  style: { color: 'red;position:fixed', background: 'url(https://example.invalid/a)' }
+}, {});
+assert(!/position:fixed|url\(/.test(unsafeStyledHtml), 'Unsafe structured dictionary style values should be discarded');
 
 overlay.applyConfig({
   etymologyCollapseDefault: 'expanded',
@@ -404,8 +431,8 @@ assert(!/\.dict-details \{[^}]*border-left:/s.test(css), 'Collapsed details shou
 assert(/\.dict-details\[open\] \{[^}]*border-left:/s.test(css), 'Expanded details should keep the left border');
 assert(/\.dict-details summary \{[^}]*list-style-position: inside;[^}]*\}/.test(css), 'Collapsed details marker should be inset');
 assert(/\.dict-term \{[^}]*font-size: 30px;[^}]*\}/.test(css), 'Secondary entry headwords should match the main popup headword size');
-assert(/\.dict-term \{[^}]*position: relative;[^}]*padding-right: 38px;[^}]*\}/.test(css), 'Secondary entry headword rows should reserve space for the speaker button');
-assert(/\.dict-term \.audio-button \{[^}]*position: absolute;[^}]*top: 1px;[^}]*right: 0;[^}]*\}/.test(css), 'Secondary entry speaker buttons should be pinned to the row top-right');
+assert(/\.dict-term \{[^}]*position: relative;[^}]*padding-right: 72px;[^}]*\}/.test(css), 'Secondary entry headword rows should reserve space for audio and Anki buttons');
+assert(/\.dict-term-actions \{[^}]*position: absolute;[^}]*top: 1px;[^}]*right: 0;[^}]*\}/.test(css), 'Secondary entry actions should be pinned to the row top-right');
 assert(/\.pitch-group \{[^}]*flex: 0 0 100%;[^}]*width: 100%;[^}]*\}/.test(css), 'Pitch accent group should start on a new metadata row');
 assert(!/\.pitch-group \{[^}]*flex-direction: column;/s.test(css), 'Pitch source chip and accent pattern should stay side by side');
 assert(/\.pitch-patterns \{[^}]*font-size: 15px;[^}]*\}/.test(css), 'Pitch accent pattern should be larger than the source chip');

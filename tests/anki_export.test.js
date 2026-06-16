@@ -13,7 +13,7 @@ const settings = {
   ankiFieldMappingsJson: JSON.stringify({
     Sentence: '{sentence}',
     Expression: '{expression}',
-    ExpressionReading: '{reading}',
+    ExpressionReading: 'Reading: {reading}',
     MainDefinition: '{single-glossary-明鏡日汉双解辞典}',
     MiscInfo: '{source}',
     Frequencies: '{frequency-harmonic-rank}'
@@ -150,6 +150,7 @@ function assert(condition, message) {
   assert(note.modelName === 'Lapis', 'Export must use the configured note type');
   assert(note.fields.Sentence === 'トイレ　トイレ', 'Sentence should map to the configured field');
   assert(note.fields.Expression === 'トイレ', 'Expression should map to the configured field');
+  assert(note.fields.ExpressionReading === 'Reading: トイレ', 'Manually entered Anki field templates should replace embedded placeholders');
   assert(note.fields.MainDefinition === '[明鏡日汉双解辞典] &lt;test&gt; &amp; definition', 'Per-dictionary glossary should map by dictionary title');
   assert(note.fields.MiscInfo === 'episode.mkv @ 00:07.099', 'Source field should include a timestamp');
   assert(note.fields.Frequencies === '184', 'Frequency harmonic rank should map to an Anki field');

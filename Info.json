@@ -1,7 +1,7 @@
 {
   "name": "Hoshitan",
   "identifier": "io.github.akihazhang.hoshitan",
-  "version": "0.1.0-dev.4",
+  "version": "0.1.0-dev.7",
   "author": {
     "name": "AkihaZhang"
   },
@@ -21,6 +21,7 @@
     "fontScale": 1.0,
     "popupScale": 0.92,
     "popupMaxWidth": 440,
+    "popupMaxHeight": 520,
     "popupTheme": "inherit",
     "maxEntries": 3,
     "maxGlossesPerEntry": 4,
@@ -42,8 +43,8 @@
     "debugLogVerbose": false,
     "directWorkerIpc": true,
     "fallbackToClientExec": true,
-    "directIpcPollMs": 2,
-    "workerIdleSleepMs": 2,
+    "directIpcPollMs": 16,
+    "workerIdleSleepMs": 30,
     "ankiConnectUrl": "http://127.0.0.1:8765",
     "ankiApiKey": "",
     "ankiDeckName": "Default",

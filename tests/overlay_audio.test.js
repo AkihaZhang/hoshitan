@@ -8,6 +8,7 @@ const { context, overlay } = loadOverlayForTest([
   'renderSubtitle',
   'audioTermReadingKey',
   'playAudioForTerm',
+  'probePopupAudioButtons',
   'showAudioSourceMenu',
   'closestAnkiButton'
 ]);
@@ -92,7 +93,7 @@ overlay.renderSubtitle('読む', 91);
 assert(context.__elements.subtitle.classList.contains('hidden'), 'Heartbeat replay must not re-show subtitles hidden by the S shortcut');
 overlay.state.subtitleVisible = true;
 
-const headHtml = context.__elements.popup.children[0]._innerHTML;
+const headHtml = context.__elements.popup.querySelector('.head')._innerHTML;
 assert(/class="audio-button"/.test(headHtml), 'Lookup result header should render a speaker button when audio sources are configured');
 assert(/data-audio-term="読む"/.test(headHtml), 'Speaker button should carry the entry headword');
 assert(/data-audio-reading="よむ"/.test(headHtml), 'Speaker button should carry the entry reading');
@@ -142,6 +143,26 @@ function respondToAudioSourceRequest(fromIndex, candidates, ok) {
   const missing = await missingPromise;
   assert(!missing, 'Empty audio source JSON should report missing audio');
   assert(missingButton.dataset.audioState === 'missing', 'Missing audio should mark the speaker with the missing badge state');
+
+  const proactiveButton = context.document.createElement('button');
+  proactiveButton.className = 'audio-button';
+  proactiveButton.dataset.audioKey = overlay.audioTermReadingKey('未収録', 'みしゅうろく');
+  proactiveButton.dataset.audioTerm = '未収録';
+  proactiveButton.dataset.audioReading = 'みしゅうろく';
+  context.__elements.popup.appendChild(proactiveButton);
+  const skippedProbeButton = context.document.createElement('button');
+  skippedProbeButton.className = 'audio-button';
+  skippedProbeButton.dataset.audioKey = overlay.audioTermReadingKey('別語', 'べつご');
+  skippedProbeButton.dataset.audioTerm = '別語';
+  skippedProbeButton.dataset.audioReading = 'べつご';
+  context.__elements.popup.appendChild(skippedProbeButton);
+  const beforeProbe = context.__sent.length;
+  overlay.probePopupAudioButtons();
+  assert(context.__sent.slice(beforeProbe).filter(item => item.type === 'audio-source').length === 1, 'Popup audio probing should only preflight the primary visible entry');
+  respondToAudioSourceRequest(beforeProbe, []);
+  await new Promise(resolve => setTimeout(resolve, 5));
+  assert(proactiveButton.dataset.audioState === 'missing', 'Visible entries should proactively show a missing-audio badge');
+  assert(!skippedProbeButton.dataset.audioState, 'Secondary entries should not be eagerly probed on popup open');
 
   overlay.applyConfig({
     audioSources: [{ name: 'LanguagePod101', url: 'https://assets.languagepod101.com/dictionary/japanese/audiomp3.php?kanji={term}&kana={reading}' }]

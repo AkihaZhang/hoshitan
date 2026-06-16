@@ -19,6 +19,7 @@
       fontScale: 1,
       popupScale: 0.92,
       popupMaxWidth: 440,
+      popupMaxHeight: 520,
       popupMaxHeightVh: 34,
       popupSubtitleGapPx: 34,
       popupTheme: 'inherit',
@@ -57,11 +58,14 @@
     lookupRequestSeq: 0,
     currentLookupStored: null,
     nestedLookupHistory: [],
+    nestedLookupForwardHistory: [],
     nestedLookupRequestId: '',
     nestedLookupRequestSeq: 0,
     audioPlaying: null,
     audioPlayRequestSeq: 0,
     audioCache: Object.create(null),
+    audioProbeCache: Object.create(null),
+    audioProbeInFlight: Object.create(null),
     audioAutoPlayed: Object.create(null),
     audioSourceRequestSeq: 0,
     pendingAudioSourceRequests: Object.create(null),
@@ -105,6 +109,7 @@
       'Added to Anki.': '已添加到 Anki。',
       'Anki export failed.': 'Anki 导出失败。',
       'Back': '返回',
+      'Forward': '前进',
       'Close': '关闭',
       'Looking up selection…': '正在查询选中文本…'
     }
@@ -426,7 +431,10 @@
 	        if (button.dataset.audioKey !== key) return;
 	        if (status) button.dataset.audioState = status;
 	        else delete button.dataset.audioState;
-	        if (title) button.title = title;
+	        if (title) {
+	          button.title = title;
+	          button.setAttribute('aria-label', title);
+	        }
 	      });
 	    } catch (_) {}
 	  }
@@ -646,6 +654,66 @@
 	  function cssAttributeValue(value) {
 	    return String(value || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/[\r\n\f]/g, ' ');
 	  }
+	  function findCssBlockEnd(source, openIndex) {
+	    let depth = 1;
+	    let quote = '';
+	    let comment = false;
+	    for (let i = openIndex + 1; i < source.length; i++) {
+	      const ch = source[i];
+	      const next = source[i + 1];
+	      if (comment) {
+	        if (ch === '*' && next === '/') { comment = false; i++; }
+	        continue;
+	      }
+	      if (quote) {
+	        if (ch === '\\') { i++; continue; }
+	        if (ch === quote) quote = '';
+	        continue;
+	      }
+	      if (ch === '/' && next === '*') { comment = true; i++; continue; }
+	      if (ch === '"' || ch === "'") { quote = ch; continue; }
+	      if (ch === '{') depth++;
+	      else if (ch === '}' && --depth === 0) return i;
+	    }
+	    return -1;
+	  }
+	  function sanitizeDictionaryCssBody(body) {
+	    return String(body || '')
+	      .replace(/@import[^;{}]*;?/gi, '')
+	      .replace(/[-\w]+\s*:\s*[^;{}]*url\s*\([^;{}]*\)\s*;?/gi, '');
+	  }
+	  function scopeDictionaryCss(cssText, dictionaryName) {
+	    const source = String(cssText || '').slice(0, 100000);
+	    const scope = '#popup .dict-section[data-dictionary="' + cssAttributeValue(dictionaryName) + '"]';
+	    const scopeRules = text => {
+	      let output = '';
+	      let cursor = 0;
+	      while (cursor < text.length) {
+	        const open = text.indexOf('{', cursor);
+	        if (open < 0) break;
+	        const close = findCssBlockEnd(text, open);
+	        if (close < 0) break;
+	        const prelude = text.slice(cursor, open);
+	        const trimmed = prelude.trim();
+	        const body = text.slice(open + 1, close);
+	        if (/^@(media|supports|container|layer)\b/i.test(trimmed)) {
+	          output += trimmed + '{' + scopeRules(body) + '}';
+	        } else if (!/^@/i.test(trimmed)) {
+	          const selectors = trimmed.split(',').map(selector => {
+	            const value = selector.trim();
+	            if (!value) return '';
+	            if (value === ':root' || value === 'html' || value === 'body') return scope;
+	            if (value.startsWith('&')) return scope + value.slice(1);
+	            return scope + ' ' + value;
+	          }).filter(Boolean);
+	          if (selectors.length) output += selectors.join(', ') + '{' + sanitizeDictionaryCssBody(body) + '}';
+	        }
+	        cursor = close + 1;
+	      }
+	      return output;
+	    };
+	    return scopeRules(source.replace(/@(?:import|charset|namespace)[^;{}]*;?/gi, ''));
+	  }
 	  function applyDictionaryStyles(styles) {
 	    const source = styles && typeof styles === 'object' && !Array.isArray(styles) ? styles : {};
 	    const names = Object.keys(source).sort();
@@ -659,7 +727,7 @@
 	      const css = String(source[name] || '').slice(0, Math.max(0, Math.min(100000, 300000 - total)));
 	      if (!css.trim()) return;
 	      total += css.length;
-	      rules.push('#popup .dict-section[data-dictionary="' + cssAttributeValue(name) + '"] {' + css + '}');
+	      rules.push(scopeDictionaryCss(css, name));
 	    });
 	    try {
 	      if (!dictionaryStylesEl) {
@@ -808,6 +876,8 @@
     state.config.audioSources = normalizeAudioSources(state.config.audioSources);
     if (previousAudioSignature !== audioSourcesSignature(state.config.audioSources)) {
       state.audioCache = Object.create(null);
+      state.audioProbeCache = Object.create(null);
+      state.audioProbeInFlight = Object.create(null);
     }
     ensurePopupThemeHintListener();
     applyPopupTheme(state.config.popupTheme);
@@ -861,6 +931,7 @@
     state.currentPos = null;
     state.currentLookupStored = null;
     state.nestedLookupHistory = [];
+    state.nestedLookupForwardHistory = [];
     state.nestedLookupRequestId = '';
     state.activeMatchStart = null;
     state.activeMatchLength = 0;
@@ -1028,6 +1099,7 @@
     if (!sameUnitVisible) {
       state.currentLookupStored = null;
       state.nestedLookupHistory = [];
+      state.nestedLookupForwardHistory = [];
       state.nestedLookupRequestId = '';
     }
     const stored = state.lookupByPos[pos];
@@ -1209,9 +1281,19 @@
 	  function showPreviousNestedLookup() {
 	    if (!state.nestedLookupHistory.length) return false;
 	    state.nestedLookupRequestId = '';
+	    if (state.currentLookupStored) state.nestedLookupForwardHistory.push(state.currentLookupStored);
 	    const previous = state.nestedLookupHistory.pop();
 	    state.currentLookupStored = previous || null;
 	    renderStoredLookup(previous, { nested: state.nestedLookupHistory.length > 0 });
+	    return true;
+	  }
+	  function showNextNestedLookup() {
+	    if (!state.nestedLookupForwardHistory.length) return false;
+	    state.nestedLookupRequestId = '';
+	    if (state.currentLookupStored) state.nestedLookupHistory.push(state.currentLookupStored);
+	    const next = state.nestedLookupForwardHistory.pop();
+	    state.currentLookupStored = next || null;
+	    renderStoredLookup(next, { nested: true });
 	    return true;
 	  }
 	  function ankiPayloadForEntry(entry, requestId) {
@@ -1244,6 +1326,17 @@
 	      at: Date.now()
 	    };
 	  }
+	  function setAnkiButtonState(button, stateName, title) {
+	    if (!button) return;
+	    button.classList.remove('success', 'error');
+	    if (stateName === 'success' || stateName === 'error') button.classList.add(stateName);
+	    if (stateName) button.dataset.ankiState = stateName;
+	    else delete button.dataset.ankiState;
+	    if (title) {
+	      button.title = title;
+	      button.setAttribute('aria-label', title);
+	    }
+	  }
 	  function requestAnkiExport(button) {
 	    const entryIndex = Math.max(0, Number(button.getAttribute('data-anki-entry-index') || 0) || 0);
 	    const stored = state.currentLookupStored || state.lookupByPos[state.currentPos];
@@ -1260,7 +1353,7 @@
 	    state.ankiPendingRequestId = requestId;
 	    state.ankiPendingButton = button;
 	    button.disabled = true;
-	    button.textContent = tr('Adding...');
+	    setAnkiButtonState(button, 'loading', tr('Adding...'));
 	    setStatus({ message: tr('Creating Anki card...'), kind: 'info' });
 	    const sent = sendBridgeMessage(payload);
 	    if (!sent) {
@@ -1269,7 +1362,7 @@
 	        state.ankiPendingRequestId = '';
 	        state.ankiPendingButton = null;
 	        button.disabled = false;
-	        button.textContent = tr('Add to Anki');
+	        setAnkiButtonState(button, 'error', tr('Add to Anki'));
 	        setStatus({ message: tr('Could not send Anki request: {error}', { error: String(error && error.message ? error.message : error) }), kind: 'error' });
 	      }
 	    }
@@ -1283,6 +1376,7 @@
 	      const action = String(actionButton.dataset.popupAction || '');
 	      if (action === 'close') hidePopup();
 	      else if (action === 'back') showPreviousNestedLookup();
+	      else if (action === 'forward') showNextNestedLookup();
 	      return;
 	    }
 	    const ankiButton = closestAnkiButton(ev.target);
@@ -1324,10 +1418,11 @@
     if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
     const dx = Number(ev.deltaX || 0);
     const dy = Number(ev.deltaY || 0);
+    const scrollTarget = popupEl.querySelector('.popup-scroll') || popupEl;
     // Manually scroll so the gesture is consumed by the overlay instead of being
     // interpreted by IINA as seek/fast-forward.
-    if (Math.abs(dy) >= Math.abs(dx)) popupEl.scrollTop += dy;
-    else popupEl.scrollLeft += dx;
+    if (Math.abs(dy) >= Math.abs(dx)) scrollTarget.scrollTop += dy;
+    else scrollTarget.scrollLeft += dx;
   }
   popupEl.addEventListener('wheel', trapPopupWheel, { passive: false, capture: true });
   popupEl.addEventListener('mousewheel', trapPopupWheel, { passive: false, capture: true });
@@ -1526,6 +1621,7 @@
     state.currentAnchor = null;
     state.currentLookupStored = null;
     state.nestedLookupHistory = [];
+    state.nestedLookupForwardHistory = [];
     state.nestedLookupRequestId = '';
     Object.keys(state.pendingLookupTimers || {}).forEach(k => clearTimeout(state.pendingLookupTimers[k]));
     Object.keys(state.pendingLookupRequests || {}).forEach(k => cancelPendingLookupRequest(k));
@@ -1541,6 +1637,61 @@
 	    const key = audioTermReadingKey(audioTerm, audioReading);
 	    return '<button type="button" class="audio-button" data-audio-key="' + escapeHtml(key) + '" data-audio-term="' + escapeHtml(audioTerm) + '" data-audio-reading="' + escapeHtml(audioReading) + '" title="Play audio" aria-label="Play audio"><svg class="audio-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="audio-speaker-body" d="M3 9v6h4l5 4V5L7 9H3z"></path><path class="audio-wave" d="M16 8.5a5 5 0 0 1 0 7"></path><path class="audio-wave" d="M19 5a9 9 0 0 1 0 14"></path></svg></button>';
 	  }
+	  function renderAnkiButtonHtml(entryIndex) {
+	    if (entryIndex === null || entryIndex === undefined) return '';
+	    const label = tr('Add to Anki');
+	    return '<button type="button" class="anki-add-button" data-anki-entry-index="' + escapeHtml(String(entryIndex)) + '" title="' + escapeHtml(label) + '" aria-label="' + escapeHtml(label) + '"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="4.5" y="4.5" width="15" height="15" rx="2.5"></rect><path d="M12 8v8M8 12h8"></path></svg></button>';
+	  }
+	  function probePopupAudioButtons() {
+	    try {
+	      const sources = activeAudioSources();
+	      let selected = null;
+	      let selectedTerm = '';
+	      let selectedReading = '';
+	      let selectedKey = '';
+	      let selectedCacheKey = '';
+	      popupEl.querySelectorAll('.audio-button').forEach(button => {
+	        if (selected) return;
+	        const term = String(button.dataset.audioTerm || '').trim();
+	        const reading = String(button.dataset.audioReading || '').trim();
+	        const key = String(button.dataset.audioKey || audioTermReadingKey(term, reading));
+	        if (!term) return;
+	        selected = button;
+	        selectedTerm = term;
+	        selectedReading = reading;
+	        selectedKey = key;
+	        selectedCacheKey = audioCacheKey(term, reading, sources);
+	      });
+	      if (!selected || !selectedTerm) return;
+	      const cached = state.audioProbeCache[selectedCacheKey];
+	      if (cached && cached.status) {
+	        setAudioButtonsStateForKey(selectedKey, cached.status, cached.title || (cached.status === 'ready' ? 'Play audio' : 'Could not find audio'));
+	        return;
+	      }
+	      if (state.audioProbeInFlight[selectedCacheKey]) {
+	        setAudioButtonsStateForKey(selectedKey, 'loading', 'Finding audio...');
+	        return;
+	      }
+	      state.audioProbeInFlight[selectedCacheKey] = true;
+	      setAudioButtonsStateForKey(selectedKey, 'loading', 'Finding audio...');
+	      findPlayableAudio(selectedTerm, selectedReading, sources).then(result => {
+	        if (result && result.audio) {
+	          try { result.audio.pause(); } catch (_) {}
+	          const title = 'Play audio\nFrom ' + String(result.sourceName || 'audio source');
+	          state.audioProbeCache[selectedCacheKey] = { status: 'ready', title };
+	          setAudioButtonsStateForKey(selectedKey, 'ready', title);
+	        } else {
+	          state.audioProbeCache[selectedCacheKey] = { status: 'missing', title: 'Could not find audio' };
+	          setAudioButtonsStateForKey(selectedKey, 'missing', 'Could not find audio');
+	        }
+	      }).catch(() => {
+	        state.audioProbeCache[selectedCacheKey] = { status: 'missing', title: 'Could not find audio' };
+	        setAudioButtonsStateForKey(selectedKey, 'missing', 'Could not find audio');
+	      }).finally(() => {
+	        delete state.audioProbeInFlight[selectedCacheKey];
+	      });
+	    } catch (_) {}
+	  }
 	  function bindPopupAudioButtons() {
 	    try {
 	      popupEl.querySelectorAll('.audio-button').forEach(button => {
@@ -1555,34 +1706,42 @@
 	          showAudioSourceMenu(button, event);
 	        });
 	      });
+	      setTimeout(probePopupAudioButtons, 0);
 	    } catch (_) {}
 	  }
-	  function renderPopupHead(heading, reading, secondaryText, audioData) {
+	  function popupToolbarButton(action, label, path, disabled) {
+	    return '<button type="button" class="popup-control-button popup-' + escapeHtml(action) + '-button" data-popup-action="' + escapeHtml(action) + '" title="' + escapeHtml(label) + '" aria-label="' + escapeHtml(label) + '"' + (disabled ? ' disabled' : '') + '><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + path + '</svg></button>';
+	  }
+	  function renderPopupActionBar() {
+	    const back = popupToolbarButton('back', tr('Back'), '<path d="M15 5l-7 7 7 7"></path>', !state.nestedLookupHistory.length);
+	    const forward = popupToolbarButton('forward', tr('Forward'), '<path d="M9 5l7 7-7 7"></path>', !state.nestedLookupForwardHistory.length);
+	    const close = popupToolbarButton('close', tr('Close'), '<path d="M6 6l12 12M18 6L6 18"></path>', false);
+	    return '<div class="popup-action-nav">' + back + forward + '</div><div class="popup-action-spacer"></div>' + close;
+	  }
+	  function renderPopupHead(heading, reading, secondaryText, audioData, entryIndex) {
 	    const audioHtml = audioData ? renderAudioButtonHtml(audioData.term, audioData.reading) : '';
-	    const backHtml = state.nestedLookupHistory.length
-	      ? '<button type="button" class="popup-control-button popup-back-button" data-popup-action="back" title="' + escapeHtml(tr('Back')) + '" aria-label="' + escapeHtml(tr('Back')) + '">‹</button>'
-	      : '';
-	    const closeHtml = '<button type="button" class="popup-control-button popup-close-button" data-popup-action="close" title="' + escapeHtml(tr('Close')) + '" aria-label="' + escapeHtml(tr('Close')) + '">×</button>';
 	    return '<div class="head-main"><div class="head-title"><span class="term">' + escapeHtml(heading || '') + '</span>' +
 	      (reading ? '<span class="reading">' + escapeHtml(reading) + '</span>' : '') + '</div>' +
-	      '<div class="head-actions">' + backHtml + audioHtml + closeHtml + '</div></div>' +
+	      '<div class="head-actions">' + audioHtml + renderAnkiButtonHtml(entryIndex) + '</div></div>' +
 	      (secondaryText ? '<div class="lookup-source">' + escapeHtml(secondaryText) + '</div>' : '');
 	  }
 	  function showPopup(anchor, heading, bodyHtml) {
 	    hideAudioSourceMenu();
 	    state.currentAnchor = anchor || null;
-	    popupEl.innerHTML = '<div class="head">' + renderPopupHead(heading || '', '', '', null) + '</div><div class="body">' + bodyHtml + '</div>';
+	    popupEl.innerHTML = '<div class="popup-action-bar">' + renderPopupActionBar() + '</div><div class="popup-scroll"><div class="head">' + renderPopupHead(heading || '', '', '', null, null) + '</div><div class="body">' + bodyHtml + '</div></div>';
 	    markPopupClickable();
 	    popupEl.classList.remove('hidden');
 	    setLookupPopupVisibility(true);
 	    placePopup(anchor);
 	  }
-	  function setPopupBody(bodyHtml, heading, reading, secondaryText, audioData) {
+	  function setPopupBody(bodyHtml, heading, reading, secondaryText, audioData, entryIndex) {
 	    hideAudioSourceMenu();
+	    const actionBar = popupEl.querySelector('.popup-action-bar');
 	    const head = popupEl.querySelector('.head');
 	    const body = popupEl.querySelector('.body');
+	    if (actionBar) actionBar.innerHTML = renderPopupActionBar();
 	    if (head && heading !== undefined) {
-	      head.innerHTML = renderPopupHead(heading || '', reading || '', secondaryText || '', audioData || null);
+	      head.innerHTML = renderPopupHead(heading || '', reading || '', secondaryText || '', audioData || null, entryIndex);
 	    }
     if (body) body.innerHTML = bodyHtml;
     markPopupClickable();
@@ -1613,7 +1772,10 @@
     const gap = Math.max(12, Number(state.config.popupSubtitleGapPx || 34));
     const scale = Math.max(0.1, Number(state.config.popupScale || 0.92) || 0.92);
     const desiredVh = Math.max(20, Math.min(60, Number(state.config.popupMaxHeightVh || 34)));
-    const desiredMax = Math.floor(window.innerHeight * desiredVh / 100);
+    const configuredHeight = Number(state.config.popupMaxHeight);
+    const desiredMax = Number.isFinite(configuredHeight) && configuredHeight > 0
+      ? Math.max(180, Math.min(1200, configuredHeight))
+      : Math.floor(window.innerHeight * desiredVh / 100);
 
     // Hard rule: choose a non-subtitle region first, then cap the popup height to
     // that region. v1.3.2 accidentally let max-height fall back to the whole
@@ -1762,6 +1924,66 @@
 	  function nodeDataMap(node) {
 	    return (node && typeof node === 'object' && node.data && typeof node.data === 'object') ? node.data : {};
 	  }
+	  const structuredStyleProperties = {
+	    background: 'background',
+	    backgroundColor: 'background-color',
+	    border: 'border',
+	    borderColor: 'border-color',
+	    borderRadius: 'border-radius',
+	    borderStyle: 'border-style',
+	    borderWidth: 'border-width',
+	    color: 'color',
+	    display: 'display',
+	    fontFamily: 'font-family',
+	    fontSize: 'font-size',
+	    fontStyle: 'font-style',
+	    fontWeight: 'font-weight',
+	    height: 'height',
+	    lineHeight: 'line-height',
+	    listStyleType: 'list-style-type',
+	    margin: 'margin',
+	    marginTop: 'margin-top',
+	    marginRight: 'margin-right',
+	    marginBottom: 'margin-bottom',
+	    marginLeft: 'margin-left',
+	    maxHeight: 'max-height',
+	    maxWidth: 'max-width',
+	    minHeight: 'min-height',
+	    minWidth: 'min-width',
+	    opacity: 'opacity',
+	    overflow: 'overflow',
+	    overflowX: 'overflow-x',
+	    overflowY: 'overflow-y',
+	    padding: 'padding',
+	    paddingTop: 'padding-top',
+	    paddingRight: 'padding-right',
+	    paddingBottom: 'padding-bottom',
+	    paddingLeft: 'padding-left',
+	    textAlign: 'text-align',
+	    textDecoration: 'text-decoration',
+	    textEmphasis: 'text-emphasis',
+	    textIndent: 'text-indent',
+	    textTransform: 'text-transform',
+	    verticalAlign: 'vertical-align',
+	    whiteSpace: 'white-space',
+	    width: 'width',
+	    wordBreak: 'word-break',
+	    writingMode: 'writing-mode'
+	  };
+	  function structuredStyleText(style) {
+	    if (!style || typeof style !== 'object' || Array.isArray(style)) return '';
+	    const declarations = [];
+	    Object.keys(style).forEach(key => {
+	      const property = structuredStyleProperties[key];
+	      if (!property) return;
+	      let value = style[key];
+	      if (typeof value === 'number' && /^margin-(?:top|right|bottom|left)$/.test(property)) value = String(value) + 'em';
+	      else value = String(value == null ? '' : value).trim();
+	      if (!value || value.length > 160 || /[;{}<>]/.test(value) || /(?:url|expression)\s*\(|javascript:/i.test(value)) return;
+	      declarations.push(property + ':' + value);
+	    });
+	    return declarations.join(';');
+	  }
 	  function structuredDataAttributes(node, omitTitle) {
 	    if (!node || typeof node !== 'object') return '';
 	    const pairs = [];
@@ -1783,6 +2005,9 @@
 	    Object.keys(attrs).forEach(key => {
 	      if ((!omitTitle && key === 'title') || key.indexOf('data-') === 0) add(key, attrs[key]);
 	    });
+	    const style = structuredStyleText(node.style);
+	    if (style) add('style', style);
+	    if (node.lang && /^[A-Za-z0-9-]{1,24}$/.test(String(node.lang))) add('lang', node.lang);
 	    if (!omitTitle && node.title) add('title', node.title);
 	    return pairs.length ? ' ' + pairs.join(' ') : '';
 	  }
@@ -2322,6 +2547,19 @@
 	    if (!expression) return null;
 	    return { term: expression, reading: String(term.reading || '') };
 	  }
+	  function groupedGlossariesForDisplay(glossaries, limit) {
+	    const groups = [];
+	    const byDictionary = Object.create(null);
+	    glossaries.slice(0, limit).forEach(glossary => {
+	      const dictionary = String((glossary && glossary.dict) || '');
+	      if (!byDictionary[dictionary]) {
+	        byDictionary[dictionary] = { dictionary, glossaries: [] };
+	        groups.push(byDictionary[dictionary]);
+	      }
+	      byDictionary[dictionary].glossaries.push(glossary);
+	    });
+	    return groups;
+	  }
 	  function maybeAutoPlayEntryAudio(stored, entry) {
 	    if (!state.config || !state.config.audioAutoPlay) return;
 	    const data = audioDataForEntry(entry);
@@ -2360,11 +2598,10 @@
 	    }
 	    const maxEntries = Math.max(1, state.config.maxEntries || 3);
 	    const maxGlosses = Math.max(1, state.config.maxGlossesPerEntry || 4);
-    let html = '';
+	    let html = '';
 	    entries.slice(0, maxEntries).forEach((entry, entryIndex) => {
 	      const term = entry.term || {};
 	      html += '<div class="entry">';
-	      html += '<div class="entry-actions"><button type="button" class="anki-add-button" data-anki-entry-index="' + escapeHtml(String(entryIndex)) + '">' + escapeHtml(tr('Add to Anki')) + '</button></div>';
 	      if (term.expression || term.reading) {
 	        const entryHeadword = displayHeadwordForEntry(entry);
 	        const repeatsHeader = entryIndex === 0 &&
@@ -2372,23 +2609,25 @@
 	          compareTextKey(term.reading || '') === compareTextKey(header.reading || '');
 	        if (!repeatsHeader) {
 	          const entryAudio = audioDataForEntry(entry);
-	          html += '<div class="dict-term"><span class="dict-term-text">' + escapeHtml(entryHeadword) + (term.reading ? '<span class="dict-reading">' + escapeHtml(term.reading) + '</span>' : '') + '</span>' + (entryAudio ? renderAudioButtonHtml(entryAudio.term, entryAudio.reading) : '') + '</div>';
+	          html += '<div class="dict-term"><span class="dict-term-text">' + escapeHtml(entryHeadword) + (term.reading ? '<span class="dict-reading">' + escapeHtml(term.reading) + '</span>' : '') + '</span><span class="dict-term-actions">' + (entryAudio ? renderAudioButtonHtml(entryAudio.term, entryAudio.reading) : '') + renderAnkiButtonHtml(entryIndex) + '</span></div>';
 	        }
 	      }
 	      html += renderEntryMetadata(term);
       const glossaries = Array.isArray(term.glossaries) ? term.glossaries : [];
-      glossaries.slice(0, maxGlosses).forEach(g => {
-        html += '<div class="dict-section" data-dictionary="' + escapeHtml(String(g.dict || '')) + '">';
-        html += '<div class="dict-header">';
-        if (g.dict) html += '<span class="dict-name">' + escapeHtml(g.dict) + '</span>';
-        html += '</div>';
-        html += renderGlossaryPayload(g);
-        html += '</div>';
+      groupedGlossariesForDisplay(glossaries, maxGlosses).forEach(group => {
+        const dictionaryLabel = group.dictionary || tr('Dictionary');
+        html += '<details class="dict-section" data-dictionary="' + escapeHtml(group.dictionary) + '" open>';
+        html += '<summary class="dict-header"><span class="dict-name">' + escapeHtml(dictionaryLabel) + '</span></summary>';
+        html += '<div class="dict-section-body">';
+        group.glossaries.forEach(g => {
+          html += '<div class="dict-glossary">' + renderGlossaryPayload(g) + '</div>';
+        });
+        html += '</div></details>';
       });
       if (Array.isArray(entry.trace) && entry.trace.length) html += '<div class="trace">' + escapeHtml(entry.trace.map(t => t.name || '').filter(Boolean).join(' → ')) + '</div>';
       html += '</div>';
     });
-	    setPopupBody(html, header.heading, header.reading, header.secondary, headerAudio);
+	    setPopupBody(html, header.heading, header.reading, header.secondary, headerAudio, 0);
 	    if (!options.nested) maybeAutoPlayEntryAudio(stored, first);
 	  }
 
@@ -2519,6 +2758,7 @@
     }
     const previous = state.currentLookupStored;
     if (previous) state.nestedLookupHistory.push(previous);
+    state.nestedLookupForwardHistory = [];
     const stored = {
       ok: true,
       position: state.currentPos,
@@ -2526,6 +2766,7 @@
       nestedText: String(payload.text || ''),
       result: payload.result || {}
     };
+    state.currentLookupStored = stored;
     renderStoredLookup(stored, { nested: true });
   });
 
@@ -2551,9 +2792,7 @@
     state.ankiPendingButton = null;
     if (button) {
       button.disabled = false;
-      button.textContent = payload.ok ? tr('Added') : tr('Try Again');
-      button.classList.remove('success', 'error');
-      button.classList.add(payload.ok ? 'success' : 'error');
+      setAnkiButtonState(button, payload.ok ? 'success' : 'error', payload.ok ? tr('Added') : tr('Try Again'));
     }
     setStatus({
       message: String(payload.message || payload.error || (payload.ok ? tr('Added to Anki.') : tr('Anki export failed.'))),
