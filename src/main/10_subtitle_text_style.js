@@ -251,11 +251,9 @@ function replayCurrentSubtitle() {
 function canHideNativeSubtitlesForCurrentLanguage() {
   if (!lookupBackendReadyForNativeHide) return false;
   try {
-    const language = selectedLanguageModule();
-    const dicts = activeDictionaryPaths(language);
-    if (dictionarySetupMessage(language, dicts)) return false;
-    const ready = activeWorkerReady || readWorkerReady();
-    return !!ready && activeWorkerFingerprint === workerFingerprint(dicts, language) && ready.fingerprint === activeWorkerFingerprint;
+    return !!activeWorkerReady &&
+      !!activeWorkerFingerprint &&
+      activeWorkerReady.fingerprint === activeWorkerFingerprint;
   } catch (_) { return false; }
 }
 function syncNativeSubtitleVisibility() {
@@ -271,7 +269,6 @@ function syncNativeSubtitleVisibility() {
 function pollSubtitle(options) {
   if (!enabled) return;
   refreshPollingInterval();
-  syncNativeSubtitleVisibility();
   const sub = readCurrentSubtitle();
   if (sub && !textSubtitleOverlayPrimed && refreshOverlayForTextSubtitleActivation()) {
     textSubtitleOverlayPrimed = true;

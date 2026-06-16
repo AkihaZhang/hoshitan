@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0-dev.8 - 2026-06-16
+
+- Fixed a high-CPU polling path where native subtitle visibility checks read manifest and worker files on every subtitle timer tick.
+
 ## 0.1.0-dev.7 - 2026-06-16
 
 - Reduced idle CPU use by moving dictionary worker polling from a 2ms busy loop to conservative bounded intervals.

@@ -11,7 +11,7 @@ const info = JSON.parse(fs.readFileSync(path.join(root, 'Info.json'), 'utf8'));
 assert(info.name === 'Hoshitan', 'Plugin display name should use the Hoshitan brand');
 assert(info.identifier === 'io.github.akihazhang.hoshitan', 'Plugin identifier should be independent from upstream');
 assert(info.author && info.author.name === 'AkihaZhang', 'Plugin author metadata should name the fork maintainer');
-assert(info.version === '0.1.0-dev.7', 'Testing builds should use the Hoshitan development version');
+assert(info.version === '0.1.0-dev.8', 'Testing builds should use the Hoshitan development version');
 assert(info.ghRepo === 'AkihaZhang/hoshitan', 'GitHub updates should target the Hoshitan repository');
 assert(info.preferenceDefaults.etymologyCollapseDefault === 'collapsed', 'Etymology should default collapsed globally');
 assert(info.preferenceDefaults.wiktionaryEtymologyCollapseOverride === 'collapsed', 'Wiktionary/Kaikki override should default collapsed');
@@ -169,5 +169,17 @@ assert(/mpv\.command\("sub-seek", \["-1"\]\)/.test(lifecycleSource), 'Subtitle s
 assert(/core\.stop\(\)/.test(lifecycleSource), 'Command-W should use the typed IINA core stop API');
 assert(!/mpv\.command\([^;\n]*\[\s*\]\)/.test(lifecycleSource), 'IINA mpv commands must not receive untyped empty JavaScript arrays');
 assert(!/mpv\.command\([^;\n]*\[\s*-?\d/.test(lifecycleSource), 'IINA mpv command arrays must not contain JavaScript numbers');
+
+const subtitleSource = fs.readFileSync(path.join(root, 'src/main/10_subtitle_text_style.js'), 'utf8');
+const canHideSource = subtitleSource.slice(
+  subtitleSource.indexOf('function canHideNativeSubtitlesForCurrentLanguage()'),
+  subtitleSource.indexOf('function syncNativeSubtitleVisibility()')
+);
+assert(!/activeDictionaryPaths|readManifest|readWorkerReady|file\.read/.test(canHideSource), 'Native subtitle visibility checks must not read files on the subtitle polling hot path');
+const pollSource = subtitleSource.slice(
+  subtitleSource.indexOf('function pollSubtitle(options)'),
+  subtitleSource.indexOf('function charsOf(text)')
+);
+assert(!/syncNativeSubtitleVisibility\(\)/.test(pollSource), 'Subtitle polling must not synchronize native subtitle visibility on every tick');
 
 console.log('settings and menu layout tests passed');

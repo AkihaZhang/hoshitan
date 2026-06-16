@@ -1,6 +1,6 @@
 {
   "name": "hoshitan",
-  "version": "0.1.0-dev.7",
+  "version": "0.1.0-dev.8",
   "private": true,
   "description": "Subtitle dictionary lookup and Anki card creation for IINA",
   "license": "GPL-3.0-only",
