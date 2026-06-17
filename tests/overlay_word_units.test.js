@@ -6,16 +6,21 @@ const { context, overlay } = loadOverlayForTest([
   'renderSubtitle',
   'lookupPreviewForPosition',
   'lookupUnitForPosition',
+  'markPointerMovedForLookup',
   'subtitleEl',
   'popupEl'
 ]);
 overlay.state.enabled = true;
 
-function enter(pos) {
+function enterWithoutMove(pos) {
   const el = overlay.subtitleEl.querySelector('.char.lookupable[data-pos="' + String(pos) + '"]');
   assert(el, 'Expected hoverable element at ' + pos);
   el.listeners.mouseenter({ currentTarget: el });
   return el;
+}
+function enter(pos) {
+  overlay.markPointerMovedForLookup();
+  return enterWithoutMove(pos);
 }
 
 function lookupMessages() {
@@ -69,6 +74,9 @@ assert(overlay.state.currentAnchor === quicklyAnchor, 'Popup anchor should move 
 overlay.renderSubtitle('Witches gather', 10);
 const witchesEnd = 'Witches'.length;
 const beforeWitches = lookupMessages().length;
+overlay.state.lastPointerMoveAt = 0;
+enterWithoutMove(0);
+assert(lookupMessages().length === beforeWitches, 'Idle pointer over a rerendered subtitle should not dispatch lookup');
 enter(0);
 assert(lookupMessages().length === beforeWitches + 1, 'English deinflected word should dispatch one lookup from the word start');
 context.__handlers['line-lookup-result']({

@@ -1,12 +1,6 @@
 function backendInstalled() { try { return file.exists(binPath()); } catch (_) { return false; } }
 async function backendBinaryMatchesBundled() {
-  if (!backendInstalled()) return false;
-  try {
-    const result = await utils.exec("/usr/bin/cmp", ["-s", bundledBinPath(), binPath()], dataRoot());
-    return !!result && result.status === 0;
-  } catch (_) {
-    return false;
-  }
+  return backendInstalled();
 }
 async function ensureBundledBackendInstalled() {
   await ensureDataDirs();
@@ -424,26 +418,31 @@ if [ -z "${"$"}{HOME:-}" ]; then
     mkdir -p "$HOME"
   fi
 fi
-nohup "$BIN" worker "$WORKER_ROOT" --sleep-ms "$SLEEP_MS" > "$LOG" 2>&1 < /dev/null &
+(
+  trap '' HUP
+  exec < /dev/null >> "$LOG" 2>&1
+  for FD_PATH in /dev/fd/*; do
+    FD="${"$"}{FD_PATH##*/}"
+    case "$FD" in
+      ''|*[!0-9]*|0|1|2) continue ;;
+    esac
+    eval "exec ${"$"}{FD}>&-" 2>/dev/null || true
+  done
+  exec "$BIN" worker "$WORKER_ROOT" --sleep-ms "$SLEEP_MS"
+) &
 echo $! > "$PID"
+exit 0
 `;
   file.write(workerStartScriptPath(), script);
-  await execChecked("/bin/chmod", ["755", workerStartScriptPath()]);
 }
 async function stopBackendWorker() {
   try { await ensureDataDirs(); } catch (_) {}
   try { file.write(workerStopPath(), "stop\n"); } catch (_) {}
-  try {
-    if (file.exists(workerPidPath())) {
-      const pid = String(file.read(workerPidPath()) || "").trim();
-      if (/^\d+$/.test(pid)) await utils.exec("/bin/kill", ["-TERM", pid], dataRoot());
-    }
-  } catch (_) {}
   safeDelete(workerPidPath());
   safeDelete(workerReadyPath());
   activeWorkerFingerprint = null;
   activeWorkerReady = null;
-  await sleep(120);
+  await sleep(180);
 }
 function configuredWorkerIdleSleepMs() {
   const value = prefNumber("workerIdleSleepMs", WORKER_IDLE_SLEEP_MS_DEFAULT);
@@ -588,6 +587,7 @@ async function lookupViaWorker(suffix, dicts, scanLength, maxResults, requestId,
   const lang = language || selectedLanguageModule();
   debugVerbose("lookupViaWorker begin requestId=" + String(requestId || "") + " language=" + lang.id + " suffix=" + JSON.stringify(String(suffix || "").slice(0, 80)) + " dicts=" + dicts.length + " mode=" + String(backendMode || "yomitan-japanese") + " directIpc=" + String(prefBool("directWorkerIpc", true)));
   const timeout = Math.max(1500, prefNumber("lookupTimeoutMs", 9000));
+  const clientExecFallbackEnabled = prefBool("fallbackToClientExec", false) && prefBool("allowClientExecLookup", false);
 
   if (prefBool("directWorkerIpc", true)) {
     try {
@@ -595,7 +595,7 @@ async function lookupViaWorker(suffix, dicts, scanLength, maxResults, requestId,
       return result;
     } catch (error) {
       debugWarn("direct worker lookup failed requestId=" + String(requestId || "") + ": " + compactError(error));
-      if (!prefBool("fallbackToClientExec", true)) throw error;
+      if (!clientExecFallbackEnabled) throw error;
     }
   }
 
@@ -733,9 +733,10 @@ async function lookupAtPosition(text, position, requestId) {
     maxResults,
     maxGlossaries
   ].join("\n");
-  if (lookupCache[key]) {
-    debugVerbose("lookupAtPosition cache hit lang=" + language.id + " pos=" + pos + " lookupText=" + JSON.stringify(lookupText) + " noResult=" + String(!!lookupCache[key].noResult) + " cacheKey=" + JSON.stringify(languageCacheKey));
-    return lookupCache[key];
+  const cachedLookup = typeof getLookupCacheValue === "function" ? getLookupCacheValue(key) : lookupCache[key];
+  if (cachedLookup) {
+    debugVerbose("lookupAtPosition cache hit lang=" + language.id + " pos=" + pos + " lookupText=" + JSON.stringify(lookupText) + " noResult=" + String(!!cachedLookup.noResult) + " cacheKey=" + JSON.stringify(languageCacheKey));
+    return cachedLookup;
   }
   debugVerbose("lookupAtPosition cache miss lang=" + language.id + " mode=" + backendMode + " pos=" + pos + " candidateCount=" + candidates.length + " cacheKey=" + JSON.stringify(languageCacheKey) + " candidates=" + JSON.stringify(candidates.map(c => ({ text: c.text, source: c.source, reason: c.reason })).slice(0, 24)));
   let result = null;
@@ -816,7 +817,8 @@ async function lookupAtPosition(text, position, requestId) {
   result.noResult = !candidateUsed && !(result.results && result.results.length);
   result.noResultReason = result.noResult ? "all-candidates-empty" : "";
   result.lookupCacheKey = languageCacheKey;
-  lookupCache[key] = result;
+  if (typeof setLookupCacheValue === "function") setLookupCacheValue(key, result);
+  else lookupCache[key] = result;
   if (result.noResult) debugVerbose("lookupAtPosition cached no-result language=" + language.id + " cacheKey=" + JSON.stringify(languageCacheKey));
   return result;
 }

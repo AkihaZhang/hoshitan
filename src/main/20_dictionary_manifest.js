@@ -12,18 +12,21 @@ const PROFILE_PREFERENCE_DEFAULTS = {
   hideNativeSubtitles: true,
   pauseWhilePopupVisible: true,
   audioAutoPlay: false,
+  audioProbeOnPopup: false,
   audioSourcesJson: DEFAULT_AUDIO_SOURCES_JSON,
   lookupLanguage: "ja",
   scanLength: 24,
   maxEntries: 3,
   maxGlossesPerEntry: 4,
   lookupTimeoutMs: 9000,
-  fontScale: 1.0,
+  fontScale: 0.9,
+  nativeSubtitleScale: 0.72,
   popupScale: 0.92,
   popupMaxWidth: 440,
   popupMaxHeight: 520,
   popupMaxHeightVh: 34,
   popupSubtitleGapPx: 34,
+  popupTopMarginPx: 56,
   popupTheme: "inherit",
   subtitlePollMs: 120,
   etymologyCollapseDefault: "collapsed",
@@ -34,7 +37,8 @@ const PROFILE_PREFERENCE_DEFAULTS = {
   debugLogEnabled: true,
   debugLogVerbose: false,
   directWorkerIpc: true,
-  fallbackToClientExec: true,
+  fallbackToClientExec: false,
+  allowClientExecLookup: false,
   directIpcPollMs: DIRECT_IPC_POLL_MS_DEFAULT,
   workerIdleSleepMs: WORKER_IDLE_SLEEP_MS_DEFAULT
 };
@@ -159,6 +163,10 @@ function normalizeProfilePreferences(prefs) {
     if (Object.prototype.hasOwnProperty.call(prefs, key)) out[key] = prefs[key];
   });
   out.audioAutoPlay = normalizeProfilePreferenceBoolValue(out.audioAutoPlay, PROFILE_PREFERENCE_DEFAULTS.audioAutoPlay);
+  out.audioProbeOnPopup = normalizeProfilePreferenceBoolValue(out.audioProbeOnPopup, PROFILE_PREFERENCE_DEFAULTS.audioProbeOnPopup);
+  out.directWorkerIpc = normalizeProfilePreferenceBoolValue(out.directWorkerIpc, PROFILE_PREFERENCE_DEFAULTS.directWorkerIpc);
+  out.fallbackToClientExec = normalizeProfilePreferenceBoolValue(out.fallbackToClientExec, PROFILE_PREFERENCE_DEFAULTS.fallbackToClientExec);
+  out.allowClientExecLookup = normalizeProfilePreferenceBoolValue(out.allowClientExecLookup, PROFILE_PREFERENCE_DEFAULTS.allowClientExecLookup);
   out.audioSourcesJson = normalizeAudioSourcesJsonPreference(out.audioSourcesJson, !hasAudioSources);
   out.directIpcPollMs = normalizeProfilePreferenceNumberValue(out.directIpcPollMs, DIRECT_IPC_POLL_MS_DEFAULT, DIRECT_IPC_POLL_MS_MIN, DIRECT_IPC_POLL_MS_MAX);
   out.workerIdleSleepMs = normalizeProfilePreferenceNumberValue(out.workerIdleSleepMs, WORKER_IDLE_SLEEP_MS_DEFAULT, WORKER_IDLE_SLEEP_MS_MIN, WORKER_IDLE_SLEEP_MS_MAX);
@@ -503,7 +511,8 @@ function setDictionaryEnabled(name, enabledNow) {
     if (enabledNow) delete profile.disabled[name]; else profile.disabled[name] = true;
   });
   writeManifest(manifest);
-  lookupCache = Object.create(null);
+  if (typeof resetLookupCache === "function") resetLookupCache();
+  else lookupCache = Object.create(null);
   activeWorkerFingerprint = null;
   activeWorkerReady = null;
   stopBackendWorker().catch(() => {});
@@ -517,7 +526,8 @@ function setDictionaryOrder(names) {
     profile.dictionaryOrder = dictionaryOrderWithInstalledNames(names, installedNames);
   });
   writeManifest(manifest);
-  lookupCache = Object.create(null);
+  if (typeof resetLookupCache === "function") resetLookupCache();
+  else lookupCache = Object.create(null);
   activeWorkerFingerprint = null;
   activeWorkerReady = null;
   stopBackendWorker().catch(() => {});
@@ -595,7 +605,8 @@ async function deleteDictionary(name) {
   const deletePath = safeInstalledDictionaryPath(dict.path);
   const removedPath = deletedDictionaryPath(dict.name);
   const names = [dict.name, dict.title, name].filter(Boolean);
-  lookupCache = Object.create(null);
+  if (typeof resetLookupCache === "function") resetLookupCache();
+  else lookupCache = Object.create(null);
   activeWorkerFingerprint = null;
   activeWorkerReady = null;
   stopBackendWorker().catch(error => {
@@ -675,7 +686,8 @@ function uniqueProfileId(base, profiles) {
   return id;
 }
 function resetLookupRuntimeForProfileChange() {
-  lookupCache = Object.create(null);
+  if (typeof resetLookupCache === "function") resetLookupCache();
+  else lookupCache = Object.create(null);
   lookupInFlight = Object.create(null);
   activeWorkerFingerprint = null;
   activeWorkerReady = null;

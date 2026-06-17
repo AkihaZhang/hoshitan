@@ -405,6 +405,7 @@ async function runOverlayPass(worker, cases, scanLength) {
     'state',
     'applyConfig',
     'renderSubtitle',
+    'markPointerMovedForLookup',
     'subtitleEl',
     'popupEl'
   ]);
@@ -429,6 +430,7 @@ async function runOverlayPass(worker, cases, scanLength) {
       if (!el || !el.listeners.mouseenter) throw new Error(`no hoverable element at ${testCase.position}`);
       const sentBefore = context.__sent.length;
       const started = performance.now();
+      overlay.markPointerMovedForLookup();
       el.listeners.mouseenter({ currentTarget: el });
       const lookupMessage = context.__sent.slice(sentBefore).find(message => message.type === 'lookup');
       if (!lookupMessage) throw new Error('overlay did not send lookup message');

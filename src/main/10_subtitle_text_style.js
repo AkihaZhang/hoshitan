@@ -142,24 +142,10 @@ function appearanceHintFromThemeMaterial(value, systemHint) {
   return "";
 }
 async function readMacOSAppearanceHint() {
-  try {
-    const result = await utils.exec("/usr/bin/defaults", ["read", "-g", "AppleInterfaceStyle"], dataRoot());
-    const text = String((result && result.stdout) || "").trim().toLowerCase();
-    return text === "dark" ? "dark" : "light";
-  } catch (_) {
-    return "";
-  }
+  return "";
 }
 async function readIINAAppearanceHint() {
-  try {
-    const result = await utils.exec("/usr/bin/defaults", ["read", "com.colliderli.iina", "themeMaterial"], dataRoot());
-    const raw = String((result && result.stdout) || "").trim();
-    if (!raw) return "";
-    const systemHint = Number(raw) === 4 ? await readMacOSAppearanceHint() : "";
-    return appearanceHintFromThemeMaterial(raw, systemHint);
-  } catch (_) {
-    return "";
-  }
+  return "";
 }
 function scheduleIINAAppearanceHintRefresh(force) {
   const now = Date.now();
@@ -188,12 +174,13 @@ function overlayConfig(options) {
     resolvedUiLanguage: resolvedUiLanguage(),
     language: selectedLanguageOverlayConfig(),
     lookupLanguage: language.id,
-    fontScale: prefNumber("fontScale", 1.0),
+    fontScale: prefNumber("fontScale", 0.9),
     popupScale: prefNumber("popupScale", 0.92),
     popupMaxWidth: Math.max(260, prefNumber("popupMaxWidth", 440)),
     popupMaxHeight: Math.max(180, prefNumber("popupMaxHeight", 520)),
     popupMaxHeightVh: Math.max(20, prefNumber("popupMaxHeightVh", 34)),
     popupSubtitleGapPx: Math.max(12, prefNumber("popupSubtitleGapPx", 34)),
+    popupTopMarginPx: Math.max(0, prefNumber("popupTopMarginPx", 56)),
     popupTheme: normalizePopupThemePreference(pref("popupTheme", "inherit")),
     popupThemeHint: normalizeAppearanceHint(iinaAppearanceHint),
     ...readSubtitleStyleConfig(),
@@ -202,6 +189,7 @@ function overlayConfig(options) {
     scanLength: Math.max(1, prefNumber("scanLength", 24)),
     hoverRequestTimeoutMs: Math.max(1500, prefNumber("hoverRequestTimeoutMs", 15000)),
     audioAutoPlay: prefBool("audioAutoPlay", false),
+    audioProbeOnPopup: prefBool("audioProbeOnPopup", false),
     audioSources: activeWordAudioSources(),
     etymologyCollapseDefault: String(pref("etymologyCollapseDefault", "collapsed") || "collapsed"),
     wiktionaryEtymologyCollapseOverride: String(pref("wiktionaryEtymologyCollapseOverride", "collapsed") || "collapsed"),
@@ -256,9 +244,26 @@ function canHideNativeSubtitlesForCurrentLanguage() {
       activeWorkerReady.fingerprint === activeWorkerFingerprint;
   } catch (_) { return false; }
 }
+function configuredNativeSubtitleScale() {
+  const value = prefNumber("nativeSubtitleScale", 0.72);
+  return Math.max(0.25, Math.min(2.0, Number.isFinite(value) ? value : 0.72));
+}
+function applyNativeSubtitleScale() {
+  if (!enabled) return;
+  try { mpv.set("sub-scale", configuredNativeSubtitleScale()); } catch (error) {
+    console.warn("Could not update native subtitle scale: " + compactError(error));
+  }
+}
+function restoreNativeSubtitleScale() {
+  try {
+    if (nativeSubScaleBeforeEnable !== null) mpv.set("sub-scale", nativeSubScaleBeforeEnable);
+  } catch (_) {}
+  nativeSubScaleBeforeEnable = null;
+}
 function syncNativeSubtitleVisibility() {
   if (!enabled) return;
   try {
+    applyNativeSubtitleScale();
     if (prefBool("hideNativeSubtitles", true) && canHideNativeSubtitlesForCurrentLanguage()) {
       mpv.set("sub-visibility", false);
     } else if (nativeSubVisibilityBeforeEnable !== null) {

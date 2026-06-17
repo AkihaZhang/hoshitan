@@ -22,11 +22,13 @@
       popupMaxHeight: 520,
       popupMaxHeightVh: 34,
       popupSubtitleGapPx: 34,
+      popupTopMarginPx: 56,
       popupTheme: 'inherit',
 	      maxEntries: 3,
 	      maxGlossesPerEntry: 4,
 	      scanLength: 24,
 	      audioAutoPlay: false,
+	      audioProbeOnPopup: false,
 	      audioSources: [],
 	      dictionaryStyles: {},
 	      etymologyCollapseDefault: 'collapsed',
@@ -62,14 +64,21 @@
     nestedLookupRequestId: '',
     nestedLookupRequestSeq: 0,
     audioPlaying: null,
+    audioPlayingKey: '',
     audioPlayRequestSeq: 0,
+    audioPlayInFlightKey: '',
+    audioPlayInFlightStartedAt: 0,
+    audioLastPlayAt: 0,
     audioCache: Object.create(null),
+    audioCacheOrder: [],
     audioProbeCache: Object.create(null),
+    audioProbeCacheOrder: [],
     audioProbeInFlight: Object.create(null),
     audioAutoPlayed: Object.create(null),
     audioSourceRequestSeq: 0,
     pendingAudioSourceRequests: Object.create(null),
     audioSourceMenu: null,
+    lastPointerMoveAt: 0,
     pendingLookupTimers: Object.create(null),
     pendingLookupRequests: Object.create(null),
     charByPos: Object.create(null),
@@ -140,6 +149,10 @@
     return /^(Grammar|Etymology|Details|Note|See also)$/i.test(raw) ? tr(raw) : raw;
   }
   const LOOKUP_RETRY_INTERVAL_MS = 60;
+  const IDLE_HOVER_LOOKUP_MS = 1200;
+  const AUDIO_CACHE_MAX_ENTRIES = 24;
+  const AUDIO_REPEAT_CLICK_THROTTLE_MS = 120;
+  const AUDIO_IN_FLIGHT_DEDUP_MS = 5000;
 	  let customPopupStyleEl = null;
 	  let lastCustomPopupCss = null;
 	  let dictionaryStylesEl = null;
@@ -255,6 +268,35 @@
 	  function audioCacheKey(term, reading, sources) {
 	    return JSON.stringify([String(term || ''), String(reading || ''), audioLanguageCode(), audioSourcesSignature(sources || activeAudioSources())]);
 	  }
+	  function resetAudioCaches() {
+	    state.audioCache = Object.create(null);
+	    state.audioCacheOrder = [];
+	    state.audioProbeCache = Object.create(null);
+	    state.audioProbeCacheOrder = [];
+	    state.audioProbeInFlight = Object.create(null);
+	    state.audioPlayInFlightKey = '';
+	    state.audioPlayInFlightStartedAt = 0;
+	  }
+	  function setBoundedCache(cache, orderName, key, value, limit) {
+	    const order = Array.isArray(state[orderName]) ? state[orderName] : [];
+	    if (Object.prototype.hasOwnProperty.call(cache, key)) {
+	      const index = order.indexOf(key);
+	      if (index >= 0) order.splice(index, 1);
+	    }
+	    cache[key] = value;
+	    order.push(key);
+	    while (order.length > limit) {
+	      const oldest = order.shift();
+	      if (oldest) delete cache[oldest];
+	    }
+	    state[orderName] = order;
+	  }
+	  function setAudioCacheValue(key, value) {
+	    setBoundedCache(state.audioCache, 'audioCacheOrder', key, value, AUDIO_CACHE_MAX_ENTRIES);
+	  }
+	  function setAudioProbeCacheValue(key, value) {
+	    setBoundedCache(state.audioProbeCache, 'audioProbeCacheOrder', key, value, AUDIO_CACHE_MAX_ENTRIES);
+	  }
 	  function audioUrlFromTemplate(template, term, reading) {
 	    const values = {
 	      term: String(term || ''),
@@ -341,6 +383,9 @@
 	  function urlLooksLikeAudioFile(url) {
 	    return /\.(?:mp3|m4a|aac|ogg|oga|opus|wav|webm)(?:[?#]|$)/i.test(String(url || ''));
 	  }
+	  function isPluginAudioBridgeSourceUrl(url) {
+	    return /^http:\/\/127\.0\.0\.1:19742\/localaudio\/?\?/i.test(String(url || ''));
+	  }
 	  function directAudioCandidateForSource(source, sourceUrl) {
 	    return [{ url: sourceUrl, name: normalizeWhitespace(source && source.name || '') }];
 	  }
@@ -348,15 +393,15 @@
 	    const sourceUrl = safeAudioUrl(audioUrlFromTemplate(source && source.url, term, reading), '');
 	    if (!sourceUrl) return [];
 	    if (urlLooksLikeAudioFile(sourceUrl)) return directAudioCandidateForSource(source, sourceUrl);
-	    const bridgeResult = await requestAudioCandidatesFromPlugin(sourceUrl);
-	    if (bridgeResult && bridgeResult.ok && Array.isArray(bridgeResult.candidates)) {
-	      const candidates = normalizeAudioCandidateList(bridgeResult.candidates, sourceUrl);
-	      overlayDebug("audio source bridge resolved url=" + JSON.stringify(sourceUrl) + " candidates=" + candidates.length);
-	      return candidates;
-	    }
-	    if (bridgeResult && bridgeResult.ok === false) {
-	      overlayDebug("audio source bridge failed url=" + JSON.stringify(sourceUrl) + " error=" + JSON.stringify(String(bridgeResult.error || "")));
-	      return directAudioCandidateForSource(source, sourceUrl);
+	    if (isPluginAudioBridgeSourceUrl(sourceUrl)) {
+	      const bridgeResult = await requestAudioCandidatesFromPlugin(sourceUrl);
+	      if (bridgeResult && bridgeResult.ok && Array.isArray(bridgeResult.candidates)) {
+	        const candidates = normalizeAudioCandidateList(bridgeResult.candidates, sourceUrl);
+	        overlayDebug("local audio bridge resolved url=" + JSON.stringify(sourceUrl) + " candidates=" + candidates.length);
+	        return candidates;
+	      }
+	      overlayDebug("local audio bridge failed url=" + JSON.stringify(sourceUrl) + " error=" + JSON.stringify(String((bridgeResult && bridgeResult.error) || "")));
+	      return [];
 	    }
 	    try {
 	      const text = await fetchTextWithTimeout(sourceUrl, Math.min(8000, Math.max(2500, Number(state.config.hoverRequestTimeoutMs || 5000))));
@@ -409,14 +454,26 @@
 	    if (typeof Audio !== 'function') throw new Error('Audio playback unavailable');
 	    const audio = new Audio(url);
 	    try { audio.preload = 'auto'; } catch (_) {}
-	    await waitForAudioData(audio, Math.min(9000, Math.max(2500, Number(state.config.hoverRequestTimeoutMs || 5000))));
-	    return audio;
+	    try {
+	      await waitForAudioData(audio, Math.min(9000, Math.max(2500, Number(state.config.hoverRequestTimeoutMs || 5000))));
+	      return audio;
+	    } catch (error) {
+	      disposeAudio(audio);
+	      throw error;
+	    }
+	  }
+	  function disposeAudio(audio) {
+	    if (!audio) return;
+	    try { audio.pause(); } catch (_) {}
+	    try { audio.removeAttribute('src'); } catch (_) {}
+	    try { audio.src = ''; } catch (_) {}
+	    try { if (typeof audio.load === 'function') audio.load(); } catch (_) {}
 	  }
 	  function stopCurrentAudio() {
 	    const audio = state.audioPlaying;
-	    if (!audio) return;
-	    try { audio.pause(); } catch (_) {}
+	    if (audio) disposeAudio(audio);
 	    state.audioPlaying = null;
+	    state.audioPlayingKey = '';
 	  }
 	  function cancelPendingAudioSourceRequests() {
 	    Object.keys(state.pendingAudioSourceRequests || {}).forEach(requestId => {
@@ -455,11 +512,27 @@
 	          const audio = await createPlayableAudio(candidate.url);
 	          const sourceName = candidate.name || source.name || ('Source ' + String(sourceIndex + 1));
 	          const result = { url: candidate.url, sourceIndex, candidateIndex, sourceName };
-	          state.audioCache[cacheKey] = result;
+	          setAudioCacheValue(cacheKey, result);
 	          return Object.assign({}, result, { audio });
 	        } catch (error) {
 	          overlayDebug("audio candidate failed url=" + JSON.stringify(candidate.url) + " error=" + String(error && error.message ? error.message : error));
 	        }
+	      }
+	    }
+	    return null;
+	  }
+	  async function findAudioProbeCandidate(term, reading, sources) {
+	    const configuredSources = sources || activeAudioSources();
+	    const cacheKey = audioCacheKey(term, reading, configuredSources);
+	    const cached = state.audioCache[cacheKey];
+	    if (cached && cached.url) return Object.assign({}, cached);
+	    for (let sourceIndex = 0; sourceIndex < configuredSources.length; sourceIndex++) {
+	      const source = configuredSources[sourceIndex];
+	      const candidates = await resolveAudioCandidateUrls(source, term, reading);
+	      if (candidates.length) {
+	        const candidate = candidates[0];
+	        const sourceName = candidate.name || source.name || ('Source ' + String(sourceIndex + 1));
+	        return { url: candidate.url, sourceIndex, candidateIndex: 0, sourceName };
 	      }
 	    }
 	    return null;
@@ -470,13 +543,38 @@
 	    reading = String(reading || '').trim();
 	    const sources = Array.isArray(options.sources) ? normalizeAudioSources(options.sources) : activeAudioSources();
 	    if (!term || !sources.length) return false;
-	    const requestSeq = ++state.audioPlayRequestSeq;
 	    const key = audioTermReadingKey(term, reading);
+	    const playKey = audioCacheKey(term, reading, sources);
 	    if (button) button.dataset.audioKey = key;
+	    const now = Date.now();
+	    if (state.audioPlayInFlightKey === playKey && now - Number(state.audioPlayInFlightStartedAt || 0) < AUDIO_IN_FLIGHT_DEDUP_MS) {
+	      setAudioButtonsStateForKey(key, 'loading', 'Finding audio...');
+	      return false;
+	    }
+	    if (state.audioPlaying && state.audioPlayingKey === playKey) {
+	      if (now - Number(state.audioLastPlayAt || 0) < AUDIO_REPEAT_CLICK_THROTTLE_MS) return true;
+	      try { state.audioPlaying.currentTime = 0; } catch (_) {}
+	      try { state.audioPlaying.volume = 1; } catch (_) {}
+	      state.audioLastPlayAt = now;
+	      setAudioButtonsStateForKey(key, 'ready', 'Play audio');
+	      const replayPromise = state.audioPlaying.play();
+	      if (replayPromise && typeof replayPromise.then === 'function') {
+	        await replayPromise.catch(error => {
+	          overlayDebug("audio replay promise rejected " + String(error && error.message ? error.message : error));
+	        });
+	      }
+	      return true;
+	    }
+	    const requestSeq = ++state.audioPlayRequestSeq;
+	    state.audioPlayInFlightKey = playKey;
+	    state.audioPlayInFlightStartedAt = now;
 	    setAudioButtonsStateForKey(key, 'loading', 'Finding audio...');
 	    try {
 	      const result = await findPlayableAudio(term, reading, sources);
-	      if (requestSeq !== state.audioPlayRequestSeq) return false;
+	      if (requestSeq !== state.audioPlayRequestSeq) {
+	        disposeAudio(result && result.audio);
+	        return false;
+	      }
 	      if (!result || !result.audio) {
 	        setAudioButtonsStateForKey(key, 'missing', 'Could not find audio');
 	        return false;
@@ -486,6 +584,8 @@
 	      try { audio.currentTime = 0; } catch (_) {}
 	      try { audio.volume = 1; } catch (_) {}
 	      state.audioPlaying = audio;
+	      state.audioPlayingKey = playKey;
+	      state.audioLastPlayAt = Date.now();
 	      setAudioButtonsStateForKey(key, 'ready', 'Play audio\nFrom ' + String(result.sourceName || 'audio source'));
 	      const playPromise = audio.play();
 	      if (playPromise && typeof playPromise.then === 'function') {
@@ -499,6 +599,10 @@
 	      setAudioButtonsStateForKey(key, 'missing', 'Could not find audio');
 	      return false;
 	    } finally {
+	      if (state.audioPlayInFlightKey === playKey) {
+	        state.audioPlayInFlightKey = '';
+	        state.audioPlayInFlightStartedAt = 0;
+	      }
 	      try {
 	        if (button && button.dataset.audioState === 'loading') delete button.dataset.audioState;
 	      } catch (_) {}
@@ -868,6 +972,14 @@
     return fallback || null;
   }
 
+  function markPointerMovedForLookup() {
+    state.lastPointerMoveAt = Date.now();
+  }
+
+  function pointerFreshForLookup() {
+    return Date.now() - Number(state.lastPointerMoveAt || 0) <= IDLE_HOVER_LOOKUP_MS;
+  }
+
   function applyConfig(config) {
     const previousAudioSignature = audioSourcesSignature(activeAudioSources());
     state.config = Object.assign({}, state.config, config || {});
@@ -875,9 +987,7 @@
     state.config.popupTheme = normalizePopupTheme(state.config.popupTheme);
     state.config.audioSources = normalizeAudioSources(state.config.audioSources);
     if (previousAudioSignature !== audioSourcesSignature(state.config.audioSources)) {
-      state.audioCache = Object.create(null);
-      state.audioProbeCache = Object.create(null);
-      state.audioProbeInFlight = Object.create(null);
+      resetAudioCaches();
     }
     ensurePopupThemeHintListener();
     applyPopupTheme(state.config.popupTheme);
@@ -1087,6 +1197,10 @@
 
   function onCharEnter(ev) {
     cancelHidePopupTimer();
+    if (!pointerFreshForLookup()) {
+      overlayDebug("char enter ignored because pointer is idle lineId=" + state.lineId);
+      return;
+    }
     const target = ev.currentTarget;
     const rawPos = Number(target.dataset.pos || 0);
     const unit = lookupUnitForPosition(rawPos);
@@ -1433,6 +1547,8 @@
       if (path.includes(popupEl)) trapPopupWheel(ev);
     }
   }, { passive: false, capture: true });
+  document.addEventListener('mousemove', markPointerMovedForLookup, { passive: true, capture: true });
+  window.addEventListener('pointermove', markPointerMovedForLookup, { passive: true });
   function ensureBridgeSocket() {
     if (!state.bridgePort) return;
     if (state.bridgeSocket && (state.bridgeSocket.readyState === WebSocket.OPEN || state.bridgeSocket.readyState === WebSocket.CONNECTING)) return;
@@ -1674,18 +1790,17 @@
 	      }
 	      state.audioProbeInFlight[selectedCacheKey] = true;
 	      setAudioButtonsStateForKey(selectedKey, 'loading', 'Finding audio...');
-	      findPlayableAudio(selectedTerm, selectedReading, sources).then(result => {
-	        if (result && result.audio) {
-	          try { result.audio.pause(); } catch (_) {}
+	      findAudioProbeCandidate(selectedTerm, selectedReading, sources).then(result => {
+	        if (result && result.url) {
 	          const title = 'Play audio\nFrom ' + String(result.sourceName || 'audio source');
-	          state.audioProbeCache[selectedCacheKey] = { status: 'ready', title };
+	          setAudioProbeCacheValue(selectedCacheKey, { status: 'ready', title });
 	          setAudioButtonsStateForKey(selectedKey, 'ready', title);
 	        } else {
-	          state.audioProbeCache[selectedCacheKey] = { status: 'missing', title: 'Could not find audio' };
+	          setAudioProbeCacheValue(selectedCacheKey, { status: 'missing', title: 'Could not find audio' });
 	          setAudioButtonsStateForKey(selectedKey, 'missing', 'Could not find audio');
 	        }
 	      }).catch(() => {
-	        state.audioProbeCache[selectedCacheKey] = { status: 'missing', title: 'Could not find audio' };
+	        setAudioProbeCacheValue(selectedCacheKey, { status: 'missing', title: 'Could not find audio' });
 	        setAudioButtonsStateForKey(selectedKey, 'missing', 'Could not find audio');
 	      }).finally(() => {
 	        delete state.audioProbeInFlight[selectedCacheKey];
@@ -1706,7 +1821,7 @@
 	          showAudioSourceMenu(button, event);
 	        });
 	      });
-	      setTimeout(probePopupAudioButtons, 0);
+	      if (state.config && state.config.audioProbeOnPopup) setTimeout(probePopupAudioButtons, 0);
 	    } catch (_) {}
 	  }
 	  function popupToolbarButton(action, label, path, disabled) {
@@ -1769,6 +1884,7 @@
     const rect = anchor.getBoundingClientRect();
     const sub = visibleSubtitleRect();
     const margin = 12;
+    const topMargin = Math.max(margin, Math.min(180, Number(state.config.popupTopMarginPx || 56)));
     const gap = Math.max(12, Number(state.config.popupSubtitleGapPx || 34));
     const scale = Math.max(0.1, Number(state.config.popupScale || 0.92) || 0.92);
     const desiredVh = Math.max(20, Math.min(60, Number(state.config.popupMaxHeightVh || 34)));
@@ -1780,14 +1896,14 @@
     // Hard rule: choose a non-subtitle region first, then cap the popup height to
     // that region. v1.3.2 accidentally let max-height fall back to the whole
     // window, which could make a tall popup overlap the subtitle band.
-    const availableAbove = Math.max(0, sub.top - margin - gap);
+    const availableAbove = Math.max(0, sub.top - topMargin - gap);
     const availableBelow = Math.max(0, window.innerHeight - sub.bottom - margin - gap);
     let placeAbove = true;
     if (availableAbove < 90 && availableBelow > availableAbove) placeAbove = false;
     else if (availableAbove < 160 && availableBelow > 220) placeAbove = false;
     else placeAbove = true; // subtitles are usually at the bottom; keep the popup above.
 
-    let regionTop = placeAbove ? margin : sub.bottom + gap;
+    let regionTop = placeAbove ? topMargin : sub.bottom + gap;
     let regionBottom = placeAbove ? sub.top - gap : window.innerHeight - margin;
     if (regionBottom - regionTop < 80) {
       // Fallback: use the larger side, still outside the subtitle if possible.
@@ -1797,8 +1913,8 @@
         regionBottom = window.innerHeight - margin;
       } else {
         placeAbove = true;
-        regionTop = margin;
-        regionBottom = Math.max(margin + 80, sub.top - gap);
+        regionTop = topMargin;
+        regionBottom = Math.max(topMargin + 80, sub.top - gap);
       }
     }
 
@@ -1821,7 +1937,7 @@
     // the word being studied while still leaving the subtitle band unobstructed.
     let top = placeAbove ? (regionBottom - popupH) : regionTop;
     top = Math.max(regionTop, Math.min(top, regionBottom - popupH));
-    top = Math.max(margin, Math.min(top, window.innerHeight - popupH - margin));
+    top = Math.max(topMargin, Math.min(top, window.innerHeight - popupH - margin));
 
     // Absolute last safety check: if the computed rect still overlaps subtitles,
     // shrink to fit the upper region and keep its bottom above the subtitle.
@@ -1829,7 +1945,7 @@
     if (overlaps && availableAbove > 80) {
       const safeHeight = Math.max(80, Math.min(desiredMax, availableAbove));
       document.documentElement.style.setProperty('--popup-max-height', String(Math.floor(safeHeight / scale)) + 'px');
-      top = Math.max(margin, sub.top - gap - safeHeight);
+      top = Math.max(topMargin, sub.top - gap - safeHeight);
     }
 
     popupEl.style.left = left + 'px';

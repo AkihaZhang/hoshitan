@@ -249,12 +249,7 @@ function languageLabelForUi(language) {
 }
 async function refreshSystemUiLanguage() {
   if (configuredUiLanguage() !== "auto") return resolvedUiLanguage();
-  let detected = "en";
-  try {
-    const result = await utils.exec("/usr/bin/defaults", ["read", "-g", "AppleLanguages"], dataRoot());
-    const output = String(result && result.stdout || "");
-    if (/zh[-_](?:Hans|CN)|\"zh\"/i.test(output)) detected = "zh-CN";
-  } catch (_) {}
+  const detected = detectedSystemUiLanguage;
   if (detected !== detectedSystemUiLanguage) {
     detectedSystemUiLanguage = detected;
     try { rebuildMenu(); } catch (_) {}

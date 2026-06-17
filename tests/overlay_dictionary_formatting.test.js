@@ -55,6 +55,16 @@ const scaledPopupTop = Number.parseFloat(context.__elements.popup.style.top);
 assert(scaledPopupTop + context.__elements.popup._rect.height <= context.__elements.subtitle._rect.top - 34 + 0.001, 'Scaled popup should stay above the subtitle-safe region');
 assert(context.document.documentElement.style['--popup-max-height'] === '433px', 'Scaled popup max-height should reserve visual room after CSS transform');
 
+context.window.innerHeight = 700;
+context.__elements.subtitle._rect = { left: 0, top: 260, right: 1200, bottom: 340, width: 1200, height: 80 };
+context.__elements.popup._rect = { left: 0, top: 0, right: 528, bottom: 260, width: 528, height: 260 };
+const topMarginAnchor = context.document.createElement('span');
+topMarginAnchor._rect = { left: 420, top: 270, right: 460, bottom: 330, width: 40, height: 60 };
+overlay.applyConfig({ popupScale: 1, popupMaxHeight: 500, popupSubtitleGapPx: 34, popupTopMarginPx: 72 });
+overlay.placePopup(topMarginAnchor);
+const safePopupTop = Number.parseFloat(context.__elements.popup.style.top);
+assert(safePopupTop >= 72, 'Popup top safe margin should keep the action bar below the window chrome');
+
 const header = overlay.displayHeaderForResult({
   text: 'I was juster',
   lookupStart: 6,

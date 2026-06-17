@@ -202,6 +202,7 @@ function setEnabled(next) {
     const dicts = activeDictionaryPaths(language);
     try {
       nativeSubVisibilityBeforeEnable = mpv.getFlag("sub-visibility");
+      nativeSubScaleBeforeEnable = mpv.getString("sub-scale");
       syncNativeSubtitleVisibility();
     } catch (error) { console.warn("Could not update native subtitle visibility: " + compactError(error)); }
     overlay.show();
@@ -216,6 +217,7 @@ function setEnabled(next) {
       lookupBackendReadyForNativeHide = false;
       debugError("Dictionary lookup startup failed language=" + language.id + ": " + compactError(error));
       try { if (nativeSubVisibilityBeforeEnable !== null) mpv.set("sub-visibility", nativeSubVisibilityBeforeEnable); } catch (_) {}
+      restoreNativeSubtitleScale();
       setOverlayStatus(compactError(error), "error", 14000);
     });
   } else {
@@ -224,6 +226,7 @@ function setEnabled(next) {
     stopPolling();
     publishSubtitle("");
     try { if (nativeSubVisibilityBeforeEnable !== null) mpv.set("sub-visibility", nativeSubVisibilityBeforeEnable); } catch (_) {}
+    restoreNativeSubtitleScale();
     showOSD(t("state.off"));
   }
 }

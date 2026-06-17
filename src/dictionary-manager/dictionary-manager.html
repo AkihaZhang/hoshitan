@@ -406,8 +406,12 @@
           </select>
         </div>
         <div class="field">
-          <label for="fontScale">Subtitle size</label>
-          <input id="fontScale" data-profile-pref="fontScale" type="number" min="0.5" max="2.0" step="0.05">
+          <label for="fontScale">Hoshitan subtitle size</label>
+          <input id="fontScale" data-profile-pref="fontScale" type="number" min="0.3" max="2.0" step="0.05">
+        </div>
+        <div class="field">
+          <label for="nativeSubtitleScale">IINA subtitle size</label>
+          <input id="nativeSubtitleScale" data-profile-pref="nativeSubtitleScale" type="number" min="0.25" max="2.0" step="0.05">
         </div>
         <div class="field">
           <label for="popupScale">Popup size</label>
@@ -424,6 +428,10 @@
         <div class="field">
           <label for="popupSubtitleGapPx">Gap above subtitles (px)</label>
           <input id="popupSubtitleGapPx" data-profile-pref="popupSubtitleGapPx" type="number" min="12" max="96" step="1">
+        </div>
+        <div class="field">
+          <label for="popupTopMarginPx">Popup top margin (px)</label>
+          <input id="popupTopMarginPx" data-profile-pref="popupTopMarginPx" type="number" min="12" max="180" step="1">
         </div>
         <div class="field">
           <label for="subtitlePollMs">Subtitle refresh interval (ms)</label>
@@ -542,6 +550,7 @@
       <h3>Playback</h3>
       <div class="form-grid">
         <label class="check-field"><input data-profile-pref="audioAutoPlay" type="checkbox"><span>Play first result audio automatically</span></label>
+        <label class="check-field"><input data-profile-pref="audioProbeOnPopup" type="checkbox"><span>Probe first result audio on popup</span></label>
       </div>
 
       <h3>Online Audio Sources</h3>
@@ -583,7 +592,7 @@
       <h3>Worker</h3>
       <div class="form-grid">
         <label class="check-field"><input data-profile-pref="directWorkerIpc" type="checkbox"><span>Use direct worker IPC</span></label>
-        <label class="check-field"><input data-profile-pref="fallbackToClientExec" type="checkbox"><span>Fall back to client executable lookup</span></label>
+        <label class="check-field"><input data-profile-pref="allowClientExecLookup" type="checkbox"><span>Allow client executable lookup fallback</span></label>
         <div class="field">
           <label for="directIpcPollMs">Direct IPC poll interval (ms)</label>
           <input id="directIpcPollMs" data-profile-pref="directIpcPollMs" type="number" min="16" max="250" step="1">
@@ -644,10 +653,13 @@
         'Dark': '深色',
         'Light': '浅色',
         'Subtitle size': '字幕大小',
+        'Hoshitan subtitle size': 'Hoshitan 字幕大小',
+        'IINA subtitle size': 'IINA 原生字幕大小',
         'Popup size': '弹窗大小',
         'Popup width (px)': '弹窗宽度（像素）',
         'Popup height (px)': '弹窗高度（像素）',
         'Gap above subtitles (px)': '字幕上方间距（像素）',
+        'Popup top margin (px)': '弹窗顶部安全边距（像素）',
         'Subtitle refresh interval (ms)': '字幕刷新间隔（毫秒）',
         'Entry Sections': '词条分区',
         'Etymology sections': '词源分区',
@@ -688,6 +700,7 @@
         'Screenshot, word audio, and sentence audio are generated only when a note field maps to their corresponding English placeholder.': '仅当笔记字段映射到相应英文占位符时，才会生成截图、单词音频和句子音频。',
         'Playback': '播放',
         'Play first result audio automatically': '自动播放第一条结果的音频',
+        'Probe first result audio on popup': '弹窗打开时检测第一条结果音频',
         'Online Audio Sources': '在线音频源',
         'Yomitan audio source endpoints and direct audio URL templates are supported.': '支持 Yomitan 音频源端点和直接音频 URL 模板。',
         'Add source': '添加音频源',
@@ -705,6 +718,7 @@
         'Worker': '工作进程',
         'Use direct worker IPC': '使用工作进程直接通信',
         'Fall back to client executable lookup': '失败时回退到客户端进程查词',
+        'Allow client executable lookup fallback': '允许回退到客户端进程查词',
         'Direct IPC poll interval (ms)': '直接通信轮询间隔（毫秒）',
         'Worker idle sleep interval (ms)': '工作进程空闲休眠间隔（毫秒）',
         'Diagnostics': '诊断',

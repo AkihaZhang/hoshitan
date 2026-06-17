@@ -224,7 +224,8 @@ async function runLookupPerformanceBenchmark() {
     const dicts = activeDictionaryPaths(language);
     if (!dicts.length) throw new Error("No enabled dictionaries installed.");
     await ensureBackendWorker(dicts, language);
-    lookupCache = Object.create(null);
+    if (typeof resetLookupCache === "function") resetLookupCache();
+    else lookupCache = Object.create(null);
 
     const cases = lookupBenchmarkCases();
     const seqSamples = [];
@@ -244,7 +245,8 @@ async function runLookupPerformanceBenchmark() {
     logTimingSummary(seqSummary);
     debugLog("BENCH sequential wallMs=" + seqSummary.wallMs);
 
-    lookupCache = Object.create(null);
+    if (typeof resetLookupCache === "function") resetLookupCache();
+    else lookupCache = Object.create(null);
     const burstCases = cases.slice(0, 40);
     const burstStart = Date.now();
     const burstSamples = await Promise.all(burstCases.map(async (c, i) => {

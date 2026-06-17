@@ -10,7 +10,7 @@
 
 const { core, mpv, event, overlay, menu, input, ws, preferences, console, file, http, utils, standaloneWindow } = iina;
 
-const VERSION = "0.1.0-dev.8";
+const VERSION = "0.1.0-dev.10";
 const RECOMMENDED_JITENDEX_URL = "https://github.com/stephenmk/stephenmk.github.io/releases/latest/download/jitendex-yomitan.zip";
 
 let enabled = false;
@@ -25,9 +25,13 @@ let lastSubtitle = null;
 let subtitleEmptySince = 0;
 let lastSubtitlePublishedAt = 0;
 let nativeSubVisibilityBeforeEnable = null;
+let nativeSubScaleBeforeEnable = null;
 let requestSerial = 0;
 let lookupInFlight = Object.create(null);
 let lookupCache = Object.create(null);
+let lookupCacheOrder = [];
+let lookupCacheSizes = Object.create(null);
+let lookupCacheBytes = 0;
 let statusTimer = null;
 let workerStartInFlight = null;
 let activeWorkerFingerprint = null;
@@ -69,6 +73,8 @@ const LOOKUP_POPUP_RESUME_DELAY_MS = 90;
 const SUBTITLE_EMPTY_GRACE_MS = 260;
 const SUBTITLE_REPLAY_INTERVAL_MS = 1500;
 const DICTIONARY_STYLES_CACHE_MS = 30000;
+const LOOKUP_CACHE_MAX_ENTRIES = 24;
+const LOOKUP_CACHE_MAX_BYTES = 2 * 1024 * 1024;
 
 function pref(key, fallback) {
   const value = preferences.get(key);
@@ -93,6 +99,49 @@ function prefBool(key, fallback) {
 function prefNumber(key, fallback) {
   const value = Number(pref(key, fallback));
   return Number.isFinite(value) ? value : fallback;
+}
+function resetLookupCache() {
+  lookupCache = Object.create(null);
+  lookupCacheOrder = [];
+  lookupCacheSizes = Object.create(null);
+  lookupCacheBytes = 0;
+}
+function approximateLookupCacheBytes(value) {
+  try { return JSON.stringify(value || null).length; } catch (_) { return 0; }
+}
+function touchLookupCacheKey(key) {
+  const index = lookupCacheOrder.indexOf(key);
+  if (index >= 0) lookupCacheOrder.splice(index, 1);
+  lookupCacheOrder.push(key);
+}
+function pruneLookupCache() {
+  while (lookupCacheOrder.length > LOOKUP_CACHE_MAX_ENTRIES || lookupCacheBytes > LOOKUP_CACHE_MAX_BYTES) {
+    const oldest = lookupCacheOrder.shift();
+    if (!oldest) break;
+    if (Object.prototype.hasOwnProperty.call(lookupCache, oldest)) delete lookupCache[oldest];
+    lookupCacheBytes -= Number(lookupCacheSizes[oldest] || 0);
+    delete lookupCacheSizes[oldest];
+  }
+  if (lookupCacheBytes < 0) lookupCacheBytes = 0;
+}
+function getLookupCacheValue(key) {
+  if (!Object.prototype.hasOwnProperty.call(lookupCache, key)) return null;
+  touchLookupCacheKey(key);
+  return lookupCache[key];
+}
+function setLookupCacheValue(key, value) {
+  if (Object.prototype.hasOwnProperty.call(lookupCache, key)) {
+    lookupCacheBytes -= Number(lookupCacheSizes[key] || 0);
+  }
+  lookupCache[key] = value;
+  const bytes = approximateLookupCacheBytes(value);
+  lookupCacheSizes[key] = bytes;
+  lookupCacheBytes += bytes;
+  touchLookupCacheKey(key);
+  pruneLookupCache();
+}
+function lookupCacheStats() {
+  return { entries: lookupCacheOrder.length, bytes: lookupCacheBytes };
 }
 function compactError(error) {
   const msg = error && error.message ? String(error.message) : String(error || "Unknown error");
@@ -351,8 +400,32 @@ async function execChecked(command, args, cwd, stdoutHook, stderrHook) {
   }
   return result;
 }
+function tryCreateDirectory(path) {
+  const target = String(path || "");
+  if (!target) return false;
+  try { if (file.exists(target)) return true; } catch (_) {}
+  const names = ["createDirectory", "mkdir", "makeDirectory"];
+  for (const name of names) {
+    try {
+      if (file && typeof file[name] === "function") {
+        file[name](target);
+        if (file.exists(target)) return true;
+      }
+    } catch (_) {}
+  }
+  return false;
+}
 async function ensureDataDirs() {
-  await execChecked("/bin/mkdir", ["-p", dataRoot(), pathJoin(dataRoot(), "bin"), dictRoot(), downloadRoot(), buildRoot(), workerRoot(), workerQueueDir(), workerResponseDir(), workerStateDir()]);
+  const dirs = [dataRoot(), pathJoin(dataRoot(), "bin"), dictRoot(), downloadRoot(), buildRoot(), workerRoot(), workerQueueDir(), workerResponseDir(), workerStateDir()];
+  const missing = [];
+  for (const dir of dirs) {
+    try {
+      if (file.exists(dir)) continue;
+      if (tryCreateDirectory(dir)) continue;
+    } catch (_) {}
+    missing.push(dir);
+  }
+  if (missing.length) await execChecked("/bin/mkdir", ["-p"].concat(missing));
 }
 function safeDelete(path) { try { if (file.exists(path)) file.delete(path); } catch (_) {} }
 async function clearDirFiles(dir) {
@@ -1729,24 +1802,10 @@ function appearanceHintFromThemeMaterial(value, systemHint) {
   return "";
 }
 async function readMacOSAppearanceHint() {
-  try {
-    const result = await utils.exec("/usr/bin/defaults", ["read", "-g", "AppleInterfaceStyle"], dataRoot());
-    const text = String((result && result.stdout) || "").trim().toLowerCase();
-    return text === "dark" ? "dark" : "light";
-  } catch (_) {
-    return "";
-  }
+  return "";
 }
 async function readIINAAppearanceHint() {
-  try {
-    const result = await utils.exec("/usr/bin/defaults", ["read", "com.colliderli.iina", "themeMaterial"], dataRoot());
-    const raw = String((result && result.stdout) || "").trim();
-    if (!raw) return "";
-    const systemHint = Number(raw) === 4 ? await readMacOSAppearanceHint() : "";
-    return appearanceHintFromThemeMaterial(raw, systemHint);
-  } catch (_) {
-    return "";
-  }
+  return "";
 }
 function scheduleIINAAppearanceHintRefresh(force) {
   const now = Date.now();
@@ -1775,12 +1834,13 @@ function overlayConfig(options) {
     resolvedUiLanguage: resolvedUiLanguage(),
     language: selectedLanguageOverlayConfig(),
     lookupLanguage: language.id,
-    fontScale: prefNumber("fontScale", 1.0),
+    fontScale: prefNumber("fontScale", 0.9),
     popupScale: prefNumber("popupScale", 0.92),
     popupMaxWidth: Math.max(260, prefNumber("popupMaxWidth", 440)),
     popupMaxHeight: Math.max(180, prefNumber("popupMaxHeight", 520)),
     popupMaxHeightVh: Math.max(20, prefNumber("popupMaxHeightVh", 34)),
     popupSubtitleGapPx: Math.max(12, prefNumber("popupSubtitleGapPx", 34)),
+    popupTopMarginPx: Math.max(0, prefNumber("popupTopMarginPx", 56)),
     popupTheme: normalizePopupThemePreference(pref("popupTheme", "inherit")),
     popupThemeHint: normalizeAppearanceHint(iinaAppearanceHint),
     ...readSubtitleStyleConfig(),
@@ -1789,6 +1849,7 @@ function overlayConfig(options) {
     scanLength: Math.max(1, prefNumber("scanLength", 24)),
     hoverRequestTimeoutMs: Math.max(1500, prefNumber("hoverRequestTimeoutMs", 15000)),
     audioAutoPlay: prefBool("audioAutoPlay", false),
+    audioProbeOnPopup: prefBool("audioProbeOnPopup", false),
     audioSources: activeWordAudioSources(),
     etymologyCollapseDefault: String(pref("etymologyCollapseDefault", "collapsed") || "collapsed"),
     wiktionaryEtymologyCollapseOverride: String(pref("wiktionaryEtymologyCollapseOverride", "collapsed") || "collapsed"),
@@ -1843,9 +1904,26 @@ function canHideNativeSubtitlesForCurrentLanguage() {
       activeWorkerReady.fingerprint === activeWorkerFingerprint;
   } catch (_) { return false; }
 }
+function configuredNativeSubtitleScale() {
+  const value = prefNumber("nativeSubtitleScale", 0.72);
+  return Math.max(0.25, Math.min(2.0, Number.isFinite(value) ? value : 0.72));
+}
+function applyNativeSubtitleScale() {
+  if (!enabled) return;
+  try { mpv.set("sub-scale", configuredNativeSubtitleScale()); } catch (error) {
+    console.warn("Could not update native subtitle scale: " + compactError(error));
+  }
+}
+function restoreNativeSubtitleScale() {
+  try {
+    if (nativeSubScaleBeforeEnable !== null) mpv.set("sub-scale", nativeSubScaleBeforeEnable);
+  } catch (_) {}
+  nativeSubScaleBeforeEnable = null;
+}
 function syncNativeSubtitleVisibility() {
   if (!enabled) return;
   try {
+    applyNativeSubtitleScale();
     if (prefBool("hideNativeSubtitles", true) && canHideNativeSubtitlesForCurrentLanguage()) {
       mpv.set("sub-visibility", false);
     } else if (nativeSubVisibilityBeforeEnable !== null) {
@@ -2129,12 +2207,7 @@ function languageLabelForUi(language) {
 }
 async function refreshSystemUiLanguage() {
   if (configuredUiLanguage() !== "auto") return resolvedUiLanguage();
-  let detected = "en";
-  try {
-    const result = await utils.exec("/usr/bin/defaults", ["read", "-g", "AppleLanguages"], dataRoot());
-    const output = String(result && result.stdout || "");
-    if (/zh[-_](?:Hans|CN)|\"zh\"/i.test(output)) detected = "zh-CN";
-  } catch (_) {}
+  const detected = detectedSystemUiLanguage;
   if (detected !== detectedSystemUiLanguage) {
     detectedSystemUiLanguage = detected;
     try { rebuildMenu(); } catch (_) {}
@@ -2158,18 +2231,21 @@ const PROFILE_PREFERENCE_DEFAULTS = {
   hideNativeSubtitles: true,
   pauseWhilePopupVisible: true,
   audioAutoPlay: false,
+  audioProbeOnPopup: false,
   audioSourcesJson: DEFAULT_AUDIO_SOURCES_JSON,
   lookupLanguage: "ja",
   scanLength: 24,
   maxEntries: 3,
   maxGlossesPerEntry: 4,
   lookupTimeoutMs: 9000,
-  fontScale: 1.0,
+  fontScale: 0.9,
+  nativeSubtitleScale: 0.72,
   popupScale: 0.92,
   popupMaxWidth: 440,
   popupMaxHeight: 520,
   popupMaxHeightVh: 34,
   popupSubtitleGapPx: 34,
+  popupTopMarginPx: 56,
   popupTheme: "inherit",
   subtitlePollMs: 120,
   etymologyCollapseDefault: "collapsed",
@@ -2180,7 +2256,8 @@ const PROFILE_PREFERENCE_DEFAULTS = {
   debugLogEnabled: true,
   debugLogVerbose: false,
   directWorkerIpc: true,
-  fallbackToClientExec: true,
+  fallbackToClientExec: false,
+  allowClientExecLookup: false,
   directIpcPollMs: DIRECT_IPC_POLL_MS_DEFAULT,
   workerIdleSleepMs: WORKER_IDLE_SLEEP_MS_DEFAULT
 };
@@ -2305,6 +2382,10 @@ function normalizeProfilePreferences(prefs) {
     if (Object.prototype.hasOwnProperty.call(prefs, key)) out[key] = prefs[key];
   });
   out.audioAutoPlay = normalizeProfilePreferenceBoolValue(out.audioAutoPlay, PROFILE_PREFERENCE_DEFAULTS.audioAutoPlay);
+  out.audioProbeOnPopup = normalizeProfilePreferenceBoolValue(out.audioProbeOnPopup, PROFILE_PREFERENCE_DEFAULTS.audioProbeOnPopup);
+  out.directWorkerIpc = normalizeProfilePreferenceBoolValue(out.directWorkerIpc, PROFILE_PREFERENCE_DEFAULTS.directWorkerIpc);
+  out.fallbackToClientExec = normalizeProfilePreferenceBoolValue(out.fallbackToClientExec, PROFILE_PREFERENCE_DEFAULTS.fallbackToClientExec);
+  out.allowClientExecLookup = normalizeProfilePreferenceBoolValue(out.allowClientExecLookup, PROFILE_PREFERENCE_DEFAULTS.allowClientExecLookup);
   out.audioSourcesJson = normalizeAudioSourcesJsonPreference(out.audioSourcesJson, !hasAudioSources);
   out.directIpcPollMs = normalizeProfilePreferenceNumberValue(out.directIpcPollMs, DIRECT_IPC_POLL_MS_DEFAULT, DIRECT_IPC_POLL_MS_MIN, DIRECT_IPC_POLL_MS_MAX);
   out.workerIdleSleepMs = normalizeProfilePreferenceNumberValue(out.workerIdleSleepMs, WORKER_IDLE_SLEEP_MS_DEFAULT, WORKER_IDLE_SLEEP_MS_MIN, WORKER_IDLE_SLEEP_MS_MAX);
@@ -2649,7 +2730,8 @@ function setDictionaryEnabled(name, enabledNow) {
     if (enabledNow) delete profile.disabled[name]; else profile.disabled[name] = true;
   });
   writeManifest(manifest);
-  lookupCache = Object.create(null);
+  if (typeof resetLookupCache === "function") resetLookupCache();
+  else lookupCache = Object.create(null);
   activeWorkerFingerprint = null;
   activeWorkerReady = null;
   stopBackendWorker().catch(() => {});
@@ -2663,7 +2745,8 @@ function setDictionaryOrder(names) {
     profile.dictionaryOrder = dictionaryOrderWithInstalledNames(names, installedNames);
   });
   writeManifest(manifest);
-  lookupCache = Object.create(null);
+  if (typeof resetLookupCache === "function") resetLookupCache();
+  else lookupCache = Object.create(null);
   activeWorkerFingerprint = null;
   activeWorkerReady = null;
   stopBackendWorker().catch(() => {});
@@ -2741,7 +2824,8 @@ async function deleteDictionary(name) {
   const deletePath = safeInstalledDictionaryPath(dict.path);
   const removedPath = deletedDictionaryPath(dict.name);
   const names = [dict.name, dict.title, name].filter(Boolean);
-  lookupCache = Object.create(null);
+  if (typeof resetLookupCache === "function") resetLookupCache();
+  else lookupCache = Object.create(null);
   activeWorkerFingerprint = null;
   activeWorkerReady = null;
   stopBackendWorker().catch(error => {
@@ -2821,7 +2905,8 @@ function uniqueProfileId(base, profiles) {
   return id;
 }
 function resetLookupRuntimeForProfileChange() {
-  lookupCache = Object.create(null);
+  if (typeof resetLookupCache === "function") resetLookupCache();
+  else lookupCache = Object.create(null);
   lookupInFlight = Object.create(null);
   activeWorkerFingerprint = null;
   activeWorkerReady = null;
@@ -2990,13 +3075,7 @@ async function resolveMaybePromise(value) {
 
 function backendInstalled() { try { return file.exists(binPath()); } catch (_) { return false; } }
 async function backendBinaryMatchesBundled() {
-  if (!backendInstalled()) return false;
-  try {
-    const result = await utils.exec("/usr/bin/cmp", ["-s", bundledBinPath(), binPath()], dataRoot());
-    return !!result && result.status === 0;
-  } catch (_) {
-    return false;
-  }
+  return backendInstalled();
 }
 async function ensureBundledBackendInstalled() {
   await ensureDataDirs();
@@ -3414,26 +3493,31 @@ if [ -z "${"$"}{HOME:-}" ]; then
     mkdir -p "$HOME"
   fi
 fi
-nohup "$BIN" worker "$WORKER_ROOT" --sleep-ms "$SLEEP_MS" > "$LOG" 2>&1 < /dev/null &
+(
+  trap '' HUP
+  exec < /dev/null >> "$LOG" 2>&1
+  for FD_PATH in /dev/fd/*; do
+    FD="${"$"}{FD_PATH##*/}"
+    case "$FD" in
+      ''|*[!0-9]*|0|1|2) continue ;;
+    esac
+    eval "exec ${"$"}{FD}>&-" 2>/dev/null || true
+  done
+  exec "$BIN" worker "$WORKER_ROOT" --sleep-ms "$SLEEP_MS"
+) &
 echo $! > "$PID"
+exit 0
 `;
   file.write(workerStartScriptPath(), script);
-  await execChecked("/bin/chmod", ["755", workerStartScriptPath()]);
 }
 async function stopBackendWorker() {
   try { await ensureDataDirs(); } catch (_) {}
   try { file.write(workerStopPath(), "stop\n"); } catch (_) {}
-  try {
-    if (file.exists(workerPidPath())) {
-      const pid = String(file.read(workerPidPath()) || "").trim();
-      if (/^\d+$/.test(pid)) await utils.exec("/bin/kill", ["-TERM", pid], dataRoot());
-    }
-  } catch (_) {}
   safeDelete(workerPidPath());
   safeDelete(workerReadyPath());
   activeWorkerFingerprint = null;
   activeWorkerReady = null;
-  await sleep(120);
+  await sleep(180);
 }
 function configuredWorkerIdleSleepMs() {
   const value = prefNumber("workerIdleSleepMs", WORKER_IDLE_SLEEP_MS_DEFAULT);
@@ -3578,6 +3662,7 @@ async function lookupViaWorker(suffix, dicts, scanLength, maxResults, requestId,
   const lang = language || selectedLanguageModule();
   debugVerbose("lookupViaWorker begin requestId=" + String(requestId || "") + " language=" + lang.id + " suffix=" + JSON.stringify(String(suffix || "").slice(0, 80)) + " dicts=" + dicts.length + " mode=" + String(backendMode || "yomitan-japanese") + " directIpc=" + String(prefBool("directWorkerIpc", true)));
   const timeout = Math.max(1500, prefNumber("lookupTimeoutMs", 9000));
+  const clientExecFallbackEnabled = prefBool("fallbackToClientExec", false) && prefBool("allowClientExecLookup", false);
 
   if (prefBool("directWorkerIpc", true)) {
     try {
@@ -3585,7 +3670,7 @@ async function lookupViaWorker(suffix, dicts, scanLength, maxResults, requestId,
       return result;
     } catch (error) {
       debugWarn("direct worker lookup failed requestId=" + String(requestId || "") + ": " + compactError(error));
-      if (!prefBool("fallbackToClientExec", true)) throw error;
+      if (!clientExecFallbackEnabled) throw error;
     }
   }
 
@@ -3723,9 +3808,10 @@ async function lookupAtPosition(text, position, requestId) {
     maxResults,
     maxGlossaries
   ].join("\n");
-  if (lookupCache[key]) {
-    debugVerbose("lookupAtPosition cache hit lang=" + language.id + " pos=" + pos + " lookupText=" + JSON.stringify(lookupText) + " noResult=" + String(!!lookupCache[key].noResult) + " cacheKey=" + JSON.stringify(languageCacheKey));
-    return lookupCache[key];
+  const cachedLookup = typeof getLookupCacheValue === "function" ? getLookupCacheValue(key) : lookupCache[key];
+  if (cachedLookup) {
+    debugVerbose("lookupAtPosition cache hit lang=" + language.id + " pos=" + pos + " lookupText=" + JSON.stringify(lookupText) + " noResult=" + String(!!cachedLookup.noResult) + " cacheKey=" + JSON.stringify(languageCacheKey));
+    return cachedLookup;
   }
   debugVerbose("lookupAtPosition cache miss lang=" + language.id + " mode=" + backendMode + " pos=" + pos + " candidateCount=" + candidates.length + " cacheKey=" + JSON.stringify(languageCacheKey) + " candidates=" + JSON.stringify(candidates.map(c => ({ text: c.text, source: c.source, reason: c.reason })).slice(0, 24)));
   let result = null;
@@ -3806,7 +3892,8 @@ async function lookupAtPosition(text, position, requestId) {
   result.noResult = !candidateUsed && !(result.results && result.results.length);
   result.noResultReason = result.noResult ? "all-candidates-empty" : "";
   result.lookupCacheKey = languageCacheKey;
-  lookupCache[key] = result;
+  if (typeof setLookupCacheValue === "function") setLookupCacheValue(key, result);
+  else lookupCache[key] = result;
   if (result.noResult) debugVerbose("lookupAtPosition cached no-result language=" + language.id + " cacheKey=" + JSON.stringify(languageCacheKey));
   return result;
 }
@@ -4683,6 +4770,7 @@ function setEnabled(next) {
     const dicts = activeDictionaryPaths(language);
     try {
       nativeSubVisibilityBeforeEnable = mpv.getFlag("sub-visibility");
+      nativeSubScaleBeforeEnable = mpv.getString("sub-scale");
       syncNativeSubtitleVisibility();
     } catch (error) { console.warn("Could not update native subtitle visibility: " + compactError(error)); }
     overlay.show();
@@ -4697,6 +4785,7 @@ function setEnabled(next) {
       lookupBackendReadyForNativeHide = false;
       debugError("Dictionary lookup startup failed language=" + language.id + ": " + compactError(error));
       try { if (nativeSubVisibilityBeforeEnable !== null) mpv.set("sub-visibility", nativeSubVisibilityBeforeEnable); } catch (_) {}
+      restoreNativeSubtitleScale();
       setOverlayStatus(compactError(error), "error", 14000);
     });
   } else {
@@ -4705,6 +4794,7 @@ function setEnabled(next) {
     stopPolling();
     publishSubtitle("");
     try { if (nativeSubVisibilityBeforeEnable !== null) mpv.set("sub-visibility", nativeSubVisibilityBeforeEnable); } catch (_) {}
+    restoreNativeSubtitleScale();
     showOSD(t("state.off"));
   }
 }
@@ -5756,7 +5846,8 @@ async function runLookupPerformanceBenchmark() {
     const dicts = activeDictionaryPaths(language);
     if (!dicts.length) throw new Error("No enabled dictionaries installed.");
     await ensureBackendWorker(dicts, language);
-    lookupCache = Object.create(null);
+    if (typeof resetLookupCache === "function") resetLookupCache();
+    else lookupCache = Object.create(null);
 
     const cases = lookupBenchmarkCases();
     const seqSamples = [];
@@ -5776,7 +5867,8 @@ async function runLookupPerformanceBenchmark() {
     logTimingSummary(seqSummary);
     debugLog("BENCH sequential wallMs=" + seqSummary.wallMs);
 
-    lookupCache = Object.create(null);
+    if (typeof resetLookupCache === "function") resetLookupCache();
+    else lookupCache = Object.create(null);
     const burstCases = cases.slice(0, 40);
     const burstStart = Date.now();
     const burstSamples = await Promise.all(burstCases.map(async (c, i) => {
@@ -5882,11 +5974,7 @@ function rebuildMenu() {
 
 registerShortcut();
 rebuildMenu();
-scheduleIINAAppearanceHintRefresh(true);
 refreshSystemUiLanguage().catch(() => {});
-ensureBundledBackendInstalled().catch(error => {
-  debugWarn("lookup engine install check failed: " + compactError(error));
-});
 
 event.on("iina.window-loaded", () => {
   initializeOverlay();
@@ -5899,7 +5987,8 @@ event.on("mpv.file-loaded", () => {
   subtitleEmptySince = 0;
   lastSubtitlePublishedAt = 0;
   textSubtitleOverlayPrimed = false;
-  lookupCache = Object.create(null);
+  if (typeof resetLookupCache === "function") resetLookupCache();
+  else lookupCache = Object.create(null);
   lookupInFlight = Object.create(null);
   if (enabled) startPolling();
 });

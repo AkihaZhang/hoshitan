@@ -5,6 +5,7 @@ function setupOverlay(options) {
     'state',
     'applyConfig',
     'renderSubtitle',
+    'markPointerMovedForLookup',
     'subtitleEl',
     'popupEl'
   ], options);
@@ -21,6 +22,7 @@ function setupOverlay(options) {
 function hoverFirstChar(overlay) {
   const el = overlay.subtitleEl.querySelector('.char.lookupable[data-pos="0"]');
   assert(el && el.listeners.mouseenter, 'Expected the first character to be hoverable');
+  overlay.markPointerMovedForLookup();
   el.listeners.mouseenter({ currentTarget: el });
 }
 

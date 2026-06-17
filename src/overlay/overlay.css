@@ -4,7 +4,7 @@
       --popup-max-width: 440px;
       --popup-max-height: 34vh;
       --subtitle-font-family: "Hiragino Sans", "Yu Gothic", "Noto Sans CJK JP", sans-serif;
-      --subtitle-font-size: clamp(26px, 4.2vw, 64px);
+      --subtitle-font-size: clamp(22px, 3.4vw, 52px);
       --subtitle-font-weight: 800;
       --subtitle-font-style: normal;
       --subtitle-color: #ffffff;

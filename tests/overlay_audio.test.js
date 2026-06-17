@@ -13,10 +13,19 @@ const { context, overlay } = loadOverlayForTest([
   'closestAnkiButton'
 ]);
 
-let fetchCalled = false;
-context.fetch = async function fetch() {
-  fetchCalled = true;
-  throw new Error('overlay fetch should not be used when bridge resolves audio');
+const fetchCalls = [];
+const fetchResponses = [];
+context.fetch = async function fetch(url) {
+  fetchCalls.push(String(url || ''));
+  if (/audiomp3\.php/i.test(String(url || ''))) throw new Error('direct audio endpoints are not JSON');
+  const response = fetchResponses.length
+    ? fetchResponses.shift()
+    : { type: 'audioSourceList', audioSources: [] };
+  return {
+    ok: response !== false,
+    status: response === false ? 500 : 200,
+    text: async () => JSON.stringify(response === false ? {} : response)
+  };
 };
 
 const loaded = [];
@@ -118,19 +127,47 @@ function respondToAudioSourceRequest(fromIndex, candidates, ok) {
 
 (async () => {
   const beforeFirst = context.__sent.length;
+  fetchResponses.push({
+    type: 'audioSourceList',
+    audioSources: [
+      { name: 'bad', url: 'http://127.0.0.1:5050/bad.mp3' },
+      { name: 'good', url: 'http://127.0.0.1:5050/good.mp3' }
+    ]
+  });
   const playPromise = overlay.playAudioForTerm('読む', 'よむ', button, {});
-  const request = respondToAudioSourceRequest(beforeFirst, [
-    { name: 'bad', url: 'http://127.0.0.1:5050/bad.mp3' },
-    { name: 'good', url: 'http://127.0.0.1:5050/good.mp3' }
-  ]);
   const ok = await playPromise;
   assert(ok, 'Audio playback should succeed when a later candidate works');
-  assert(request.url.indexOf('term=%E8%AA%AD%E3%82%80') >= 0, 'Audio source URL should receive the encoded term');
-  assert(request.url.indexOf('reading=%E3%82%88%E3%82%80') >= 0, 'Audio source URL should receive the encoded reading');
-  assert(!fetchCalled, 'Overlay should not fetch source JSON directly when the bridge resolves audio');
+  assert(!context.__sent.slice(beforeFirst).some(item => item.type === 'audio-source'), 'Online audio should not spawn plugin-side curl through the bridge');
+  assert(fetchCalls[0].indexOf('term=%E8%AA%AD%E3%82%80') >= 0, 'Audio source URL should receive the encoded term');
+  assert(fetchCalls[0].indexOf('reading=%E3%82%88%E3%82%80') >= 0, 'Audio source URL should receive the encoded reading');
   assert(loaded[0].indexOf('bad.mp3') >= 0, 'The first candidate should be tried before fallback candidates');
   assert(played[0] === 'http://127.0.0.1:5050/good.mp3', 'The first working candidate should be played');
   assert(button.dataset.audioState === 'ready', 'Successful audio should leave the button available without a missing badge');
+
+  const loadedAfterFirstPlay = loaded.length;
+  const replayed = await overlay.playAudioForTerm('読む', 'よむ', button, {});
+  assert(replayed, 'Clicking the same playing audio should be accepted');
+  assert(loaded.length === loadedAfterFirstPlay, 'Clicking the same playing audio should not create another Audio object');
+
+  const rapidKey = overlay.audioTermReadingKey('連打', 'れんだ');
+  const rapidButton = context.document.createElement('button');
+  rapidButton.className = 'audio-button';
+  rapidButton.dataset.audioKey = rapidKey;
+  context.__elements.popup.appendChild(rapidButton);
+  const beforeRapidLoaded = loaded.filter(url => url.indexOf('rapid.mp3') >= 0).length;
+  fetchResponses.push({
+    type: 'audioSourceList',
+    audioSources: [
+      { name: 'rapid', url: 'http://127.0.0.1:5050/rapid.mp3' }
+    ]
+  });
+  const rapidResults = await Promise.all([
+    overlay.playAudioForTerm('連打', 'れんだ', rapidButton, {}),
+    overlay.playAudioForTerm('連打', 'れんだ', rapidButton, {}),
+    overlay.playAudioForTerm('連打', 'れんだ', rapidButton, {})
+  ]);
+  assert(rapidResults[0] === true && rapidResults[1] === false && rapidResults[2] === false, 'Concurrent clicks for the same audio should coalesce behind the first load');
+  assert(loaded.filter(url => url.indexOf('rapid.mp3') >= 0).length === beforeRapidLoaded + 1, 'Concurrent clicks for the same audio should only load one candidate');
 
   const missingKey = overlay.audioTermReadingKey('無音', '');
   const missingButton = context.document.createElement('button');
@@ -138,9 +175,10 @@ function respondToAudioSourceRequest(fromIndex, candidates, ok) {
   missingButton.dataset.audioKey = missingKey;
   context.__elements.popup.appendChild(missingButton);
   const beforeMissing = context.__sent.length;
+  fetchResponses.push({ type: 'audioSourceList', audioSources: [] });
   const missingPromise = overlay.playAudioForTerm('無音', '', missingButton, {});
-  respondToAudioSourceRequest(beforeMissing, []);
   const missing = await missingPromise;
+  assert(!context.__sent.slice(beforeMissing).some(item => item.type === 'audio-source'), 'Missing online audio should not use plugin-side curl');
   assert(!missing, 'Empty audio source JSON should report missing audio');
   assert(missingButton.dataset.audioState === 'missing', 'Missing audio should mark the speaker with the missing badge state');
 
@@ -157,12 +195,27 @@ function respondToAudioSourceRequest(fromIndex, candidates, ok) {
   skippedProbeButton.dataset.audioReading = 'べつご';
   context.__elements.popup.appendChild(skippedProbeButton);
   const beforeProbe = context.__sent.length;
+  fetchResponses.push({ type: 'audioSourceList', audioSources: [] });
   overlay.probePopupAudioButtons();
-  assert(context.__sent.slice(beforeProbe).filter(item => item.type === 'audio-source').length === 1, 'Popup audio probing should only preflight the primary visible entry');
-  respondToAudioSourceRequest(beforeProbe, []);
   await new Promise(resolve => setTimeout(resolve, 5));
+  assert(!context.__sent.slice(beforeProbe).some(item => item.type === 'audio-source'), 'Online popup audio probing should not use plugin-side curl');
   assert(proactiveButton.dataset.audioState === 'missing', 'Visible entries should proactively show a missing-audio badge');
   assert(!skippedProbeButton.dataset.audioState, 'Secondary entries should not be eagerly probed on popup open');
+
+  overlay.applyConfig({
+    audioSources: [{ name: 'Local Audio', url: 'http://127.0.0.1:19742/localaudio/?term={term}&reading={reading}' }]
+  });
+  const localKey = overlay.audioTermReadingKey('読む', 'よむ');
+  const localButton = context.document.createElement('button');
+  localButton.className = 'audio-button';
+  localButton.dataset.audioKey = localKey;
+  context.__elements.popup.appendChild(localButton);
+  const beforeLocal = context.__sent.length;
+  const localPromise = overlay.playAudioForTerm('読む', 'よむ', localButton, {});
+  const localRequest = respondToAudioSourceRequest(beforeLocal, [{ name: 'Local Audio', url: 'data:audio/mpeg;base64,SUQz' }]);
+  const local = await localPromise;
+  assert(local, 'Local audio should still resolve through the plugin bridge');
+  assert(localRequest.url.indexOf('127.0.0.1:19742') >= 0, 'Only the local audio bridge URL should be sent to the plugin');
 
   overlay.applyConfig({
     audioSources: [{ name: 'LanguagePod101', url: 'https://assets.languagepod101.com/dictionary/japanese/audiomp3.php?kanji={term}&kana={reading}' }]
@@ -174,13 +227,12 @@ function respondToAudioSourceRequest(fromIndex, candidates, ok) {
   context.__elements.popup.appendChild(directButton);
   const beforeDirect = context.__sent.length;
   const directPromise = overlay.playAudioForTerm('読む', 'よむ', directButton, {});
-  const directRequest = respondToAudioSourceRequest(beforeDirect, [], false);
   const direct = await directPromise;
   assert(direct, 'Non-JSON source URLs should be tried directly as audio');
-  assert(directRequest.url.indexOf('audiomp3.php') >= 0, 'Direct audio source templates should be sent to the bridge before fallback');
-  assert(directRequest.url.indexOf('kanji=%E8%AA%AD%E3%82%80') >= 0, 'Direct audio source URL should encode the term');
-  assert(directRequest.url.indexOf('kana=%E3%82%88%E3%82%80') >= 0, 'Direct audio source URL should encode the reading');
-  assert(played[played.length - 1] === directRequest.url, 'Direct audio fallback should play the templated source URL');
+  assert(!context.__sent.slice(beforeDirect).some(item => item.type === 'audio-source'), 'Direct online audio fallback should not use plugin-side curl');
+  assert(played[played.length - 1].indexOf('audiomp3.php') >= 0, 'Direct audio fallback should play the templated source URL');
+  assert(played[played.length - 1].indexOf('kanji=%E8%AA%AD%E3%82%80') >= 0, 'Direct audio source URL should encode the term');
+  assert(played[played.length - 1].indexOf('kana=%E3%82%88%E3%82%80') >= 0, 'Direct audio source URL should encode the reading');
   assert(directButton.dataset.audioState === 'ready', 'Direct audio fallback should leave the button ready');
 
   overlay.applyConfig({
@@ -222,10 +274,9 @@ function respondToAudioSourceRequest(fromIndex, candidates, ok) {
 
   const beforeMenuPlay = context.__sent.length;
   items[1].listeners.click({ preventDefault() {}, stopPropagation() {} });
-  const menuRequest = respondToAudioSourceRequest(beforeMenuPlay, [], false);
   await new Promise(resolve => setTimeout(resolve, 5));
-  assert(menuRequest.url.indexOf('languagepod101.com') >= 0, 'Choosing a menu item should play only that source');
-  assert(played[played.length - 1] === menuRequest.url, 'Chosen direct audio source should be played');
+  assert(!context.__sent.slice(beforeMenuPlay).some(item => item.type === 'audio-source'), 'Choosing a direct online audio source should not use plugin-side curl');
+  assert(played[played.length - 1].indexOf('languagepod101.com') >= 0, 'Chosen direct audio source should be played');
   assert(!context.__body.querySelector('.audio-source-menu'), 'Choosing a source should close the menu');
 
   console.log('overlay audio tests passed');

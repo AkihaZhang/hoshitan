@@ -10,7 +10,7 @@
 
 const { core, mpv, event, overlay, menu, input, ws, preferences, console, file, http, utils, standaloneWindow } = iina;
 
-const VERSION = "0.1.0-dev.8";
+const VERSION = "0.1.0-dev.10";
 const RECOMMENDED_JITENDEX_URL = "https://github.com/stephenmk/stephenmk.github.io/releases/latest/download/jitendex-yomitan.zip";
 
 let enabled = false;
@@ -25,9 +25,13 @@ let lastSubtitle = null;
 let subtitleEmptySince = 0;
 let lastSubtitlePublishedAt = 0;
 let nativeSubVisibilityBeforeEnable = null;
+let nativeSubScaleBeforeEnable = null;
 let requestSerial = 0;
 let lookupInFlight = Object.create(null);
 let lookupCache = Object.create(null);
+let lookupCacheOrder = [];
+let lookupCacheSizes = Object.create(null);
+let lookupCacheBytes = 0;
 let statusTimer = null;
 let workerStartInFlight = null;
 let activeWorkerFingerprint = null;
@@ -69,6 +73,8 @@ const LOOKUP_POPUP_RESUME_DELAY_MS = 90;
 const SUBTITLE_EMPTY_GRACE_MS = 260;
 const SUBTITLE_REPLAY_INTERVAL_MS = 1500;
 const DICTIONARY_STYLES_CACHE_MS = 30000;
+const LOOKUP_CACHE_MAX_ENTRIES = 24;
+const LOOKUP_CACHE_MAX_BYTES = 2 * 1024 * 1024;
 
 function pref(key, fallback) {
   const value = preferences.get(key);
@@ -93,6 +99,49 @@ function prefBool(key, fallback) {
 function prefNumber(key, fallback) {
   const value = Number(pref(key, fallback));
   return Number.isFinite(value) ? value : fallback;
+}
+function resetLookupCache() {
+  lookupCache = Object.create(null);
+  lookupCacheOrder = [];
+  lookupCacheSizes = Object.create(null);
+  lookupCacheBytes = 0;
+}
+function approximateLookupCacheBytes(value) {
+  try { return JSON.stringify(value || null).length; } catch (_) { return 0; }
+}
+function touchLookupCacheKey(key) {
+  const index = lookupCacheOrder.indexOf(key);
+  if (index >= 0) lookupCacheOrder.splice(index, 1);
+  lookupCacheOrder.push(key);
+}
+function pruneLookupCache() {
+  while (lookupCacheOrder.length > LOOKUP_CACHE_MAX_ENTRIES || lookupCacheBytes > LOOKUP_CACHE_MAX_BYTES) {
+    const oldest = lookupCacheOrder.shift();
+    if (!oldest) break;
+    if (Object.prototype.hasOwnProperty.call(lookupCache, oldest)) delete lookupCache[oldest];
+    lookupCacheBytes -= Number(lookupCacheSizes[oldest] || 0);
+    delete lookupCacheSizes[oldest];
+  }
+  if (lookupCacheBytes < 0) lookupCacheBytes = 0;
+}
+function getLookupCacheValue(key) {
+  if (!Object.prototype.hasOwnProperty.call(lookupCache, key)) return null;
+  touchLookupCacheKey(key);
+  return lookupCache[key];
+}
+function setLookupCacheValue(key, value) {
+  if (Object.prototype.hasOwnProperty.call(lookupCache, key)) {
+    lookupCacheBytes -= Number(lookupCacheSizes[key] || 0);
+  }
+  lookupCache[key] = value;
+  const bytes = approximateLookupCacheBytes(value);
+  lookupCacheSizes[key] = bytes;
+  lookupCacheBytes += bytes;
+  touchLookupCacheKey(key);
+  pruneLookupCache();
+}
+function lookupCacheStats() {
+  return { entries: lookupCacheOrder.length, bytes: lookupCacheBytes };
 }
 function compactError(error) {
   const msg = error && error.message ? String(error.message) : String(error || "Unknown error");
@@ -351,8 +400,32 @@ async function execChecked(command, args, cwd, stdoutHook, stderrHook) {
   }
   return result;
 }
+function tryCreateDirectory(path) {
+  const target = String(path || "");
+  if (!target) return false;
+  try { if (file.exists(target)) return true; } catch (_) {}
+  const names = ["createDirectory", "mkdir", "makeDirectory"];
+  for (const name of names) {
+    try {
+      if (file && typeof file[name] === "function") {
+        file[name](target);
+        if (file.exists(target)) return true;
+      }
+    } catch (_) {}
+  }
+  return false;
+}
 async function ensureDataDirs() {
-  await execChecked("/bin/mkdir", ["-p", dataRoot(), pathJoin(dataRoot(), "bin"), dictRoot(), downloadRoot(), buildRoot(), workerRoot(), workerQueueDir(), workerResponseDir(), workerStateDir()]);
+  const dirs = [dataRoot(), pathJoin(dataRoot(), "bin"), dictRoot(), downloadRoot(), buildRoot(), workerRoot(), workerQueueDir(), workerResponseDir(), workerStateDir()];
+  const missing = [];
+  for (const dir of dirs) {
+    try {
+      if (file.exists(dir)) continue;
+      if (tryCreateDirectory(dir)) continue;
+    } catch (_) {}
+    missing.push(dir);
+  }
+  if (missing.length) await execChecked("/bin/mkdir", ["-p"].concat(missing));
 }
 function safeDelete(path) { try { if (file.exists(path)) file.delete(path); } catch (_) {} }
 async function clearDirFiles(dir) {

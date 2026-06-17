@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.0-dev.10 - 2026-06-17
+
+- Added bounded LRU storage for large lookup results so repeated hover lookups cannot grow IINA's plugin memory for the whole playback session.
+- Added caps for overlay audio/probe caches and release `Audio` objects after failures or replacement playback.
+
+## 0.1.0-dev.9 - 2026-06-16
+
+- Disabled client-executable lookup fallback unless explicitly opted in, preventing repeated `utils.exec` subprocesses from driving IINA CPU spikes when direct worker IPC is available.
+- Stopped routing online audio source checks through plugin-side `curl`; online sources now resolve in the overlay, while local audio continues to use the plugin bridge.
+- Made popup audio probing opt-in and lightweight so opening a lookup popup no longer eagerly loads audio.
+- Suppressed hover lookups from idle mouseenter events after subtitle rerenders, avoiding continuous lookup churn when the cursor rests over the subtitle area during playback.
+- Added controls for Hoshitan subtitle size, IINA native subtitle scale, and popup top safe margin; defaults now keep native subtitles smaller and popup controls away from the title bar.
+
 ## 0.1.0-dev.8 - 2026-06-16
 
 - Fixed a high-CPU polling path where native subtitle visibility checks read manifest and worker files on every subtitle timer tick.
