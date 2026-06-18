@@ -68,6 +68,10 @@ assert(/data-global-setting="lowRamImport"/.test(managerHtml), 'Settings manager
 assert(/data-global-setting="ankiDeckName"/.test(managerHtml), 'Settings manager should expose the Anki deck');
 assert(/data-global-setting="uiLanguage"/.test(managerHtml), 'Settings manager should expose UI language selection');
 assert(/简体中文/.test(managerHtml), 'Settings manager should include Simplified Chinese');
+assert(/<option value="ja">日本語<\/option>/.test(managerHtml), 'Lookup language names should use native display names');
+assert(/<option value="fr">Français<\/option>/.test(managerHtml), 'French should use its native display name');
+assert(/<option value="de">Deutsch<\/option>/.test(managerHtml), 'German should use its native display name');
+assert(/<option value="ko">한국어<\/option>/.test(managerHtml), 'Korean should use its native display name');
 assert(/function translateStaticDocument\(\)/.test(managerHtml), 'Settings manager should translate static UI text');
 assert(/data-global-setting="ankiModelName"/.test(managerHtml), 'Settings manager should expose the Anki note type');
 assert(/id="ankiAutoMap"/.test(managerHtml), 'Settings manager should offer automatic Anki field mapping');
@@ -97,6 +101,9 @@ assert(/data-panel="audio"/.test(managerHtml), 'Settings manager should expose a
 assert(/data-global-setting="localAudioEnabled"/.test(managerHtml), 'Settings manager should expose local audio');
 assert(/data-global-setting="localAudioDatabasePath"/.test(managerHtml), 'Settings manager should expose the Hoshi Reader database path');
 assert(/id="dictionaryList"/.test(managerHtml), 'Dictionary manager should include the installed dictionary list');
+assert(/Term Dictionaries/.test(managerHtml), 'Dictionary manager should group term dictionaries');
+assert(/Frequency Dictionaries/.test(managerHtml), 'Dictionary manager should group frequency dictionaries');
+assert(/Pitch Dictionaries/.test(managerHtml), 'Dictionary manager should group pitch dictionaries');
 assert(/dictionary-manager-set-enabled/.test(managerHtml), 'Dictionary manager should toggle dictionary enabled state');
 assert(/dictionary-manager-set-order/.test(managerHtml), 'Dictionary manager should save dictionary order');
 assert(/dictionary-manager-delete/.test(managerHtml), 'Dictionary manager should expose per-dictionary deletion');
@@ -104,7 +111,8 @@ assert(/dictionary-manager-create-profile/.test(managerHtml), 'Settings manager 
 assert(/dictionary-manager-rename-profile/.test(managerHtml), 'Settings manager should rename profiles');
 assert(/dictionary-manager-delete-profile/.test(managerHtml), 'Settings manager should delete profiles');
 assert(/Delete/.test(managerHtml), 'Dictionary manager rows should include a delete button');
-assert(/id="recommendedList"/.test(managerHtml), 'Settings manager should expose a recommended downloads list');
+assert(!/id="recommendedList"/.test(managerHtml), 'Settings manager should not promote a recommended dictionary download');
+assert(!/Recommended Downloads/.test(managerHtml), 'Settings manager should not show the recommended downloads section');
 assert(/Import ZIP/.test(managerHtml), 'Dictionary manager should expose ZIP import');
 assert(/typeof iina !== 'undefined'/.test(managerHtml), 'Dictionary manager should use the IINA webview message bridge');
 assert(/id="profileSelect"/.test(managerHtml), 'Dictionary manager should expose profile selection');
@@ -159,6 +167,7 @@ assert(/dictionary-manager-delete/.test(managerBridgeSource), 'Dictionary manage
 assert(/dictionary-manager-rename-profile/.test(managerBridgeSource), 'Settings manager should handle profile rename commands');
 assert(/dictionary-manager-delete-profile/.test(managerBridgeSource), 'Settings manager should handle profile delete commands');
 assert(/dictionary-manager-update-global-settings/.test(managerBridgeSource), 'Settings manager should handle global import settings');
+assert(!/dictionary-manager-download-recommended/.test(managerBridgeSource), 'Settings manager should not handle hidden recommended downloads');
 assert(/deleteDictionary\(String\(name\)\)/.test(managerBridgeSource), 'Dictionary manager delete commands should remove installed dictionaries');
 assert(/function runDictionaryManagerZipImport\(\)/.test(managerBridgeSource), 'Dictionary ZIP import should use a picker-aware action path');
 assert(!/postDictionaryManagerStatus\("Opening ZIP picker\.\.\."/.test(managerBridgeSource), 'ZIP picker opening status should be transient webview state only');

@@ -30,7 +30,7 @@ assert(
   context.t('anki.deckMissing', { deck: 'Lapis_test' }) === '未找到 Anki 牌组：Lapis_test',
   'Translations should interpolate values'
 );
-assert(context.languageLabelForUi({ id: 'ja', label: 'Japanese' }) === '日语', 'Language labels should localize');
+assert(context.languageLabelForUi({ id: 'ja', label: 'Japanese' }) === '日本語', 'Language labels should use native display names');
 
 language = 'en';
 assert(context.t('menu.settings') === 'Settings...', 'English should remain available');

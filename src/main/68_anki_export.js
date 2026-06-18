@@ -157,6 +157,7 @@ function ankiFieldsFromPayload(payload, settings, sourceText) {
     "{sasayaki-audio}": ""
   };
   const htmlValues = {
+    "{sentence}": payload && payload.sentenceHtml,
     "{definition}": payload && (payload.definitionHtml || payload.glossaryHtml),
     "{glossary}": payload && payload.glossaryHtml,
     "{glossary-first}": payload && (payload.glossaryFirstHtml || payload.selectedGlossaryHtml),

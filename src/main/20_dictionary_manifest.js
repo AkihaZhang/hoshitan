@@ -439,6 +439,36 @@ function activeDictionaryEntries(language) {
   });
   return out;
 }
+function dictionaryTypes(entry) {
+  const types = [];
+  if (Number(entry && entry.termCount || 0) > 0) types.push("term");
+  if (Number(entry && entry.freqCount || 0) > 0) types.push("frequency");
+  if (Number(entry && entry.pitchCount || 0) > 0) types.push("pitch");
+  return types;
+}
+function dictionaryPrimaryType(entry) {
+  const types = dictionaryTypes(entry);
+  if (types.indexOf("term") >= 0) return "term";
+  if (types.indexOf("frequency") >= 0) return "frequency";
+  if (types.indexOf("pitch") >= 0) return "pitch";
+  return "term";
+}
+function emptyDictionaryGroups() {
+  return { term: [], frequency: [], pitch: [] };
+}
+function activeDictionaryGroups(language) {
+  const groups = emptyDictionaryGroups();
+  activeDictionaryEntries(language).forEach(entry => {
+    const p = pathJoin(dictRoot(), entry.name);
+    const types = dictionaryTypes(entry);
+    if (!types.length) types.push("term");
+    types.forEach(type => {
+      if (!groups[type]) groups[type] = [];
+      groups[type].push(p);
+    });
+  });
+  return groups;
+}
 function activeDictionaryPaths(language) {
   return activeDictionaryEntries(language).map(d => pathJoin(dictRoot(), d.name));
 }
@@ -496,8 +526,21 @@ function dictionaryCompatibilityWarning(language, entries) {
 }
 function workerFingerprint(dicts, language) {
   const lang = language || selectedLanguageModule();
-  const paths = (dicts || activeDictionaryPaths(lang)).slice();
-  return JSON.stringify({ version: VERSION, language: lang.id || "ja", dictionaries: paths });
+  let groups;
+  if (!dicts) groups = activeDictionaryGroups(lang);
+  else if (Array.isArray(dicts)) groups = { term: dicts.slice(), frequency: [], pitch: [] };
+  else groups = {
+    term: Array.isArray(dicts.term) ? dicts.term.slice() : [],
+    frequency: Array.isArray(dicts.frequency) ? dicts.frequency.slice() : [],
+    pitch: Array.isArray(dicts.pitch) ? dicts.pitch.slice() : []
+  };
+  return JSON.stringify({
+    version: VERSION,
+    language: lang.id || "ja",
+    termDictionaries: groups.term,
+    frequencyDictionaries: groups.frequency,
+    pitchDictionaries: groups.pitch
+  });
 }
 function setDictionaryEnabled(name, enabledNow) {
   const manifest = updateActiveProfile(readManifest(), profile => {

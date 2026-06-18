@@ -220,6 +220,20 @@
       user-select: none;
     }
     #popup .popup-action-nav { display: flex; align-items: center; gap: 6px; }
+    #popup .nested-lookup-status {
+      min-width: 0;
+      max-width: 58%;
+      margin-left: 8px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      color: var(--popup-reading);
+      background: var(--popup-chip-bg);
+      font-size: 12px;
+      font-weight: 700;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     #popup .popup-action-spacer { flex: 1 1 auto; }
     #popup .popup-scroll {
       min-height: 0;

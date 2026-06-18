@@ -14,12 +14,6 @@ function dictionaryManagerState() {
   const disabled = disabledDictionaryMap(manifest);
   const dicts = dictionaryDirs();
   const activeProfile = activeDictionaryProfile(manifest);
-  const hasJitendex = dicts.some(dict => {
-    const title = String((dict && dict.title) || "").toLowerCase();
-    const name = String((dict && dict.name) || "").toLowerCase();
-    const url = String((dict && dict.downloadUrl) || "");
-    return title.indexOf("jitendex") >= 0 || name.indexOf("jitendex") >= 0 || url === RECOMMENDED_JITENDEX_URL;
-  });
   return {
     version: VERSION,
     dictionaries: dicts.map((dict, index) => ({
@@ -34,6 +28,8 @@ function dictionaryManagerState() {
       mediaCount: Number(dict.mediaCount || 0),
       pitchCount: Number(dict.pitchCount || 0),
       freqCount: Number(dict.freqCount || 0),
+      type: dictionaryPrimaryType(dict),
+      types: dictionaryTypes(dict),
       enabled: !disabled[dict.name],
       order: index
     })),
@@ -45,17 +41,7 @@ function dictionaryManagerState() {
     profilePreferences: normalizeProfilePreferences(activeProfile.preferences),
     globalSettings: readGlobalSettingsSnapshot(),
     globalSettingDefaults: Object.assign({}, GLOBAL_SETTINGS_DEFAULTS),
-    lookupLanguage: pref("lookupLanguage", "ja"),
-    recommendedDictionaries: [
-      {
-        id: "jitendex-ja-en",
-        title: "Jitendex",
-        language: t("recommended.jitendexLanguage"),
-        description: t("recommended.jitendexDescription"),
-        downloadUrl: RECOMMENDED_JITENDEX_URL,
-        installed: hasJitendex
-      }
-    ]
+    lookupLanguage: pref("lookupLanguage", "ja")
   };
 }
 function postDictionaryManagerState() {
@@ -196,9 +182,6 @@ function registerDictionaryManagerHandlers() {
     const name = payload && payload.name;
     if (!name) return;
     runDictionaryManagerAction(t("manager.deletingDictionary"), () => deleteDictionary(String(name)));
-  });
-  onMessage("dictionary-manager-download-recommended", () => {
-    runDictionaryManagerAction(t("manager.downloading"), () => getRecommendedDictionaries());
   });
   onMessage("dictionary-manager-import-zip", () => {
     runDictionaryManagerZipImport();

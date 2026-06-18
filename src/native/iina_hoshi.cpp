@@ -141,6 +141,16 @@ static void add_all_dictionary_types(DictionaryQuery& query, const std::vector<s
     query.add_pitch_dict(p);
   }
 }
+struct DictionaryGroups {
+  std::vector<std::string> term;
+  std::vector<std::string> frequency;
+  std::vector<std::string> pitch;
+};
+static void add_dictionary_groups(DictionaryQuery& query, const DictionaryGroups& groups) {
+  for (const auto& p : groups.term) query.add_term_dict(p);
+  for (const auto& p : groups.frequency) query.add_freq_dict(p);
+  for (const auto& p : groups.pitch) query.add_pitch_dict(p);
+}
 static std::vector<size_t> utf8_prefix_end_offsets(const std::string& s, size_t max_chars) {
   std::vector<size_t> ends;
   for (size_t i = 0; i < s.size() && ends.size() < max_chars;) {
@@ -373,7 +383,7 @@ static void cmd_lookup(int argc, char** argv) {
   Lookup lookup(dict_query, deinflector);
   std::cout << lookup_to_json(lookup, lookup_string, max_results, scan_length, max_glossaries);
 }
-struct WorkerConfig { std::string fingerprint; std::vector<std::string> dicts; };
+struct WorkerConfig { std::string fingerprint; DictionaryGroups dicts; };
 static WorkerConfig read_worker_config(const fs::path& config_path) {
   WorkerConfig cfg;
   std::ifstream in(config_path);
@@ -384,9 +394,19 @@ static WorkerConfig read_worker_config(const fs::path& config_path) {
     std::string key = line.substr(0, tab);
     std::string val = line.substr(tab + 1);
     if (key == "fingerprint") cfg.fingerprint = val;
-    else if (key == "dict") cfg.dicts.push_back(val);
+    else if (key == "term") cfg.dicts.term.push_back(val);
+    else if (key == "frequency") cfg.dicts.frequency.push_back(val);
+    else if (key == "pitch") cfg.dicts.pitch.push_back(val);
+    else if (key == "dict") {
+      cfg.dicts.term.push_back(val);
+      cfg.dicts.frequency.push_back(val);
+      cfg.dicts.pitch.push_back(val);
+    }
   }
   return cfg;
+}
+static size_t dictionary_group_count(const DictionaryGroups& groups) {
+  return groups.term.size() + groups.frequency.size() + groups.pitch.size();
 }
 static void cmd_worker(int argc, char** argv) {
   if (argc < 3) { print_error("usage: worker <worker_dir> [--sleep-ms n]"); std::exit(2); }
@@ -403,13 +423,13 @@ static void cmd_worker(int argc, char** argv) {
   fs::path config_path = root / "config.tsv";
   fs::create_directories(queue); fs::create_directories(responses); fs::create_directories(state);
   WorkerConfig cfg = read_worker_config(config_path);
-  if (cfg.dicts.empty()) throw std::runtime_error("worker config has no dictionaries");
+  if (dictionary_group_count(cfg.dicts) == 0) throw std::runtime_error("worker config has no dictionaries");
   DictionaryQuery dict_query;
-  add_all_dictionary_types(dict_query, cfg.dicts);
+  add_dictionary_groups(dict_query, cfg.dicts);
   Deinflector deinflector;
   Lookup lookup(dict_query, deinflector);
-  write_file_atomic(state / "ready.json", std::string("{\"ok\":true,\"worker\":true,\"wrapperVersion\":") + json_quote(WRAPPER_VERSION) + ",\"fingerprint\":" + json_quote(cfg.fingerprint) + ",\"dictCount\":" + std::to_string(cfg.dicts.size()) + "}\n");
-  std::cerr << "iina-hoshi-dicts worker ready with " << cfg.dicts.size() << " dictionaries; sleep_ms=" << sleep_ms << "\n";
+  write_file_atomic(state / "ready.json", std::string("{\"ok\":true,\"worker\":true,\"wrapperVersion\":") + json_quote(WRAPPER_VERSION) + ",\"fingerprint\":" + json_quote(cfg.fingerprint) + ",\"dictCount\":" + std::to_string(dictionary_group_count(cfg.dicts)) + ",\"termDictCount\":" + std::to_string(cfg.dicts.term.size()) + ",\"frequencyDictCount\":" + std::to_string(cfg.dicts.frequency.size()) + ",\"pitchDictCount\":" + std::to_string(cfg.dicts.pitch.size()) + "}\n");
+  std::cerr << "iina-hoshi-dicts worker ready with term=" << cfg.dicts.term.size() << " frequency=" << cfg.dicts.frequency.size() << " pitch=" << cfg.dicts.pitch.size() << "; sleep_ms=" << sleep_ms << "\n";
   while (!fs::exists(stop)) {
     std::vector<fs::path> requests;
     std::error_code ec;

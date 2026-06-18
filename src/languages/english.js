@@ -118,6 +118,7 @@ const HOSHITAN_ENGLISH_LANGUAGE = (() => {
   return {
     id: "en",
     label: "English (experimental)",
+    nativeLabel: "English",
     experimental: true,
     lookupUnit: "word",
     wordMode: "latin-word",

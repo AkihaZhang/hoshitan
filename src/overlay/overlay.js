@@ -63,6 +63,7 @@
     nestedLookupForwardHistory: [],
     nestedLookupRequestId: '',
     nestedLookupRequestSeq: 0,
+    nestedLookupStatusText: '',
     audioPlaying: null,
     audioPlayingKey: '',
     audioPlayRequestSeq: 0,
@@ -120,7 +121,8 @@
       'Back': '返回',
       'Forward': '前进',
       'Close': '关闭',
-      'Looking up selection…': '正在查询选中文本…'
+      'Looking up selection…': '正在查询选中文本…',
+      'Looking up: {text}': '正在查询：{text}'
     }
   };
   function overlayUiLanguage() {
@@ -1047,6 +1049,7 @@
     state.nestedLookupHistory = [];
     state.nestedLookupForwardHistory = [];
     state.nestedLookupRequestId = '';
+    state.nestedLookupStatusText = '';
     state.activeMatchStart = null;
     state.activeMatchLength = 0;
     subtitleEl.textContent = '';
@@ -1219,6 +1222,7 @@
       state.nestedLookupHistory = [];
       state.nestedLookupForwardHistory = [];
       state.nestedLookupRequestId = '';
+      state.nestedLookupStatusText = '';
     }
     const stored = state.lookupByPos[pos];
     if (sameUnitVisible) {
@@ -1426,17 +1430,47 @@
 	      return '';
 	    }
 	  }
+	  function htmlWithBoldRange(text, start, length) {
+	    const chars = Array.from(String(text || ''));
+	    const s = Math.max(0, Math.min(Number(start) || 0, chars.length));
+	    const e = Math.max(s, Math.min(s + Math.max(0, Number(length) || 0), chars.length));
+	    if (s === e) return escapeHtml(chars.join(''));
+	    return escapeHtml(chars.slice(0, s).join('')) +
+	      '<b>' + escapeHtml(chars.slice(s, e).join('')) + '</b>' +
+	      escapeHtml(chars.slice(e).join(''));
+	  }
+	  function ankiSentenceHtmlForEntry(entry) {
+	    const text = String(state.text || '');
+	    if (!text) return '';
+	    const chars = Array.from(text);
+	    const start = Number(state.activeMatchStart);
+	    const length = Number(state.activeMatchLength || 0);
+	    if (Number.isFinite(start) && length > 0 && start >= 0 && start < chars.length) {
+	      return htmlWithBoldRange(text, start, length);
+	    }
+	    const surface = String((entry && entry.matched) || displayHeadwordForEntry(entry) || '').trim();
+	    if (surface) {
+	      const index = text.indexOf(surface);
+	      if (index >= 0) {
+	        const charStart = Array.from(text.slice(0, index)).length;
+	        return htmlWithBoldRange(text, charStart, Array.from(surface).length);
+	      }
+	    }
+	    return escapeHtml(text);
+	  }
 	  function requestNestedLookup(text) {
 	    const lookupText = normalizeWhitespace(text).slice(0, 120);
 	    if (!lookupText || !state.currentLookupStored || state.nestedLookupRequestId) return false;
 	    const requestId = 'nested-' + String(Date.now()) + '-' + String(++state.nestedLookupRequestSeq);
 	    state.nestedLookupRequestId = requestId;
-	    setPopupBody('<div class="loading">' + escapeHtml(tr('Looking up selection…')) + '</div>');
+	    state.nestedLookupStatusText = lookupText;
+	    refreshPopupActionBar();
 	    const payload = { type: 'nested-lookup', requestId, text: lookupText, at: Date.now() };
 	    if (!sendBridgeMessage(payload)) {
 	      try { iina.postMessage('nested-lookup', payload); }
 	      catch (error) {
 	        state.nestedLookupRequestId = '';
+	        state.nestedLookupStatusText = '';
 	        setPopupBody('<div class="error">' + escapeHtml(String(error && error.message ? error.message : error)) + '</div>');
 	        return false;
 	      }
@@ -1446,6 +1480,7 @@
 	  function showPreviousNestedLookup() {
 	    if (!state.nestedLookupHistory.length) return false;
 	    state.nestedLookupRequestId = '';
+	    state.nestedLookupStatusText = '';
 	    if (state.currentLookupStored) state.nestedLookupForwardHistory.push(state.currentLookupStored);
 	    const previous = state.nestedLookupHistory.pop();
 	    state.currentLookupStored = previous || null;
@@ -1455,6 +1490,7 @@
 	  function showNextNestedLookup() {
 	    if (!state.nestedLookupForwardHistory.length) return false;
 	    state.nestedLookupRequestId = '';
+	    state.nestedLookupStatusText = '';
 	    if (state.currentLookupStored) state.nestedLookupHistory.push(state.currentLookupStored);
 	    const next = state.nestedLookupForwardHistory.pop();
 	    state.currentLookupStored = next || null;
@@ -1472,6 +1508,7 @@
 	      lineId: state.lineId,
 	      position: state.currentPos,
 	      sentence: state.text,
+	      sentenceHtml: ankiSentenceHtmlForEntry(entry),
 	      expression: displayHeadwordForEntry(entry),
 	      reading: String(term.reading || ''),
 	      furiganaPlain: furiganaPlainForEntry(entry),
@@ -1796,6 +1833,7 @@
     state.nestedLookupHistory = [];
     state.nestedLookupForwardHistory = [];
     state.nestedLookupRequestId = '';
+    state.nestedLookupStatusText = '';
     Object.keys(state.pendingLookupTimers || {}).forEach(k => clearTimeout(state.pendingLookupTimers[k]));
     Object.keys(state.pendingLookupRequests || {}).forEach(k => cancelPendingLookupRequest(k));
     state.pendingLookupTimers = Object.create(null);
@@ -1888,7 +1926,14 @@
 	    const back = popupToolbarButton('back', tr('Back'), '<path d="M15 5l-7 7 7 7"></path>', !state.nestedLookupHistory.length);
 	    const forward = popupToolbarButton('forward', tr('Forward'), '<path d="M9 5l7 7-7 7"></path>', !state.nestedLookupForwardHistory.length);
 	    const close = popupToolbarButton('close', tr('Close'), '<path d="M6 6l12 12M18 6L6 18"></path>', false);
-	    return '<div class="popup-action-nav">' + back + forward + '</div><div class="popup-action-spacer"></div>' + close;
+	    const status = state.nestedLookupRequestId && state.nestedLookupStatusText
+	      ? '<div class="nested-lookup-status">' + escapeHtml(tr('Looking up: {text}', { text: state.nestedLookupStatusText })) + '</div>'
+	      : '';
+	    return '<div class="popup-action-nav">' + back + forward + '</div>' + status + '<div class="popup-action-spacer"></div>' + close;
+	  }
+	  function refreshPopupActionBar() {
+	    const actionBar = popupEl.querySelector('.popup-action-bar');
+	    if (actionBar) actionBar.innerHTML = renderPopupActionBar();
 	  }
 	  function renderPopupHead(heading, reading, secondaryText, audioData, entryIndex) {
 	    const audioHtml = audioData ? renderAudioButtonHtml(audioData.term, audioData.reading) : '';
@@ -2925,6 +2970,7 @@
     const requestId = String((payload && payload.requestId) || '');
     if (!requestId || requestId !== state.nestedLookupRequestId) return;
     state.nestedLookupRequestId = '';
+    state.nestedLookupStatusText = '';
     if (!payload.ok) {
       setPopupBody('<div class="error">' + escapeHtml(String(payload.error || tr('Lookup failed'))) + '</div>');
       return;

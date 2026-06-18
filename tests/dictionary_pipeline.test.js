@@ -148,9 +148,21 @@ const fingerprint = context.workerFingerprint(enPaths.concat(koPaths), en);
 assert(!fingerprint.includes('\n'), 'Worker fingerprint must stay on one config line');
 const parsed = JSON.parse(fingerprint);
 assert(parsed.language === 'en', 'Worker fingerprint should include selected language');
-assert(parsed.dictionaries.length === 12, 'Worker fingerprint should include every supplied dictionary path');
-assert(parsed.dictionaries[0] === enPaths[0], 'Worker fingerprint should preserve dictionary order');
-assert(parsed.dictionaries[enPaths.length] === koPaths[0], 'Worker fingerprint should preserve repeated supplied order');
+assert(parsed.termDictionaries.length === 12, 'Worker fingerprint should include supplied paths as term dictionaries');
+assert(parsed.frequencyDictionaries.length === 0, 'Array fingerprints should not invent frequency dictionaries');
+assert(parsed.pitchDictionaries.length === 0, 'Array fingerprints should not invent pitch dictionaries');
+assert(parsed.termDictionaries[0] === enPaths[0], 'Worker fingerprint should preserve dictionary order');
+assert(parsed.termDictionaries[enPaths.length] === koPaths[0], 'Worker fingerprint should preserve repeated supplied order');
+
+const groupedFingerprint = context.workerFingerprint({
+  term: ['/dict/term'],
+  frequency: ['/dict/frequency'],
+  pitch: ['/dict/pitch']
+}, ja);
+const parsedGrouped = JSON.parse(groupedFingerprint);
+assert(parsedGrouped.termDictionaries[0] === '/dict/term', 'Grouped worker fingerprint should preserve term dictionaries');
+assert(parsedGrouped.frequencyDictionaries[0] === '/dict/frequency', 'Grouped worker fingerprint should preserve frequency dictionaries');
+assert(parsedGrouped.pitchDictionaries[0] === '/dict/pitch', 'Grouped worker fingerprint should preserve pitch dictionaries');
 
 const originalRead = context.file.read;
 context.file.read = function read(p) {

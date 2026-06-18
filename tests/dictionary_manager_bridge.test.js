@@ -46,7 +46,6 @@ const context = {
   setDictionaryEnabled() {},
   setDictionaryOrder() {},
   deleteDictionary() {},
-  getRecommendedDictionaries() {},
   runDictionaryManagerZipImport() {},
   setActiveDictionaryProfile() {},
   createDictionaryProfile() { return { id: 'new-profile' }; },

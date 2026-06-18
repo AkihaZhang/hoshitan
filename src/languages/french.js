@@ -145,6 +145,7 @@ const HOSHITAN_FRENCH_LANGUAGE = (() => {
   return {
     id: "fr",
     label: "French (experimental)",
+    nativeLabel: "Français",
     experimental: true,
     lookupUnit: "word",
     wordMode: "latin-word",

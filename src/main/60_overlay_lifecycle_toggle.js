@@ -180,9 +180,11 @@ function stopPolling() {
 }
 async function prepareLookupBackendForEnabledOverlay(language, dicts) {
   const lang = language || selectedLanguageModule();
-  const activeDicts = dicts || activeDictionaryPaths(lang);
-  debugLog("prepare lookup backend language=" + lang.id + " label=" + lang.label + " activeDicts=" + activeDicts.length + " dicts=" + JSON.stringify(activeDicts.map(p => String(p).split("/").pop())));
-  const setupMessage = dictionarySetupMessage(lang, activeDicts);
+  const activeDicts = dicts || activeDictionaryGroups(lang);
+  const termPaths = workerLookupTermPaths(activeDicts);
+  const allPaths = flattenedWorkerDictionaryPaths(activeDicts);
+  debugLog("prepare lookup backend language=" + lang.id + " label=" + lang.label + " termDicts=" + termPaths.length + " activeDicts=" + allPaths.length + " dicts=" + JSON.stringify(allPaths.map(p => String(p).split("/").pop())));
+  const setupMessage = dictionarySetupMessage(lang, termPaths);
   if (setupMessage) throw new Error(setupMessage);
   const ready = await ensureBackendWorker(activeDicts, lang);
   debugLog("prepare lookup backend ready language=" + lang.id + " fingerprint=" + JSON.stringify((ready && ready.fingerprint) || ""));
@@ -199,7 +201,7 @@ function setEnabled(next) {
   rebuildMenu();
   if (enabled) {
     const language = selectedLanguageModule();
-    const dicts = activeDictionaryPaths(language);
+    const dicts = activeDictionaryGroups(language);
     try {
       nativeSubVisibilityBeforeEnable = mpv.getFlag("sub-visibility");
       nativeSubScaleBeforeEnable = mpv.getString("sub-scale");

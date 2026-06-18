@@ -10,8 +10,7 @@
 
 const { core, mpv, event, overlay, menu, input, ws, preferences, console, file, http, utils, standaloneWindow } = iina;
 
-const VERSION = "0.1.0-dev.10";
-const RECOMMENDED_JITENDEX_URL = "https://github.com/stephenmk/stephenmk.github.io/releases/latest/download/jitendex-yomitan.zip";
+const VERSION = "0.1.0-dev.14";
 
 let enabled = false;
 let initialized = false;
@@ -34,6 +33,7 @@ let lookupCacheSizes = Object.create(null);
 let lookupCacheBytes = 0;
 let statusTimer = null;
 let workerStartInFlight = null;
+let workerStartInFlightFingerprint = "";
 let activeWorkerFingerprint = null;
 let activeWorkerReady = null;
 let lookupBackendReadyForNativeHide = false;

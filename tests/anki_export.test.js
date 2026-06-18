@@ -134,6 +134,7 @@ function assert(condition, message) {
   await context.exportLookupEntryToAnki({
     requestId: 'anki-test',
     sentence: 'トイレ　トイレ',
+    sentenceHtml: 'トイレ　<b>トイレ</b>',
     expression: 'トイレ',
     reading: 'トイレ',
     furiganaPlain: 'トイレ',
@@ -162,7 +163,7 @@ function assert(condition, message) {
   const note = addCall.options.data.params.note;
   assert(note.deckName === 'Lapis_test', 'Export must target the configured test deck');
   assert(note.modelName === 'Lapis', 'Export must use the configured note type');
-  assert(note.fields.Sentence === 'トイレ　トイレ', 'Sentence should map to the configured field');
+  assert(note.fields.Sentence === 'トイレ　<b>トイレ</b>', 'Sentence should preserve matched-word HTML when exported');
   assert(note.fields.Expression === 'トイレ', 'Expression should map to the configured field');
   assert(note.fields.ExpressionReading === 'Reading: トイレ', 'Manually entered Anki field templates should replace embedded placeholders');
   assert(note.fields.MainDefinition.includes('style="color: dodgerblue;"'), 'Per-dictionary glossary should preserve rendered HTML by dictionary title');

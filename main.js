@@ -10,8 +10,7 @@
 
 const { core, mpv, event, overlay, menu, input, ws, preferences, console, file, http, utils, standaloneWindow } = iina;
 
-const VERSION = "0.1.0-dev.10";
-const RECOMMENDED_JITENDEX_URL = "https://github.com/stephenmk/stephenmk.github.io/releases/latest/download/jitendex-yomitan.zip";
+const VERSION = "0.1.0-dev.14";
 
 let enabled = false;
 let initialized = false;
@@ -34,6 +33,7 @@ let lookupCacheSizes = Object.create(null);
 let lookupCacheBytes = 0;
 let statusTimer = null;
 let workerStartInFlight = null;
+let workerStartInFlightFingerprint = "";
 let activeWorkerFingerprint = null;
 let activeWorkerReady = null;
 let lookupBackendReadyForNativeHide = false;
@@ -734,6 +734,7 @@ const HOSHITAN_JAPANESE_LANGUAGE = (() => {
   return {
     id: "ja",
     label: "Japanese",
+    nativeLabel: "日本語",
     experimental: false,
     lookupUnit: "character",
     wordMode: "rightward-prefix",
@@ -930,6 +931,7 @@ const HOSHITAN_ENGLISH_LANGUAGE = (() => {
   return {
     id: "en",
     label: "English (experimental)",
+    nativeLabel: "English",
     experimental: true,
     lookupUnit: "word",
     wordMode: "latin-word",
@@ -1101,6 +1103,7 @@ const HOSHITAN_FRENCH_LANGUAGE = (() => {
   return {
     id: "fr",
     label: "French (experimental)",
+    nativeLabel: "Français",
     experimental: true,
     lookupUnit: "word",
     wordMode: "latin-word",
@@ -1461,6 +1464,7 @@ const HOSHITAN_GERMAN_LANGUAGE = (() => {
   return {
     id: "de",
     label: "German (experimental)",
+    nativeLabel: "Deutsch",
     experimental: true,
     lookupUnit: "word",
     wordMode: "latin-word",
@@ -1525,6 +1529,7 @@ const HOSHITAN_CHINESE_LANGUAGE = (() => {
   return {
     id: "zh",
     label: "Chinese (experimental)",
+    nativeLabel: "中文",
     experimental: true,
     lookupUnit: "character",
     wordMode: "rightward-prefix",
@@ -1588,6 +1593,7 @@ const HOSHITAN_KOREAN_LANGUAGE = (() => {
   return {
     id: "ko",
     label: "Korean (experimental)",
+    nativeLabel: "한국어",
     experimental: true,
     lookupUnit: "word",
     wordMode: "korean-run",
@@ -1628,6 +1634,7 @@ const HOSHITAN_LANGUAGE_REGISTRY = (() => {
     return {
       id: selectedLanguage.id,
       label: selectedLanguage.label,
+      nativeLabel: selectedLanguage.nativeLabel || selectedLanguage.label,
       experimental: !!selectedLanguage.experimental,
       lookupUnit: selectedLanguage.lookupUnit || "character",
       wordMode: selectedLanguage.wordMode,
@@ -2009,7 +2016,6 @@ const I18N_MESSAGES = {
     "manager.selectionSaved": "Dictionary selection saved.",
     "manager.orderSaved": "Dictionary order saved.",
     "manager.deletingDictionary": "Deleting dictionary",
-    "manager.downloading": "Downloading recommended dictionaries",
     "manager.switchingProfile": "Switching profile",
     "manager.creatingProfile": "Creating profile",
     "manager.profileRenamed": "Profile renamed.",
@@ -2039,12 +2045,6 @@ const I18N_MESSAGES = {
     "dict.refreshingList": "Refreshing installed dictionaries.",
     "dict.refreshingWorker": "Refreshing lookup worker...",
     "dict.workerAvailable": "The new dictionary will be available for hover popups.",
-    "dict.downloadTitle": "Downloading recommended dictionaries",
-    "dict.downloading": "Downloading dictionary...",
-    "dict.downloadingJitendex": "Downloading Jitendex...",
-    "dict.downloadComplete": "Download complete. Importing...",
-    "dict.hoverReady": "You can now hover Japanese subtitles for dictionary popups.",
-    "dict.downloadFailed": "Could not download recommended dictionaries.",
     "dict.lookupReady": "Dictionary lookup ready.",
     "dict.preparingLookup": "Preparing dictionary lookup...",
     "dict.chooseZip": "Choose Yomitan dictionary ZIPs",
@@ -2060,9 +2060,7 @@ const I18N_MESSAGES = {
     "dict.backendImportFailed": "Backend import command failed.",
     "dict.importStageFailed": "Dictionary import failed.",
     "dict.couldNotAdd": "Could not add dictionary.",
-    "dict.couldNotAddDetail": "Could not add dictionary: {error}",
-    "recommended.jitendexLanguage": "Japanese",
-    "recommended.jitendexDescription": "JMdict-based Japanese-English dictionary with structured Yomitan data."
+    "dict.couldNotAddDetail": "Could not add dictionary: {error}"
   },
   "zh-CN": {
     "menu.settings": "设置...",
@@ -2116,7 +2114,6 @@ const I18N_MESSAGES = {
     "manager.selectionSaved": "词典选择已保存。",
     "manager.orderSaved": "词典顺序已保存。",
     "manager.deletingDictionary": "正在删除词典",
-    "manager.downloading": "正在下载推荐词典",
     "manager.switchingProfile": "正在切换配置方案",
     "manager.creatingProfile": "正在创建配置方案",
     "manager.profileRenamed": "配置方案已重命名。",
@@ -2146,12 +2143,6 @@ const I18N_MESSAGES = {
     "dict.refreshingList": "正在刷新已安装词典。",
     "dict.refreshingWorker": "正在刷新查词进程...",
     "dict.workerAvailable": "新词典很快即可用于字幕悬停查词。",
-    "dict.downloadTitle": "正在下载推荐词典",
-    "dict.downloading": "正在下载词典...",
-    "dict.downloadingJitendex": "正在下载 Jitendex...",
-    "dict.downloadComplete": "下载完成，正在导入...",
-    "dict.hoverReady": "现在可以在日语字幕上悬停查词。",
-    "dict.downloadFailed": "无法下载推荐词典。",
     "dict.lookupReady": "词典查词已就绪。",
     "dict.preparingLookup": "正在准备词典查词...",
     "dict.chooseZip": "选择 Yomitan 词典 ZIP",
@@ -2167,9 +2158,7 @@ const I18N_MESSAGES = {
     "dict.backendImportFailed": "词典后端导入命令失败。",
     "dict.importStageFailed": "词典导入失败。",
     "dict.couldNotAdd": "无法添加词典。",
-    "dict.couldNotAddDetail": "无法添加词典：{error}",
-    "recommended.jitendexLanguage": "日语",
-    "recommended.jitendexDescription": "基于 JMdict 的日英词典，包含结构化 Yomitan 数据。"
+    "dict.couldNotAddDetail": "无法添加词典：{error}"
   }
 };
 
@@ -2199,11 +2188,8 @@ function t(key, values) {
 }
 function languageLabelForUi(language) {
   const id = String(language && language.id || "");
-  const labels = {
-    en: { ja: "Japanese", en: "English", fr: "French", de: "German", zh: "Chinese", ko: "Korean" },
-    "zh-CN": { ja: "日语", en: "英语", fr: "法语", de: "德语", zh: "中文", ko: "韩语" }
-  };
-  return (labels[resolvedUiLanguage()] || labels.en)[id] || String(language && language.label || id);
+  const labels = { ja: "日本語", en: "English", fr: "Français", de: "Deutsch", zh: "中文", ko: "한국어" };
+  return labels[id] || String(language && (language.nativeLabel || language.label) || id);
 }
 async function refreshSystemUiLanguage() {
   if (configuredUiLanguage() !== "auto") return resolvedUiLanguage();
@@ -2658,6 +2644,36 @@ function activeDictionaryEntries(language) {
   });
   return out;
 }
+function dictionaryTypes(entry) {
+  const types = [];
+  if (Number(entry && entry.termCount || 0) > 0) types.push("term");
+  if (Number(entry && entry.freqCount || 0) > 0) types.push("frequency");
+  if (Number(entry && entry.pitchCount || 0) > 0) types.push("pitch");
+  return types;
+}
+function dictionaryPrimaryType(entry) {
+  const types = dictionaryTypes(entry);
+  if (types.indexOf("term") >= 0) return "term";
+  if (types.indexOf("frequency") >= 0) return "frequency";
+  if (types.indexOf("pitch") >= 0) return "pitch";
+  return "term";
+}
+function emptyDictionaryGroups() {
+  return { term: [], frequency: [], pitch: [] };
+}
+function activeDictionaryGroups(language) {
+  const groups = emptyDictionaryGroups();
+  activeDictionaryEntries(language).forEach(entry => {
+    const p = pathJoin(dictRoot(), entry.name);
+    const types = dictionaryTypes(entry);
+    if (!types.length) types.push("term");
+    types.forEach(type => {
+      if (!groups[type]) groups[type] = [];
+      groups[type].push(p);
+    });
+  });
+  return groups;
+}
 function activeDictionaryPaths(language) {
   return activeDictionaryEntries(language).map(d => pathJoin(dictRoot(), d.name));
 }
@@ -2715,8 +2731,21 @@ function dictionaryCompatibilityWarning(language, entries) {
 }
 function workerFingerprint(dicts, language) {
   const lang = language || selectedLanguageModule();
-  const paths = (dicts || activeDictionaryPaths(lang)).slice();
-  return JSON.stringify({ version: VERSION, language: lang.id || "ja", dictionaries: paths });
+  let groups;
+  if (!dicts) groups = activeDictionaryGroups(lang);
+  else if (Array.isArray(dicts)) groups = { term: dicts.slice(), frequency: [], pitch: [] };
+  else groups = {
+    term: Array.isArray(dicts.term) ? dicts.term.slice() : [],
+    frequency: Array.isArray(dicts.frequency) ? dicts.frequency.slice() : [],
+    pitch: Array.isArray(dicts.pitch) ? dicts.pitch.slice() : []
+  };
+  return JSON.stringify({
+    version: VERSION,
+    language: lang.id || "ja",
+    termDictionaries: groups.term,
+    frequencyDictionaries: groups.frequency,
+    pitchDictionaries: groups.pitch
+  });
 }
 function setDictionaryEnabled(name, enabledNow) {
   const manifest = updateActiveProfile(readManifest(), profile => {
@@ -3069,7 +3098,13 @@ async function resolveMaybePromise(value) {
 
 function backendInstalled() { try { return file.exists(binPath()); } catch (_) { return false; } }
 async function backendBinaryMatchesBundled() {
-  return backendInstalled();
+  if (!backendInstalled()) return false;
+  try {
+    const result = await utils.exec("/usr/bin/cmp", ["-s", bundledBinPath(), binPath()], dataRoot());
+    return !!result && result.status === 0;
+  } catch (_) {
+    return false;
+  }
 }
 async function ensureBundledBackendInstalled() {
   await ensureDataDirs();
@@ -3426,24 +3461,6 @@ async function testFilePickerApiFromMenu() {
   if (!invalid.length) alert("File picker returned " + selected.length + " valid ZIP" + (selected.length === 1 ? "" : "s") + ".");
   else alert("File picker returned invalid path(s): " + invalid.map(result => result.message).join("; "));
 }
-async function getRecommendedDictionaries() {
-  let taskId = null;
-  try {
-    await ensureDataDirs();
-    taskId = startOverlayTask("recommended-dictionary", t("dict.downloadTitle"), t("dict.downloading"));
-    const dest = pathJoin(downloadRoot(), "jitendex-yomitan.zip");
-    updateOverlayTask(taskId, { title: t("dict.downloadTitle"), message: t("dict.downloadingJitendex"), detail: RECOMMENDED_JITENDEX_URL });
-    await http.download(RECOMMENDED_JITENDEX_URL, dest);
-    updateOverlayTask(taskId, { title: t("dict.downloadTitle"), message: t("dict.downloadComplete"), detail: dest });
-    const result = await importDictionaryZip(dest, taskId);
-    const msg = t("dict.imported", { title: result.title, count: result.term_count || 0 });
-    finishOverlayTask(taskId, true, msg, t("dict.hoverReady"));
-  } catch (error) {
-    const msg = t("dict.downloadFailed");
-    finishOverlayTask(taskId, false, msg, compactError(error));
-    alert(msg + " Details: " + compactError(error));
-  }
-}
 function homePathFromDataRoot() {
   const root = dataRoot();
   const marker = "/Library/Application Support/";
@@ -3452,7 +3469,38 @@ function homePathFromDataRoot() {
   return root;
 }
 function backendLaunchPath() { return "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Applications/Xcode.app/Contents/Developer/usr/bin"; }
+function normalizeWorkerDictionaryGroups(dicts, language) {
+  const groups = emptyDictionaryGroups();
+  if (!dicts) {
+    const active = activeDictionaryGroups(language || selectedLanguageModule());
+    groups.term = active.term.slice();
+    groups.frequency = active.frequency.slice();
+    groups.pitch = active.pitch.slice();
+    return groups;
+  }
+  if (Array.isArray(dicts)) {
+    groups.term = dicts.slice();
+    return groups;
+  }
+  ["term", "frequency", "pitch"].forEach(type => {
+    groups[type] = Array.isArray(dicts[type]) ? dicts[type].map(item => String(item || "")).filter(Boolean) : [];
+  });
+  return groups;
+}
+function workerDictionaryCount(groups) {
+  const normalized = normalizeWorkerDictionaryGroups(groups);
+  return normalized.term.length + normalized.frequency.length + normalized.pitch.length;
+}
+function workerLookupTermPaths(groups) {
+  const normalized = normalizeWorkerDictionaryGroups(groups);
+  return normalized.term.slice();
+}
+function flattenedWorkerDictionaryPaths(groups) {
+  const normalized = normalizeWorkerDictionaryGroups(groups);
+  return normalized.term.concat(normalized.frequency, normalized.pitch);
+}
 function writeWorkerConfig(dicts, fingerprint, language) {
+  const groups = normalizeWorkerDictionaryGroups(dicts, language);
   const lines = [
     "version\t" + VERSION,
     "fingerprint\t" + String(fingerprint || ""),
@@ -3460,7 +3508,9 @@ function writeWorkerConfig(dicts, fingerprint, language) {
     "home\t" + homePathFromDataRoot(),
     "path\t" + backendLaunchPath()
   ];
-  for (const d of dicts || []) lines.push("dict\t" + d);
+  for (const d of groups.term) lines.push("term\t" + d);
+  for (const d of groups.frequency) lines.push("frequency\t" + d);
+  for (const d of groups.pitch) lines.push("pitch\t" + d);
   file.write(workerConfigPath(), lines.join("\n") + "\n");
 }
 async function writeWorkerStartScript() {
@@ -3531,7 +3581,8 @@ async function startBackendWorkerProcess(dicts, language) {
   activeWorkerReady = null;
   const lang = language || selectedLanguageModule();
   const fingerprint = workerFingerprint(dicts, lang);
-  debugLog("start backend worker language=" + lang.id + " dictCount=" + (dicts || []).length + " fingerprint=" + fingerprint);
+  const groups = normalizeWorkerDictionaryGroups(dicts, lang);
+  debugLog("start backend worker language=" + lang.id + " termDicts=" + groups.term.length + " freqDicts=" + groups.frequency.length + " pitchDicts=" + groups.pitch.length + " fingerprint=" + fingerprint);
   writeWorkerConfig(dicts, fingerprint, lang);
   await writeWorkerStartScript();
   const sleepMs = configuredWorkerIdleSleepMs();
@@ -3571,8 +3622,9 @@ async function waitForWorkerReady(fingerprint, timeoutMs) {
 }
 async function ensureBackendWorker(dicts, language) {
   const lang = language || selectedLanguageModule();
-  dicts = dicts || activeDictionaryPaths(lang);
-  const setupMessage = dictionarySetupMessage(lang, dicts);
+  dicts = dicts || activeDictionaryGroups(lang);
+  const termPaths = workerLookupTermPaths(dicts);
+  const setupMessage = dictionarySetupMessage(lang, termPaths);
   if (setupMessage) throw new Error(setupMessage);
   const advisory = dictionaryCompatibilityWarning(lang, activeDictionaryEntries(lang));
   if (advisory) {
@@ -3580,9 +3632,14 @@ async function ensureBackendWorker(dicts, language) {
     setOverlayStatus(advisory, "info", 7000);
   }
   const fingerprint = workerFingerprint(dicts, lang);
-  debugVerbose("ensureBackendWorker language=" + lang.id + " dictCount=" + dicts.length + " activeFingerprintMatches=" + String(activeWorkerFingerprint === fingerprint));
+  debugVerbose("ensureBackendWorker language=" + lang.id + " dictCount=" + workerDictionaryCount(dicts) + " termDictCount=" + termPaths.length + " activeFingerprintMatches=" + String(activeWorkerFingerprint === fingerprint));
   if (activeWorkerFingerprint === fingerprint && activeWorkerReady) return activeWorkerReady;
-  if (workerStartInFlight) return workerStartInFlight;
+  if (workerStartInFlight) {
+    if (workerStartInFlightFingerprint === fingerprint) return workerStartInFlight;
+    await workerStartInFlight.catch(() => {});
+    if (activeWorkerFingerprint === fingerprint && activeWorkerReady) return activeWorkerReady;
+  }
+  workerStartInFlightFingerprint = fingerprint;
   workerStartInFlight = (async () => {
     await stopBackendWorker().catch(() => {});
     setOverlayStatus(t("dict.preparingLookup"), "info", 4000);
@@ -3590,7 +3647,12 @@ async function ensureBackendWorker(dicts, language) {
     return await waitForWorkerReady(fingerprint, Math.max(8000, prefNumber("backendTimeoutMs", 30000)));
   })();
   try { return await workerStartInFlight; }
-  finally { workerStartInFlight = null; }
+  finally {
+    if (workerStartInFlightFingerprint === fingerprint) {
+      workerStartInFlight = null;
+      workerStartInFlightFingerprint = "";
+    }
+  }
 }
 async function clearPendingWorkerRequests() { await clearDirFiles(workerQueueDir()); }
 
@@ -3638,7 +3700,7 @@ async function runWorkerQueueLookupDirect(suffix, dicts, scanLength, maxResults,
 }
 async function lookupViaWorker(suffix, dicts, scanLength, maxResults, requestId, backendMode, maxGlossaries, language) {
   const lang = language || selectedLanguageModule();
-  debugVerbose("lookupViaWorker begin requestId=" + String(requestId || "") + " language=" + lang.id + " suffix=" + JSON.stringify(String(suffix || "").slice(0, 80)) + " dicts=" + dicts.length + " mode=" + String(backendMode || "yomitan-japanese"));
+  debugVerbose("lookupViaWorker begin requestId=" + String(requestId || "") + " language=" + lang.id + " suffix=" + JSON.stringify(String(suffix || "").slice(0, 80)) + " dicts=" + workerDictionaryCount(dicts) + " mode=" + String(backendMode || "yomitan-japanese"));
   const timeout = Math.max(1500, prefNumber("lookupTimeoutMs", 9000));
   try {
     return await runWorkerQueueLookupDirect(suffix, dicts, scanLength, maxResults, requestId, timeout, backendMode, maxGlossaries, lang);
@@ -3750,8 +3812,9 @@ async function lookupAtPosition(text, position, requestId) {
     const suffix = chars.slice(pos).join("");
     return { ok: true, text: clean, position: pos, suffix, language: language.id, results: [] };
   }
-  const dicts = activeDictionaryPaths(language);
-  const setupMessage = dictionarySetupMessage(language, dicts);
+  const dicts = activeDictionaryGroups(language);
+  const termPaths = workerLookupTermPaths(dicts);
+  const setupMessage = dictionarySetupMessage(language, termPaths);
   if (setupMessage) throw new Error(setupMessage);
   const maxResults = Math.max(1, prefNumber("maxEntries", 3));
   const maxGlossaries = Math.max(1, prefNumber("maxGlossesPerEntry", 4));
@@ -3768,7 +3831,7 @@ async function lookupAtPosition(text, position, requestId) {
     candidates.map(c => c.text).join("|")
   ].join(":");
   const key = [
-    dicts.join("|"),
+    workerFingerprint(dicts, language),
     language.id,
     backendMode,
     clean,
@@ -4723,9 +4786,11 @@ function stopPolling() {
 }
 async function prepareLookupBackendForEnabledOverlay(language, dicts) {
   const lang = language || selectedLanguageModule();
-  const activeDicts = dicts || activeDictionaryPaths(lang);
-  debugLog("prepare lookup backend language=" + lang.id + " label=" + lang.label + " activeDicts=" + activeDicts.length + " dicts=" + JSON.stringify(activeDicts.map(p => String(p).split("/").pop())));
-  const setupMessage = dictionarySetupMessage(lang, activeDicts);
+  const activeDicts = dicts || activeDictionaryGroups(lang);
+  const termPaths = workerLookupTermPaths(activeDicts);
+  const allPaths = flattenedWorkerDictionaryPaths(activeDicts);
+  debugLog("prepare lookup backend language=" + lang.id + " label=" + lang.label + " termDicts=" + termPaths.length + " activeDicts=" + allPaths.length + " dicts=" + JSON.stringify(allPaths.map(p => String(p).split("/").pop())));
+  const setupMessage = dictionarySetupMessage(lang, termPaths);
   if (setupMessage) throw new Error(setupMessage);
   const ready = await ensureBackendWorker(activeDicts, lang);
   debugLog("prepare lookup backend ready language=" + lang.id + " fingerprint=" + JSON.stringify((ready && ready.fingerprint) || ""));
@@ -4742,7 +4807,7 @@ function setEnabled(next) {
   rebuildMenu();
   if (enabled) {
     const language = selectedLanguageModule();
-    const dicts = activeDictionaryPaths(language);
+    const dicts = activeDictionaryGroups(language);
     try {
       nativeSubVisibilityBeforeEnable = mpv.getFlag("sub-visibility");
       nativeSubScaleBeforeEnable = mpv.getString("sub-scale");
@@ -4857,12 +4922,6 @@ function dictionaryManagerState() {
   const disabled = disabledDictionaryMap(manifest);
   const dicts = dictionaryDirs();
   const activeProfile = activeDictionaryProfile(manifest);
-  const hasJitendex = dicts.some(dict => {
-    const title = String((dict && dict.title) || "").toLowerCase();
-    const name = String((dict && dict.name) || "").toLowerCase();
-    const url = String((dict && dict.downloadUrl) || "");
-    return title.indexOf("jitendex") >= 0 || name.indexOf("jitendex") >= 0 || url === RECOMMENDED_JITENDEX_URL;
-  });
   return {
     version: VERSION,
     dictionaries: dicts.map((dict, index) => ({
@@ -4877,6 +4936,8 @@ function dictionaryManagerState() {
       mediaCount: Number(dict.mediaCount || 0),
       pitchCount: Number(dict.pitchCount || 0),
       freqCount: Number(dict.freqCount || 0),
+      type: dictionaryPrimaryType(dict),
+      types: dictionaryTypes(dict),
       enabled: !disabled[dict.name],
       order: index
     })),
@@ -4888,17 +4949,7 @@ function dictionaryManagerState() {
     profilePreferences: normalizeProfilePreferences(activeProfile.preferences),
     globalSettings: readGlobalSettingsSnapshot(),
     globalSettingDefaults: Object.assign({}, GLOBAL_SETTINGS_DEFAULTS),
-    lookupLanguage: pref("lookupLanguage", "ja"),
-    recommendedDictionaries: [
-      {
-        id: "jitendex-ja-en",
-        title: "Jitendex",
-        language: t("recommended.jitendexLanguage"),
-        description: t("recommended.jitendexDescription"),
-        downloadUrl: RECOMMENDED_JITENDEX_URL,
-        installed: hasJitendex
-      }
-    ]
+    lookupLanguage: pref("lookupLanguage", "ja")
   };
 }
 function postDictionaryManagerState() {
@@ -5039,9 +5090,6 @@ function registerDictionaryManagerHandlers() {
     const name = payload && payload.name;
     if (!name) return;
     runDictionaryManagerAction(t("manager.deletingDictionary"), () => deleteDictionary(String(name)));
-  });
-  onMessage("dictionary-manager-download-recommended", () => {
-    runDictionaryManagerAction(t("manager.downloading"), () => getRecommendedDictionaries());
   });
   onMessage("dictionary-manager-import-zip", () => {
     runDictionaryManagerZipImport();
@@ -5301,6 +5349,7 @@ function ankiFieldsFromPayload(payload, settings, sourceText) {
     "{sasayaki-audio}": ""
   };
   const htmlValues = {
+    "{sentence}": payload && payload.sentenceHtml,
     "{definition}": payload && (payload.definitionHtml || payload.glossaryHtml),
     "{glossary}": payload && payload.glossaryHtml,
     "{glossary-first}": payload && (payload.glossaryFirstHtml || payload.selectedGlossaryHtml),
@@ -5755,7 +5804,7 @@ async function stopBackendWorkerFromMenu() {
 function showInstalledDictionaries() {
   const dicts = dictionaryDirs();
   const disabled = disabledDictionaryMap();
-  if (!dicts.length) { alert("No dictionaries installed yet. Download recommended dictionaries or import a Yomitan dictionary ZIP."); return; }
+  if (!dicts.length) { alert("No dictionaries installed yet. Import a Yomitan dictionary ZIP in Hoshitan Settings."); return; }
   alert("Installed dictionaries:\n\n" + dicts.map(d => (disabled[d.name] ? "[off] " : "[on] ") + d.name).join("\n"));
 }
 function emitDebugLogTestMessage() {

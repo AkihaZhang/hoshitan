@@ -6,8 +6,11 @@ const { context, overlay } = loadOverlayForTest([
 ]);
 
 overlay.state.text = '彼は待つ。';
+overlay.state.chars = Array.from(overlay.state.text);
 overlay.state.lineId = 9;
 overlay.state.currentPos = 2;
+overlay.state.activeMatchStart = 2;
+overlay.state.activeMatchLength = 2;
 overlay.state.config.dictionaryStyles = {
   '明鏡日汉双解辞典': '[data-sc-class="dfcn"] { color: dodgerblue; }'
 };
@@ -44,6 +47,7 @@ const payload = overlay.ankiPayloadForEntry({
 }, 'anki-payload-test');
 
 assert(payload.expression === '待つ', 'Anki payload should include the expression');
+assert(payload.sentenceHtml === '彼は<b>待つ</b>。', 'Anki payload should bold the matched word in the sentence HTML');
 assert(payload.furiganaPlain === '待つ[まつ]', 'Anki payload should include plain furigana');
 assert(payload.glossary.includes('[明鏡日汉双解辞典] 等待'), 'Anki payload should include dictionary-labelled glossaries');
 assert(payload.glossaryHtml.includes('class="yomitan-glossary"'), 'Anki payload should include rendered Yomitan glossary HTML');

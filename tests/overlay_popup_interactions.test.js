@@ -46,6 +46,9 @@ assert(/<summary class="dict-header">/.test(context.__elements.popup.querySelect
 assert(overlay.requestNestedLookup('読書'), 'Nested lookup should start for selected lookup text');
 const request = context.__sent.find(message => message.type === 'nested-lookup');
 assert(request && request.text === '読書', 'Nested lookup should send selected text through the overlay bridge');
+assert(/nested-lookup-status/.test(context.__elements.popup.querySelector('.popup-action-bar').innerHTML), 'Nested lookup should show progress in the action bar');
+assert(/読書/.test(context.__elements.popup.querySelector('.popup-action-bar').innerHTML), 'Nested lookup progress should include the selected text');
+assert(/to read/.test(context.__elements.popup.querySelector('.body').innerHTML), 'Nested lookup should keep the current result visible while loading');
 
 context.__handlers['nested-lookup-result']({
   requestId: request.requestId,
@@ -66,6 +69,7 @@ context.__handlers['nested-lookup-result']({
 assert(overlay.state.nestedLookupHistory.length === 1, 'Nested lookup should retain the previous popup result for Back');
 assert(overlay.state.currentLookupStored.result.results[0].term.expression === '読書', 'Nested lookup should replace the visible result');
 assert(!/data-popup-action="back"[^>]*disabled/.test(context.__elements.popup.querySelector('.popup-action-bar').innerHTML), 'Nested lookup should enable Back in the action bar');
+assert(!/nested-lookup-status/.test(context.__elements.popup.querySelector('.popup-action-bar').innerHTML), 'Nested lookup progress should clear after the result arrives');
 assert(overlay.showPreviousNestedLookup(), 'Back should restore the previous nested lookup');
 assert(overlay.state.currentLookupStored.result.results[0].term.expression === '読む', 'Back should restore the previous result');
 assert(!/data-popup-action="forward"[^>]*disabled/.test(context.__elements.popup.querySelector('.popup-action-bar').innerHTML), 'Back should enable Forward');

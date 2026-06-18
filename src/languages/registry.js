@@ -23,6 +23,7 @@ const HOSHITAN_LANGUAGE_REGISTRY = (() => {
     return {
       id: selectedLanguage.id,
       label: selectedLanguage.label,
+      nativeLabel: selectedLanguage.nativeLabel || selectedLanguage.label,
       experimental: !!selectedLanguage.experimental,
       lookupUnit: selectedLanguage.lookupUnit || "character",
       wordMode: selectedLanguage.wordMode,

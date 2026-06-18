@@ -44,6 +44,7 @@ const HOSHITAN_CHINESE_LANGUAGE = (() => {
   return {
     id: "zh",
     label: "Chinese (experimental)",
+    nativeLabel: "中文",
     experimental: true,
     lookupUnit: "character",
     wordMode: "rightward-prefix",

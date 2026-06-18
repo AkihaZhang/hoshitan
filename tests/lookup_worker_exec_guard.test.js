@@ -16,6 +16,7 @@ async function runCase(options) {
     debugVerbose() {},
     debugWarn() {},
     compactError(error) { return error && error.message ? error.message : String(error); },
+    emptyDictionaryGroups() { return { term: [], frequency: [], pitch: [] }; },
     prefNumber(key, fallback) { return fallback; },
     prefBool(key, fallback) {
       if (/directWorkerIpc|fallbackToClientExec|allowClientExecLookup/.test(String(key || ''))) {

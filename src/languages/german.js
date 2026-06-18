@@ -307,6 +307,7 @@ const HOSHITAN_GERMAN_LANGUAGE = (() => {
   return {
     id: "de",
     label: "German (experimental)",
+    nativeLabel: "Deutsch",
     experimental: true,
     lookupUnit: "word",
     wordMode: "latin-word",

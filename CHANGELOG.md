@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.0-dev.14 - 2026-06-18
+
+- Removed the recommended Jitendex download flow; enabled local Yomitan dictionaries are no longer treated as dependent on a bundled recommendation.
+- Split dictionary worker configuration into Hoshi-style term, frequency, and pitch dictionary groups, avoiding loading every dictionary as every type.
+- Refresh the installed native lookup backend when the bundled binary changes, so development builds do not keep using an older worker.
+- Export `{sentence}` to Anki with the matched word bolded while preserving rendered glossary HTML.
+- Kept nested lookup results visible while showing lookup progress in the popup action bar.
+- Display lookup language names using each language's native name.
+
 ## 0.1.0-dev.13 - 2026-06-18
 
 - Export rendered Yomitan glossary HTML and scoped dictionary stylesheet rules to Anki instead of flattening definitions to plain text.

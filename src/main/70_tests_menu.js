@@ -113,7 +113,7 @@ async function stopBackendWorkerFromMenu() {
 function showInstalledDictionaries() {
   const dicts = dictionaryDirs();
   const disabled = disabledDictionaryMap();
-  if (!dicts.length) { alert("No dictionaries installed yet. Download recommended dictionaries or import a Yomitan dictionary ZIP."); return; }
+  if (!dicts.length) { alert("No dictionaries installed yet. Import a Yomitan dictionary ZIP in Hoshitan Settings."); return; }
   alert("Installed dictionaries:\n\n" + dicts.map(d => (disabled[d.name] ? "[off] " : "[on] ") + d.name).join("\n"));
 }
 function emitDebugLogTestMessage() {

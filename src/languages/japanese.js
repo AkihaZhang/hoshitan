@@ -33,6 +33,7 @@ const HOSHITAN_JAPANESE_LANGUAGE = (() => {
   return {
     id: "ja",
     label: "Japanese",
+    nativeLabel: "日本語",
     experimental: false,
     lookupUnit: "character",
     wordMode: "rightward-prefix",

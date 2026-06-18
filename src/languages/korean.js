@@ -46,6 +46,7 @@ const HOSHITAN_KOREAN_LANGUAGE = (() => {
   return {
     id: "ko",
     label: "Korean (experimental)",
+    nativeLabel: "한국어",
     experimental: true,
     lookupUnit: "word",
     wordMode: "korean-run",

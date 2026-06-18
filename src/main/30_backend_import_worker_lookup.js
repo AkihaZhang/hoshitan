@@ -1,6 +1,12 @@
 function backendInstalled() { try { return file.exists(binPath()); } catch (_) { return false; } }
 async function backendBinaryMatchesBundled() {
-  return backendInstalled();
+  if (!backendInstalled()) return false;
+  try {
+    const result = await utils.exec("/usr/bin/cmp", ["-s", bundledBinPath(), binPath()], dataRoot());
+    return !!result && result.status === 0;
+  } catch (_) {
+    return false;
+  }
 }
 async function ensureBundledBackendInstalled() {
   await ensureDataDirs();
@@ -357,24 +363,6 @@ async function testFilePickerApiFromMenu() {
   if (!invalid.length) alert("File picker returned " + selected.length + " valid ZIP" + (selected.length === 1 ? "" : "s") + ".");
   else alert("File picker returned invalid path(s): " + invalid.map(result => result.message).join("; "));
 }
-async function getRecommendedDictionaries() {
-  let taskId = null;
-  try {
-    await ensureDataDirs();
-    taskId = startOverlayTask("recommended-dictionary", t("dict.downloadTitle"), t("dict.downloading"));
-    const dest = pathJoin(downloadRoot(), "jitendex-yomitan.zip");
-    updateOverlayTask(taskId, { title: t("dict.downloadTitle"), message: t("dict.downloadingJitendex"), detail: RECOMMENDED_JITENDEX_URL });
-    await http.download(RECOMMENDED_JITENDEX_URL, dest);
-    updateOverlayTask(taskId, { title: t("dict.downloadTitle"), message: t("dict.downloadComplete"), detail: dest });
-    const result = await importDictionaryZip(dest, taskId);
-    const msg = t("dict.imported", { title: result.title, count: result.term_count || 0 });
-    finishOverlayTask(taskId, true, msg, t("dict.hoverReady"));
-  } catch (error) {
-    const msg = t("dict.downloadFailed");
-    finishOverlayTask(taskId, false, msg, compactError(error));
-    alert(msg + " Details: " + compactError(error));
-  }
-}
 function homePathFromDataRoot() {
   const root = dataRoot();
   const marker = "/Library/Application Support/";
@@ -383,7 +371,38 @@ function homePathFromDataRoot() {
   return root;
 }
 function backendLaunchPath() { return "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Applications/Xcode.app/Contents/Developer/usr/bin"; }
+function normalizeWorkerDictionaryGroups(dicts, language) {
+  const groups = emptyDictionaryGroups();
+  if (!dicts) {
+    const active = activeDictionaryGroups(language || selectedLanguageModule());
+    groups.term = active.term.slice();
+    groups.frequency = active.frequency.slice();
+    groups.pitch = active.pitch.slice();
+    return groups;
+  }
+  if (Array.isArray(dicts)) {
+    groups.term = dicts.slice();
+    return groups;
+  }
+  ["term", "frequency", "pitch"].forEach(type => {
+    groups[type] = Array.isArray(dicts[type]) ? dicts[type].map(item => String(item || "")).filter(Boolean) : [];
+  });
+  return groups;
+}
+function workerDictionaryCount(groups) {
+  const normalized = normalizeWorkerDictionaryGroups(groups);
+  return normalized.term.length + normalized.frequency.length + normalized.pitch.length;
+}
+function workerLookupTermPaths(groups) {
+  const normalized = normalizeWorkerDictionaryGroups(groups);
+  return normalized.term.slice();
+}
+function flattenedWorkerDictionaryPaths(groups) {
+  const normalized = normalizeWorkerDictionaryGroups(groups);
+  return normalized.term.concat(normalized.frequency, normalized.pitch);
+}
 function writeWorkerConfig(dicts, fingerprint, language) {
+  const groups = normalizeWorkerDictionaryGroups(dicts, language);
   const lines = [
     "version\t" + VERSION,
     "fingerprint\t" + String(fingerprint || ""),
@@ -391,7 +410,9 @@ function writeWorkerConfig(dicts, fingerprint, language) {
     "home\t" + homePathFromDataRoot(),
     "path\t" + backendLaunchPath()
   ];
-  for (const d of dicts || []) lines.push("dict\t" + d);
+  for (const d of groups.term) lines.push("term\t" + d);
+  for (const d of groups.frequency) lines.push("frequency\t" + d);
+  for (const d of groups.pitch) lines.push("pitch\t" + d);
   file.write(workerConfigPath(), lines.join("\n") + "\n");
 }
 async function writeWorkerStartScript() {
@@ -462,7 +483,8 @@ async function startBackendWorkerProcess(dicts, language) {
   activeWorkerReady = null;
   const lang = language || selectedLanguageModule();
   const fingerprint = workerFingerprint(dicts, lang);
-  debugLog("start backend worker language=" + lang.id + " dictCount=" + (dicts || []).length + " fingerprint=" + fingerprint);
+  const groups = normalizeWorkerDictionaryGroups(dicts, lang);
+  debugLog("start backend worker language=" + lang.id + " termDicts=" + groups.term.length + " freqDicts=" + groups.frequency.length + " pitchDicts=" + groups.pitch.length + " fingerprint=" + fingerprint);
   writeWorkerConfig(dicts, fingerprint, lang);
   await writeWorkerStartScript();
   const sleepMs = configuredWorkerIdleSleepMs();
@@ -502,8 +524,9 @@ async function waitForWorkerReady(fingerprint, timeoutMs) {
 }
 async function ensureBackendWorker(dicts, language) {
   const lang = language || selectedLanguageModule();
-  dicts = dicts || activeDictionaryPaths(lang);
-  const setupMessage = dictionarySetupMessage(lang, dicts);
+  dicts = dicts || activeDictionaryGroups(lang);
+  const termPaths = workerLookupTermPaths(dicts);
+  const setupMessage = dictionarySetupMessage(lang, termPaths);
   if (setupMessage) throw new Error(setupMessage);
   const advisory = dictionaryCompatibilityWarning(lang, activeDictionaryEntries(lang));
   if (advisory) {
@@ -511,9 +534,14 @@ async function ensureBackendWorker(dicts, language) {
     setOverlayStatus(advisory, "info", 7000);
   }
   const fingerprint = workerFingerprint(dicts, lang);
-  debugVerbose("ensureBackendWorker language=" + lang.id + " dictCount=" + dicts.length + " activeFingerprintMatches=" + String(activeWorkerFingerprint === fingerprint));
+  debugVerbose("ensureBackendWorker language=" + lang.id + " dictCount=" + workerDictionaryCount(dicts) + " termDictCount=" + termPaths.length + " activeFingerprintMatches=" + String(activeWorkerFingerprint === fingerprint));
   if (activeWorkerFingerprint === fingerprint && activeWorkerReady) return activeWorkerReady;
-  if (workerStartInFlight) return workerStartInFlight;
+  if (workerStartInFlight) {
+    if (workerStartInFlightFingerprint === fingerprint) return workerStartInFlight;
+    await workerStartInFlight.catch(() => {});
+    if (activeWorkerFingerprint === fingerprint && activeWorkerReady) return activeWorkerReady;
+  }
+  workerStartInFlightFingerprint = fingerprint;
   workerStartInFlight = (async () => {
     await stopBackendWorker().catch(() => {});
     setOverlayStatus(t("dict.preparingLookup"), "info", 4000);
@@ -521,7 +549,12 @@ async function ensureBackendWorker(dicts, language) {
     return await waitForWorkerReady(fingerprint, Math.max(8000, prefNumber("backendTimeoutMs", 30000)));
   })();
   try { return await workerStartInFlight; }
-  finally { workerStartInFlight = null; }
+  finally {
+    if (workerStartInFlightFingerprint === fingerprint) {
+      workerStartInFlight = null;
+      workerStartInFlightFingerprint = "";
+    }
+  }
 }
 async function clearPendingWorkerRequests() { await clearDirFiles(workerQueueDir()); }
 
@@ -569,7 +602,7 @@ async function runWorkerQueueLookupDirect(suffix, dicts, scanLength, maxResults,
 }
 async function lookupViaWorker(suffix, dicts, scanLength, maxResults, requestId, backendMode, maxGlossaries, language) {
   const lang = language || selectedLanguageModule();
-  debugVerbose("lookupViaWorker begin requestId=" + String(requestId || "") + " language=" + lang.id + " suffix=" + JSON.stringify(String(suffix || "").slice(0, 80)) + " dicts=" + dicts.length + " mode=" + String(backendMode || "yomitan-japanese"));
+  debugVerbose("lookupViaWorker begin requestId=" + String(requestId || "") + " language=" + lang.id + " suffix=" + JSON.stringify(String(suffix || "").slice(0, 80)) + " dicts=" + workerDictionaryCount(dicts) + " mode=" + String(backendMode || "yomitan-japanese"));
   const timeout = Math.max(1500, prefNumber("lookupTimeoutMs", 9000));
   try {
     return await runWorkerQueueLookupDirect(suffix, dicts, scanLength, maxResults, requestId, timeout, backendMode, maxGlossaries, lang);
@@ -681,8 +714,9 @@ async function lookupAtPosition(text, position, requestId) {
     const suffix = chars.slice(pos).join("");
     return { ok: true, text: clean, position: pos, suffix, language: language.id, results: [] };
   }
-  const dicts = activeDictionaryPaths(language);
-  const setupMessage = dictionarySetupMessage(language, dicts);
+  const dicts = activeDictionaryGroups(language);
+  const termPaths = workerLookupTermPaths(dicts);
+  const setupMessage = dictionarySetupMessage(language, termPaths);
   if (setupMessage) throw new Error(setupMessage);
   const maxResults = Math.max(1, prefNumber("maxEntries", 3));
   const maxGlossaries = Math.max(1, prefNumber("maxGlossesPerEntry", 4));
@@ -699,7 +733,7 @@ async function lookupAtPosition(text, position, requestId) {
     candidates.map(c => c.text).join("|")
   ].join(":");
   const key = [
-    dicts.join("|"),
+    workerFingerprint(dicts, language),
     language.id,
     backendMode,
     clean,

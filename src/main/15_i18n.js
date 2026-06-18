@@ -51,7 +51,6 @@ const I18N_MESSAGES = {
     "manager.selectionSaved": "Dictionary selection saved.",
     "manager.orderSaved": "Dictionary order saved.",
     "manager.deletingDictionary": "Deleting dictionary",
-    "manager.downloading": "Downloading recommended dictionaries",
     "manager.switchingProfile": "Switching profile",
     "manager.creatingProfile": "Creating profile",
     "manager.profileRenamed": "Profile renamed.",
@@ -81,12 +80,6 @@ const I18N_MESSAGES = {
     "dict.refreshingList": "Refreshing installed dictionaries.",
     "dict.refreshingWorker": "Refreshing lookup worker...",
     "dict.workerAvailable": "The new dictionary will be available for hover popups.",
-    "dict.downloadTitle": "Downloading recommended dictionaries",
-    "dict.downloading": "Downloading dictionary...",
-    "dict.downloadingJitendex": "Downloading Jitendex...",
-    "dict.downloadComplete": "Download complete. Importing...",
-    "dict.hoverReady": "You can now hover Japanese subtitles for dictionary popups.",
-    "dict.downloadFailed": "Could not download recommended dictionaries.",
     "dict.lookupReady": "Dictionary lookup ready.",
     "dict.preparingLookup": "Preparing dictionary lookup...",
     "dict.chooseZip": "Choose Yomitan dictionary ZIPs",
@@ -102,9 +95,7 @@ const I18N_MESSAGES = {
     "dict.backendImportFailed": "Backend import command failed.",
     "dict.importStageFailed": "Dictionary import failed.",
     "dict.couldNotAdd": "Could not add dictionary.",
-    "dict.couldNotAddDetail": "Could not add dictionary: {error}",
-    "recommended.jitendexLanguage": "Japanese",
-    "recommended.jitendexDescription": "JMdict-based Japanese-English dictionary with structured Yomitan data."
+    "dict.couldNotAddDetail": "Could not add dictionary: {error}"
   },
   "zh-CN": {
     "menu.settings": "设置...",
@@ -158,7 +149,6 @@ const I18N_MESSAGES = {
     "manager.selectionSaved": "词典选择已保存。",
     "manager.orderSaved": "词典顺序已保存。",
     "manager.deletingDictionary": "正在删除词典",
-    "manager.downloading": "正在下载推荐词典",
     "manager.switchingProfile": "正在切换配置方案",
     "manager.creatingProfile": "正在创建配置方案",
     "manager.profileRenamed": "配置方案已重命名。",
@@ -188,12 +178,6 @@ const I18N_MESSAGES = {
     "dict.refreshingList": "正在刷新已安装词典。",
     "dict.refreshingWorker": "正在刷新查词进程...",
     "dict.workerAvailable": "新词典很快即可用于字幕悬停查词。",
-    "dict.downloadTitle": "正在下载推荐词典",
-    "dict.downloading": "正在下载词典...",
-    "dict.downloadingJitendex": "正在下载 Jitendex...",
-    "dict.downloadComplete": "下载完成，正在导入...",
-    "dict.hoverReady": "现在可以在日语字幕上悬停查词。",
-    "dict.downloadFailed": "无法下载推荐词典。",
     "dict.lookupReady": "词典查词已就绪。",
     "dict.preparingLookup": "正在准备词典查词...",
     "dict.chooseZip": "选择 Yomitan 词典 ZIP",
@@ -209,9 +193,7 @@ const I18N_MESSAGES = {
     "dict.backendImportFailed": "词典后端导入命令失败。",
     "dict.importStageFailed": "词典导入失败。",
     "dict.couldNotAdd": "无法添加词典。",
-    "dict.couldNotAddDetail": "无法添加词典：{error}",
-    "recommended.jitendexLanguage": "日语",
-    "recommended.jitendexDescription": "基于 JMdict 的日英词典，包含结构化 Yomitan 数据。"
+    "dict.couldNotAddDetail": "无法添加词典：{error}"
   }
 };
 
@@ -241,11 +223,8 @@ function t(key, values) {
 }
 function languageLabelForUi(language) {
   const id = String(language && language.id || "");
-  const labels = {
-    en: { ja: "Japanese", en: "English", fr: "French", de: "German", zh: "Chinese", ko: "Korean" },
-    "zh-CN": { ja: "日语", en: "英语", fr: "法语", de: "德语", zh: "中文", ko: "韩语" }
-  };
-  return (labels[resolvedUiLanguage()] || labels.en)[id] || String(language && language.label || id);
+  const labels = { ja: "日本語", en: "English", fr: "Français", de: "Deutsch", zh: "中文", ko: "한국어" };
+  return labels[id] || String(language && (language.nativeLabel || language.label) || id);
 }
 async function refreshSystemUiLanguage() {
   if (configuredUiLanguage() !== "auto") return resolvedUiLanguage();
