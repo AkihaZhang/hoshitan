@@ -3,8 +3,9 @@ const path = require('path');
 const vm = require('vm');
 
 const root = path.resolve(__dirname, '..');
-const sourceUrl = 'http://audio-source.invalid/?term=%E8%AA%AD%E3%82%80&reading=%E3%82%88%E3%82%80';
+const posts = [];
 const execCalls = [];
+let localAudioCalls = 0;
 
 const context = {
   console,
@@ -12,22 +13,18 @@ const context = {
   compactError(error) { return error && error.message ? error.message : String(error); },
   debugVerbose() {},
   debugWarn() {},
-  postToOverlay() {},
+  postToOverlay(type, payload) { posts.push({ type, payload }); },
+  isLocalAudioSourceUrl(url) {
+    return /^http:\/\/127\.0\.0\.1:19742\/localaudio\/?\?/i.test(String(url || ''));
+  },
+  async localAudioCandidatesForUrl(sourceUrl) {
+    localAudioCalls++;
+    return [{ name: 'Local Audio', url: 'data:audio/mpeg;base64,SUQz', sourceUrl }];
+  },
   utils: {
     async exec(command, args, cwd) {
       execCalls.push({ command, args, cwd });
-      return {
-        status: 0,
-        stdout: JSON.stringify({
-          type: 'audioSourceList',
-          audioSources: [
-            { name: 'NHK16', url: '/nhk16/audio/reading.opus' },
-            { name: 'bad', url: 'ftp://example.invalid/audio.mp3' },
-            { url: 'https://audio-cdn.invalid/jpod/audio.mp3' }
-          ]
-        }),
-        stderr: ''
-      };
+      throw new Error('utils.exec must not be used by overlay audio bridge');
     }
   }
 };
@@ -36,20 +33,39 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 vm.createContext(context);
 vm.runInContext(fs.readFileSync(path.join(root, 'src/main/50_overlay_bridge_pause.js'), 'utf8'), context);
 
 (async () => {
-  const candidates = await context.fetchAudioSourceCandidates(sourceUrl);
-  assert(execCalls.length === 1, 'Audio source resolution should use one curl request');
-  assert(execCalls[0].command === '/usr/bin/curl', 'Audio source resolution should use curl from the plugin process');
-  assert(execCalls[0].args[execCalls[0].args.length - 1] === sourceUrl, 'Audio source resolution should pass the fixture URL to the mocked exec call');
-  assert(execCalls[0].args.includes('--location'), 'Audio source resolution should follow redirects');
-  assert(execCalls[0].args.includes('--max-time'), 'Audio source resolution should have a network timeout');
-  assert(candidates.length === 2, 'Audio source resolution should keep only playable http/https candidates');
-  assert(candidates[0].name === 'NHK16', 'Audio source resolution should preserve candidate names');
-  assert(candidates[0].url === 'http://audio-source.invalid/nhk16/audio/reading.opus', 'Relative audio URLs should resolve against the source URL');
-  assert(candidates[1].url === 'https://audio-cdn.invalid/jpod/audio.mp3', 'Absolute audio URLs should pass through');
+  context.handleBridgeAudioSource({
+    requestId: 'online-1',
+    url: 'https://hoshi-reader.manhhaoo-do.workers.dev/?term=%E8%AA%AD%E3%82%80&reading=%E3%82%88%E3%82%80'
+  });
+  await delay(0);
+  const online = posts.find(item => item.payload && item.payload.requestId === 'online-1');
+  assert(online, 'Online audio bridge requests should receive a response');
+  assert(online.type === 'audio-source-result', 'Audio bridge should respond with audio-source-result');
+  assert(online.payload.ok === false, 'Online audio must be rejected by the plugin bridge');
+  assert(/Only local audio bridge/.test(online.payload.error), 'Online audio rejection should explain the boundary');
+  assert(execCalls.length === 0, 'Online audio bridge rejection must not call utils.exec');
+  assert(localAudioCalls === 0, 'Online audio bridge rejection must not query local audio');
+
+  context.handleBridgeAudioSource({
+    requestId: 'local-1',
+    url: 'http://127.0.0.1:19742/localaudio/?term=%E8%AA%AD%E3%82%80&reading=%E3%82%88%E3%82%80'
+  });
+  await delay(0);
+  const local = posts.find(item => item.payload && item.payload.requestId === 'local-1');
+  assert(local, 'Local audio bridge requests should receive a response');
+  assert(local.payload.ok === true, 'Local audio should still resolve through the plugin bridge');
+  assert(local.payload.candidates.length === 1, 'Local audio bridge should return local candidates');
+  assert(local.payload.candidates[0].url === 'data:audio/mpeg;base64,SUQz', 'Local audio bridge should preserve data audio URLs');
+  assert(execCalls.length === 0, 'Bridge dispatch itself must not call utils.exec');
+  assert(localAudioCalls === 1, 'Local audio bridge should delegate to localAudioCandidatesForUrl exactly once');
 
   console.log('audio bridge tests passed');
 })().catch(error => {

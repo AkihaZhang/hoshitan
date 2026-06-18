@@ -2255,9 +2255,6 @@ const PROFILE_PREFERENCE_DEFAULTS = {
   backendTimeoutMs: 30000,
   debugLogEnabled: true,
   debugLogVerbose: false,
-  directWorkerIpc: true,
-  fallbackToClientExec: false,
-  allowClientExecLookup: false,
   directIpcPollMs: DIRECT_IPC_POLL_MS_DEFAULT,
   workerIdleSleepMs: WORKER_IDLE_SLEEP_MS_DEFAULT
 };
@@ -2383,9 +2380,6 @@ function normalizeProfilePreferences(prefs) {
   });
   out.audioAutoPlay = normalizeProfilePreferenceBoolValue(out.audioAutoPlay, PROFILE_PREFERENCE_DEFAULTS.audioAutoPlay);
   out.audioProbeOnPopup = normalizeProfilePreferenceBoolValue(out.audioProbeOnPopup, PROFILE_PREFERENCE_DEFAULTS.audioProbeOnPopup);
-  out.directWorkerIpc = normalizeProfilePreferenceBoolValue(out.directWorkerIpc, PROFILE_PREFERENCE_DEFAULTS.directWorkerIpc);
-  out.fallbackToClientExec = normalizeProfilePreferenceBoolValue(out.fallbackToClientExec, PROFILE_PREFERENCE_DEFAULTS.fallbackToClientExec);
-  out.allowClientExecLookup = normalizeProfilePreferenceBoolValue(out.allowClientExecLookup, PROFILE_PREFERENCE_DEFAULTS.allowClientExecLookup);
   out.audioSourcesJson = normalizeAudioSourcesJsonPreference(out.audioSourcesJson, !hasAudioSources);
   out.directIpcPollMs = normalizeProfilePreferenceNumberValue(out.directIpcPollMs, DIRECT_IPC_POLL_MS_DEFAULT, DIRECT_IPC_POLL_MS_MIN, DIRECT_IPC_POLL_MS_MAX);
   out.workerIdleSleepMs = normalizeProfilePreferenceNumberValue(out.workerIdleSleepMs, WORKER_IDLE_SLEEP_MS_DEFAULT, WORKER_IDLE_SLEEP_MS_MIN, WORKER_IDLE_SLEEP_MS_MAX);
@@ -3642,41 +3636,16 @@ async function runWorkerQueueLookupDirect(suffix, dicts, scanLength, maxResults,
   safeDelete(req);
   throw new Error("Direct worker lookup timed out after " + timeout + " ms");
 }
-async function runWorkerLookupViaClientExec(suffix, dicts, scanLength, maxResults, requestId, timeout, backendMode, maxGlossaries, language) {
-  await ensureBackendWorker(dicts, language);
-  const clientArgs = [
-    "client", workerRoot(),
-    "--max-results", String(maxResults),
-    "--max-glossaries", String(maxGlossaries),
-    "--scan-length", String(scanLength),
-    "--mode", String(backendMode || "yomitan-japanese"),
-    "--timeout-ms", String(timeout),
-    "--", suffix
-  ];
-  const lookupStartedAt = Date.now();
-  const result = await runBackendJson(clientArgs, timeout + 2500, "Dictionary lookup command");
-  debugVerbose("client exec lookup result requestId=" + String(requestId || "") + " elapsedMs=" + (Date.now() - lookupStartedAt) + " resultCount=" + (result && result.results ? result.results.length : "n/a"));
-  return result;
-}
 async function lookupViaWorker(suffix, dicts, scanLength, maxResults, requestId, backendMode, maxGlossaries, language) {
   const lang = language || selectedLanguageModule();
-  debugVerbose("lookupViaWorker begin requestId=" + String(requestId || "") + " language=" + lang.id + " suffix=" + JSON.stringify(String(suffix || "").slice(0, 80)) + " dicts=" + dicts.length + " mode=" + String(backendMode || "yomitan-japanese") + " directIpc=" + String(prefBool("directWorkerIpc", true)));
+  debugVerbose("lookupViaWorker begin requestId=" + String(requestId || "") + " language=" + lang.id + " suffix=" + JSON.stringify(String(suffix || "").slice(0, 80)) + " dicts=" + dicts.length + " mode=" + String(backendMode || "yomitan-japanese"));
   const timeout = Math.max(1500, prefNumber("lookupTimeoutMs", 9000));
-  const clientExecFallbackEnabled = prefBool("fallbackToClientExec", false) && prefBool("allowClientExecLookup", false);
-
-  if (prefBool("directWorkerIpc", true)) {
-    try {
-      const result = await runWorkerQueueLookupDirect(suffix, dicts, scanLength, maxResults, requestId, timeout, backendMode, maxGlossaries, lang);
-      return result;
-    } catch (error) {
-      debugWarn("direct worker lookup failed requestId=" + String(requestId || "") + ": " + compactError(error));
-      if (!clientExecFallbackEnabled) throw error;
-    }
+  try {
+    return await runWorkerQueueLookupDirect(suffix, dicts, scanLength, maxResults, requestId, timeout, backendMode, maxGlossaries, lang);
+  } catch (error) {
+    debugWarn("direct worker lookup failed requestId=" + String(requestId || "") + ": " + compactError(error));
+    throw error;
   }
-
-  const result = await runWorkerLookupViaClientExec(suffix, dicts, scanLength, maxResults, requestId, timeout, backendMode, maxGlossaries, lang);
-  if (!result || result.ok === false) throw new Error((result && result.error) || "Worker client lookup failed");
-  return result;
 }
 function glossaryTagsIndicateNonLemma(glossary) {
   const tags = String((glossary && glossary.definitionTags) || "") + " " + String((glossary && glossary.termTags) || "");
@@ -4074,7 +4043,13 @@ function ensureOverlayBridge() {
 	  const sourceUrl = String((payload && payload.url) || "");
 	  (async () => {
 	    try {
-	      const candidates = await fetchAudioSourceCandidates(sourceUrl);
+	      if (!(typeof isLocalAudioSourceUrl === "function" && isLocalAudioSourceUrl(sourceUrl))) {
+	        throw new Error("Only local audio bridge sources may be resolved by the plugin process.");
+	      }
+	      if (typeof localAudioCandidatesForUrl !== "function") {
+	        throw new Error("Local audio bridge is not available.");
+	      }
+	      const candidates = await localAudioCandidatesForUrl(sourceUrl);
 	      debugVerbose("audio source resolved requestId=" + requestId + " url=" + JSON.stringify(sourceUrl) + " candidates=" + candidates.length);
 	      postToOverlay("audio-source-result", { requestId, ok: true, candidates });
 	    } catch (error) {
@@ -5712,8 +5687,6 @@ function runSettingsAuditChecks() {
   check(cfg.etymologyCollapseDefault === "collapsed" || cfg.etymologyCollapseDefault === "expanded", "etymologyCollapseDefault should be sent to overlay");
   check(["collapsed", "expanded", "inherit"].indexOf(cfg.wiktionaryEtymologyCollapseOverride) >= 0, "wiktionaryEtymologyCollapseOverride should be sent to overlay");
   check(typeof cfg.customPopupCss === "string", "customPopupCss should be sent to overlay as a string");
-  check(typeof prefBool("directWorkerIpc", true) === "boolean", "directWorkerIpc should be boolean-readable");
-  check(typeof prefBool("fallbackToClientExec", true) === "boolean", "fallbackToClientExec should be boolean-readable");
   check(Number.isFinite(prefNumber("directIpcPollMs", DIRECT_IPC_POLL_MS_DEFAULT)), "directIpcPollMs should be numeric");
   check(Number.isFinite(prefNumber("workerIdleSleepMs", WORKER_IDLE_SLEEP_MS_DEFAULT)), "workerIdleSleepMs should be numeric");
   if (failures.length) alert("Settings audit checks failed:\n" + failures.join("\n"));
@@ -5840,7 +5813,7 @@ function logTimingSummary(summary) {
 }
 async function runLookupPerformanceBenchmark() {
   try {
-    debugLog("BENCH starting lookup performance benchmark directIpc=" + String(prefBool("directWorkerIpc", true)) + " fallback=" + String(prefBool("fallbackToClientExec", true)));
+    debugLog("BENCH starting lookup performance benchmark workerQueue=true");
     showOSD("Hoshitan lookup benchmark started");
     const language = selectedLanguageModule();
     const dicts = activeDictionaryPaths(language);

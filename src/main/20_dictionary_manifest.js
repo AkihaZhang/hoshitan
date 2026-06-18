@@ -36,9 +36,6 @@ const PROFILE_PREFERENCE_DEFAULTS = {
   backendTimeoutMs: 30000,
   debugLogEnabled: true,
   debugLogVerbose: false,
-  directWorkerIpc: true,
-  fallbackToClientExec: false,
-  allowClientExecLookup: false,
   directIpcPollMs: DIRECT_IPC_POLL_MS_DEFAULT,
   workerIdleSleepMs: WORKER_IDLE_SLEEP_MS_DEFAULT
 };
@@ -164,9 +161,6 @@ function normalizeProfilePreferences(prefs) {
   });
   out.audioAutoPlay = normalizeProfilePreferenceBoolValue(out.audioAutoPlay, PROFILE_PREFERENCE_DEFAULTS.audioAutoPlay);
   out.audioProbeOnPopup = normalizeProfilePreferenceBoolValue(out.audioProbeOnPopup, PROFILE_PREFERENCE_DEFAULTS.audioProbeOnPopup);
-  out.directWorkerIpc = normalizeProfilePreferenceBoolValue(out.directWorkerIpc, PROFILE_PREFERENCE_DEFAULTS.directWorkerIpc);
-  out.fallbackToClientExec = normalizeProfilePreferenceBoolValue(out.fallbackToClientExec, PROFILE_PREFERENCE_DEFAULTS.fallbackToClientExec);
-  out.allowClientExecLookup = normalizeProfilePreferenceBoolValue(out.allowClientExecLookup, PROFILE_PREFERENCE_DEFAULTS.allowClientExecLookup);
   out.audioSourcesJson = normalizeAudioSourcesJsonPreference(out.audioSourcesJson, !hasAudioSources);
   out.directIpcPollMs = normalizeProfilePreferenceNumberValue(out.directIpcPollMs, DIRECT_IPC_POLL_MS_DEFAULT, DIRECT_IPC_POLL_MS_MIN, DIRECT_IPC_POLL_MS_MAX);
   out.workerIdleSleepMs = normalizeProfilePreferenceNumberValue(out.workerIdleSleepMs, WORKER_IDLE_SLEEP_MS_DEFAULT, WORKER_IDLE_SLEEP_MS_MIN, WORKER_IDLE_SLEEP_MS_MAX);

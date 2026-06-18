@@ -124,7 +124,13 @@ function ensureOverlayBridge() {
 	  const sourceUrl = String((payload && payload.url) || "");
 	  (async () => {
 	    try {
-	      const candidates = await fetchAudioSourceCandidates(sourceUrl);
+	      if (!(typeof isLocalAudioSourceUrl === "function" && isLocalAudioSourceUrl(sourceUrl))) {
+	        throw new Error("Only local audio bridge sources may be resolved by the plugin process.");
+	      }
+	      if (typeof localAudioCandidatesForUrl !== "function") {
+	        throw new Error("Local audio bridge is not available.");
+	      }
+	      const candidates = await localAudioCandidatesForUrl(sourceUrl);
 	      debugVerbose("audio source resolved requestId=" + requestId + " url=" + JSON.stringify(sourceUrl) + " candidates=" + candidates.length);
 	      postToOverlay("audio-source-result", { requestId, ok: true, candidates });
 	    } catch (error) {

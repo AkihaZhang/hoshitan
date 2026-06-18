@@ -151,7 +151,7 @@
   const LOOKUP_RETRY_INTERVAL_MS = 60;
   const IDLE_HOVER_LOOKUP_MS = 1200;
   const AUDIO_CACHE_MAX_ENTRIES = 24;
-  const AUDIO_REPEAT_CLICK_THROTTLE_MS = 120;
+  const AUDIO_REPEAT_CLICK_THROTTLE_MS = 500;
   const AUDIO_IN_FLIGHT_DEDUP_MS = 5000;
 	  let customPopupStyleEl = null;
 	  let lastCustomPopupCss = null;
@@ -548,6 +548,10 @@
 	    if (button) button.dataset.audioKey = key;
 	    const now = Date.now();
 	    if (state.audioPlayInFlightKey === playKey && now - Number(state.audioPlayInFlightStartedAt || 0) < AUDIO_IN_FLIGHT_DEDUP_MS) {
+	      setAudioButtonsStateForKey(key, 'loading', 'Finding audio...');
+	      return false;
+	    }
+	    if (state.audioPlayInFlightKey && state.audioPlayInFlightKey !== playKey && now - Number(state.audioPlayInFlightStartedAt || 0) < AUDIO_IN_FLIGHT_DEDUP_MS) {
 	      setAudioButtonsStateForKey(key, 'loading', 'Finding audio...');
 	      return false;
 	    }

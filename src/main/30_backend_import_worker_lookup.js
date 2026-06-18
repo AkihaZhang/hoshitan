@@ -567,41 +567,16 @@ async function runWorkerQueueLookupDirect(suffix, dicts, scanLength, maxResults,
   safeDelete(req);
   throw new Error("Direct worker lookup timed out after " + timeout + " ms");
 }
-async function runWorkerLookupViaClientExec(suffix, dicts, scanLength, maxResults, requestId, timeout, backendMode, maxGlossaries, language) {
-  await ensureBackendWorker(dicts, language);
-  const clientArgs = [
-    "client", workerRoot(),
-    "--max-results", String(maxResults),
-    "--max-glossaries", String(maxGlossaries),
-    "--scan-length", String(scanLength),
-    "--mode", String(backendMode || "yomitan-japanese"),
-    "--timeout-ms", String(timeout),
-    "--", suffix
-  ];
-  const lookupStartedAt = Date.now();
-  const result = await runBackendJson(clientArgs, timeout + 2500, "Dictionary lookup command");
-  debugVerbose("client exec lookup result requestId=" + String(requestId || "") + " elapsedMs=" + (Date.now() - lookupStartedAt) + " resultCount=" + (result && result.results ? result.results.length : "n/a"));
-  return result;
-}
 async function lookupViaWorker(suffix, dicts, scanLength, maxResults, requestId, backendMode, maxGlossaries, language) {
   const lang = language || selectedLanguageModule();
-  debugVerbose("lookupViaWorker begin requestId=" + String(requestId || "") + " language=" + lang.id + " suffix=" + JSON.stringify(String(suffix || "").slice(0, 80)) + " dicts=" + dicts.length + " mode=" + String(backendMode || "yomitan-japanese") + " directIpc=" + String(prefBool("directWorkerIpc", true)));
+  debugVerbose("lookupViaWorker begin requestId=" + String(requestId || "") + " language=" + lang.id + " suffix=" + JSON.stringify(String(suffix || "").slice(0, 80)) + " dicts=" + dicts.length + " mode=" + String(backendMode || "yomitan-japanese"));
   const timeout = Math.max(1500, prefNumber("lookupTimeoutMs", 9000));
-  const clientExecFallbackEnabled = prefBool("fallbackToClientExec", false) && prefBool("allowClientExecLookup", false);
-
-  if (prefBool("directWorkerIpc", true)) {
-    try {
-      const result = await runWorkerQueueLookupDirect(suffix, dicts, scanLength, maxResults, requestId, timeout, backendMode, maxGlossaries, lang);
-      return result;
-    } catch (error) {
-      debugWarn("direct worker lookup failed requestId=" + String(requestId || "") + ": " + compactError(error));
-      if (!clientExecFallbackEnabled) throw error;
-    }
+  try {
+    return await runWorkerQueueLookupDirect(suffix, dicts, scanLength, maxResults, requestId, timeout, backendMode, maxGlossaries, lang);
+  } catch (error) {
+    debugWarn("direct worker lookup failed requestId=" + String(requestId || "") + ": " + compactError(error));
+    throw error;
   }
-
-  const result = await runWorkerLookupViaClientExec(suffix, dicts, scanLength, maxResults, requestId, timeout, backendMode, maxGlossaries, lang);
-  if (!result || result.ok === false) throw new Error((result && result.error) || "Worker client lookup failed");
-  return result;
 }
 function glossaryTagsIndicateNonLemma(glossary) {
   const tags = String((glossary && glossary.definitionTags) || "") + " " + String((glossary && glossary.termTags) || "");

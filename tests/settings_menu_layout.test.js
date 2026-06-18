@@ -26,8 +26,9 @@ assert(Object.prototype.hasOwnProperty.call(info.preferenceDefaults, 'localAudio
 assert(info.preferenceDefaults.fontScale <= 0.9, 'Hoshitan subtitle size should default smaller than the old oversized overlay');
 assert(info.preferenceDefaults.nativeSubtitleScale < 1, 'IINA native subtitles should default to a reduced scale while Hoshitan is active');
 assert(info.preferenceDefaults.popupTopMarginPx >= 48, 'Popup top safe margin should keep controls clear of the title bar');
-assert(info.preferenceDefaults.fallbackToClientExec === false, 'Client executable lookup fallback should default off');
-assert(info.preferenceDefaults.allowClientExecLookup === false, 'Unsafe client executable lookup fallback should require explicit opt-in');
+assert(!Object.prototype.hasOwnProperty.call(info.preferenceDefaults, 'directWorkerIpc'), 'Removed worker IPC compatibility preference should not be in defaults');
+assert(!Object.prototype.hasOwnProperty.call(info.preferenceDefaults, 'fallbackToClientExec'), 'Removed client executable lookup fallback should not be in defaults');
+assert(!Object.prototype.hasOwnProperty.call(info.preferenceDefaults, 'allowClientExecLookup'), 'Removed client executable lookup opt-in should not be in defaults');
 assert(info.preferenceDefaults.directIpcPollMs >= 16, 'Direct worker IPC polling should not default to a busy 2ms loop');
 assert(info.preferenceDefaults.workerIdleSleepMs >= 30, 'Worker idle polling should not default to a busy 2ms loop');
 
@@ -56,7 +57,9 @@ assert(/data-profile-pref="popupMaxHeight"/.test(managerHtml), 'Settings manager
 assert(/data-profile-pref="popupTopMarginPx"/.test(managerHtml), 'Settings manager should expose popup top safe margin');
 assert(/data-profile-pref="customPopupCss"/.test(managerHtml), 'Settings manager should expose per-profile custom popup CSS');
 assert(/data-profile-pref="audioProbeOnPopup"/.test(managerHtml), 'Settings manager should expose popup audio probing as an opt-in');
-assert(/data-profile-pref="allowClientExecLookup"/.test(managerHtml), 'Settings manager should expose the explicit unsafe client lookup fallback opt-in');
+assert(!/data-profile-pref="directWorkerIpc"/.test(managerHtml), 'Settings manager should not expose removed directWorkerIpc preference');
+assert(!/data-profile-pref="allowClientExecLookup"/.test(managerHtml), 'Settings manager should not expose client executable lookup fallback on interactive lookup paths');
+assert(!/fallbackToClientExec|client executable lookup fallback|Use direct worker IPC/.test(managerHtml), 'Settings manager should not include removed worker compatibility labels');
 assert(/id="directIpcPollMs"[^>]*min="16"[^>]*max="250"/.test(managerHtml), 'Direct IPC polling setting should enforce a conservative lower bound');
 assert(/id="workerIdleSleepMs"[^>]*min="30"[^>]*max="250"/.test(managerHtml), 'Worker idle sleep setting should enforce a conservative lower bound');
 assert(/data-global-setting="lowRamImport"/.test(managerHtml), 'Settings manager should expose global dictionary import settings');
@@ -160,7 +163,10 @@ assert(/function configuredWorkerIdleSleepMs\(\)/.test(backendSource), 'Worker s
 assert(/WORKER_IDLE_SLEEP_MS_MIN/.test(backendSource), 'Worker idle sleep should clamp saved legacy values below the safe lower bound');
 assert(/function configuredDirectIpcPollMs\(\)/.test(backendSource), 'Direct IPC response polling should use a bounded helper');
 assert(/DIRECT_IPC_POLL_MS_MIN/.test(backendSource), 'Direct IPC polling should clamp saved legacy values below the safe lower bound');
-assert(/allowClientExecLookup/.test(backendSource), 'Client executable lookup fallback should require a separate explicit opt-in');
+assert(!/directWorkerIpc|fallbackToClientExec|allowClientExecLookup/.test(backendSource), 'Interactive lookup source should not read removed exec fallback preferences');
+const lookupViaWorkerSource = backendSource.slice(backendSource.indexOf('async function lookupViaWorker'), backendSource.indexOf('function glossaryTagsIndicateNonLemma'));
+assert(/runWorkerQueueLookupDirect/.test(lookupViaWorkerSource), 'Interactive lookup should use the persistent worker queue');
+assert(!/runWorkerLookupViaClientExec/.test(lookupViaWorkerSource), 'Interactive lookup must not fall back to client executable lookup');
 
 const lifecycleSource = fs.readFileSync(path.join(root, 'src/main/60_overlay_lifecycle_toggle.js'), 'utf8');
 assert(/function reloadOverlayForProfileChange\(\)/.test(lifecycleSource), 'Profile changes should be able to reload the overlay');

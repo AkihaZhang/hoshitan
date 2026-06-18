@@ -90,8 +90,6 @@ function runSettingsAuditChecks() {
   check(cfg.etymologyCollapseDefault === "collapsed" || cfg.etymologyCollapseDefault === "expanded", "etymologyCollapseDefault should be sent to overlay");
   check(["collapsed", "expanded", "inherit"].indexOf(cfg.wiktionaryEtymologyCollapseOverride) >= 0, "wiktionaryEtymologyCollapseOverride should be sent to overlay");
   check(typeof cfg.customPopupCss === "string", "customPopupCss should be sent to overlay as a string");
-  check(typeof prefBool("directWorkerIpc", true) === "boolean", "directWorkerIpc should be boolean-readable");
-  check(typeof prefBool("fallbackToClientExec", true) === "boolean", "fallbackToClientExec should be boolean-readable");
   check(Number.isFinite(prefNumber("directIpcPollMs", DIRECT_IPC_POLL_MS_DEFAULT)), "directIpcPollMs should be numeric");
   check(Number.isFinite(prefNumber("workerIdleSleepMs", WORKER_IDLE_SLEEP_MS_DEFAULT)), "workerIdleSleepMs should be numeric");
   if (failures.length) alert("Settings audit checks failed:\n" + failures.join("\n"));
@@ -218,7 +216,7 @@ function logTimingSummary(summary) {
 }
 async function runLookupPerformanceBenchmark() {
   try {
-    debugLog("BENCH starting lookup performance benchmark directIpc=" + String(prefBool("directWorkerIpc", true)) + " fallback=" + String(prefBool("fallbackToClientExec", true)));
+    debugLog("BENCH starting lookup performance benchmark workerQueue=true");
     showOSD("Hoshitan lookup benchmark started");
     const language = selectedLanguageModule();
     const dicts = activeDictionaryPaths(language);

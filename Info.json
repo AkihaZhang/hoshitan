@@ -1,7 +1,7 @@
 {
   "name": "Hoshitan",
   "identifier": "io.github.akihazhang.hoshitan",
-  "version": "0.1.0-dev.10",
+  "version": "0.1.0-dev.11",
   "author": {
     "name": "AkihaZhang"
   },
@@ -44,9 +44,6 @@
     "customPopupCss": "",
     "debugLogEnabled": true,
     "debugLogVerbose": false,
-    "directWorkerIpc": true,
-    "fallbackToClientExec": false,
-    "allowClientExecLookup": false,
     "directIpcPollMs": 16,
     "workerIdleSleepMs": 30,
     "ankiConnectUrl": "http://127.0.0.1:8765",
