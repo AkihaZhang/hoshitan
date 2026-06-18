@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.0-dev.13 - 2026-06-18
+
+- Export rendered Yomitan glossary HTML and scoped dictionary stylesheet rules to Anki instead of flattening definitions to plain text.
+- Auto-map Lapis card type, frequency, pitch, and screenshot fields so new cards show both the word and sentence on the front.
+
 ## 0.1.0-dev.12 - 2026-06-18
 
 - Reduced the default Hoshitan and native IINA subtitle scale so the subtitle overlay starts smaller on video playback.

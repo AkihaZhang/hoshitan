@@ -5232,6 +5232,21 @@ function ankiText(value, maxLength) {
   const normalized = String(value || "").replace(/\u0000/g, "").replace(/\r/g, "").trim();
   return normalized.slice(0, Math.max(1, Number(maxLength) || 50000));
 }
+function ankiHtml(value, maxLength) {
+  const normalized = String(value || "").replace(/\u0000/g, "").replace(/\r/g, "").trim();
+  return normalized.slice(0, Math.max(1, Number(maxLength) || 120000));
+}
+function ankiEscapeHtmlFragment(value) {
+  return String(value || "")
+    .replace(/\u0000/g, "")
+    .replace(/\r/g, "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+    .replace(/\n/g, "<br>");
+}
 function ankiEscapeHtml(value) {
   return ankiText(value, 50000)
     .replace(/&/g, "&amp;")
@@ -5254,6 +5269,9 @@ function ankiFieldsFromPayload(payload, settings, sourceText) {
   const singleGlossaries = payload && payload.singleGlossaries && typeof payload.singleGlossaries === "object"
     ? payload.singleGlossaries
     : {};
+  const singleGlossariesHtml = payload && payload.singleGlossariesHtml && typeof payload.singleGlossariesHtml === "object"
+    ? payload.singleGlossariesHtml
+    : {};
   const glossary = payload && (payload.glossary || payload.definition);
   const glossaryFirst = payload && (payload.glossaryFirst || payload.selectedGlossary || glossary);
   const values = {
@@ -5269,6 +5287,7 @@ function ankiFieldsFromPayload(payload, settings, sourceText) {
     "{selected-glossary-fallback}": payload && (payload.selectedGlossary || glossaryFirst),
     "{popup-selection-text}": payload && payload.popupSelectionText,
     "{frequencies}": payload && payload.frequencies,
+    "{frequencies-html}": payload && (payload.frequenciesHtml || payload.frequencies),
     "{frequency-harmonic-rank}": payload && payload.frequencyHarmonicRank,
     "{pitch-accent-positions}": payload && payload.pitchAccentPositions,
     "{pitch-accent-categories}": payload && payload.pitchAccentCategories,
@@ -5281,15 +5300,41 @@ function ankiFieldsFromPayload(payload, settings, sourceText) {
     "{sentence-audio}": "",
     "{sasayaki-audio}": ""
   };
+  const htmlValues = {
+    "{definition}": payload && (payload.definitionHtml || payload.glossaryHtml),
+    "{glossary}": payload && payload.glossaryHtml,
+    "{glossary-first}": payload && (payload.glossaryFirstHtml || payload.selectedGlossaryHtml),
+    "{selected-glossary}": payload && payload.selectedGlossaryHtml,
+    "{selected-glossary-fallback}": payload && (payload.selectedGlossaryHtml || payload.glossaryFirstHtml || payload.glossaryHtml),
+    "{frequencies-html}": payload && payload.frequenciesHtml
+  };
+  function fieldValueFromTemplate(mapping) {
+    const template = String(mapping || "");
+    let cursor = 0;
+    let out = "";
+    const re = /\{.*?\}/g;
+    let match;
+    while ((match = re.exec(template))) {
+      out += ankiEscapeHtmlFragment(template.slice(cursor, match.index));
+      const placeholder = match[0];
+      const singleMatch = /^\{single-glossary-(.+)\}$/.exec(placeholder);
+      if (singleMatch) {
+        const html = ankiSingleGlossaryValue(singleGlossariesHtml, singleMatch[1]);
+        if (html) out += ankiHtml(html, 120000);
+        else out += ankiEscapeHtmlFragment(ankiSingleGlossaryValue(singleGlossaries, singleMatch[1]) || "");
+      } else if (Object.prototype.hasOwnProperty.call(htmlValues, placeholder) && htmlValues[placeholder]) {
+        out += ankiHtml(htmlValues[placeholder], 120000);
+      } else if (Object.prototype.hasOwnProperty.call(values, placeholder)) {
+        out += ankiEscapeHtmlFragment(values[placeholder] || "");
+      }
+      cursor = match.index + placeholder.length;
+    }
+    out += ankiEscapeHtmlFragment(template.slice(cursor));
+    return ankiHtml(out, 120000);
+  }
   Object.keys(settings.fieldMappings || {}).forEach(fieldName => {
     const mapping = String(settings.fieldMappings[fieldName] || "");
-    const value = mapping.replace(/\{.*?\}/g, placeholder => {
-      if (Object.prototype.hasOwnProperty.call(values, placeholder)) return String(values[placeholder] || "");
-      const singleMatch = /^\{single-glossary-(.+)\}$/.exec(placeholder);
-      if (singleMatch) return String(ankiSingleGlossaryValue(singleGlossaries, singleMatch[1]) || "");
-      return "";
-    });
-    fields[fieldName] = ankiEscapeHtml(value || "");
+    fields[fieldName] = fieldValueFromTemplate(mapping);
   });
   return fields;
 }

@@ -15,8 +15,11 @@ const settings = {
     Expression: '{expression}',
     ExpressionReading: 'Reading: {reading}',
     MainDefinition: '{single-glossary-明鏡日汉双解辞典}',
+    Glossary: '{glossary}',
     MiscInfo: '{source}',
-    Frequencies: '{frequency-harmonic-rank}'
+    Frequency: '{frequencies-html}',
+    FreqSort: '{frequency-harmonic-rank}',
+    IsWordAndSentenceCard: 'X'
   }),
   ankiTags: 'hoshitan test, test',
   ankiAllowDuplicate: false,
@@ -36,9 +39,12 @@ const responses = {
     'Expression',
     'ExpressionReading',
     'MainDefinition',
+    'Glossary',
     'Sentence',
     'MiscInfo',
-    'Frequencies'
+    'Frequency',
+    'FreqSort',
+    'IsWordAndSentenceCard'
   ],
   addNote: 123456789
 };
@@ -133,12 +139,20 @@ function assert(condition, message) {
     furiganaPlain: 'トイレ',
     definition: '<test> & definition',
     glossary: '<test> & definition',
+    glossaryHtml: '<div class="yomitan-glossary"><span style="color: dodgerblue;">HTML definition</span></div>',
     glossaryBrief: '<test> & definition',
     glossaryFirst: '[明鏡日汉双解辞典] <test> & definition',
+    glossaryFirstHtml: '<div class="yomitan-glossary">first html</div>',
     selectedGlossary: '[明鏡日汉双解辞典] <test> & definition',
+    selectedGlossaryHtml: '<div class="yomitan-glossary">selected html</div>',
     singleGlossaries: {
       '明鏡日汉双解辞典': '[明鏡日汉双解辞典] <test> & definition'
     },
+    singleGlossariesHtml: {
+      '明鏡日汉双解辞典': '<div class="yomitan-glossary"><span style="color: dodgerblue;">single html</span></div>'
+    },
+    frequencies: 'JPDBv2: 184',
+    frequenciesHtml: '<ul style="text-align: left;"><li>JPDBv2: 184</li></ul>',
     frequencyHarmonicRank: '184'
   });
 
@@ -151,9 +165,13 @@ function assert(condition, message) {
   assert(note.fields.Sentence === 'トイレ　トイレ', 'Sentence should map to the configured field');
   assert(note.fields.Expression === 'トイレ', 'Expression should map to the configured field');
   assert(note.fields.ExpressionReading === 'Reading: トイレ', 'Manually entered Anki field templates should replace embedded placeholders');
-  assert(note.fields.MainDefinition === '[明鏡日汉双解辞典] &lt;test&gt; &amp; definition', 'Per-dictionary glossary should map by dictionary title');
+  assert(note.fields.MainDefinition.includes('style="color: dodgerblue;"'), 'Per-dictionary glossary should preserve rendered HTML by dictionary title');
+  assert(!note.fields.MainDefinition.includes('&lt;div'), 'Rendered dictionary HTML should not be escaped in Anki fields');
+  assert(note.fields.Glossary.includes('HTML definition'), 'Full glossary should preserve rendered HTML');
   assert(note.fields.MiscInfo === 'episode.mkv @ 00:07.099', 'Source field should include a timestamp');
-  assert(note.fields.Frequencies === '184', 'Frequency harmonic rank should map to an Anki field');
+  assert(note.fields.Frequency === '<ul style="text-align: left;"><li>JPDBv2: 184</li></ul>', 'Frequency HTML should map to an Anki field');
+  assert(note.fields.FreqSort === '184', 'Frequency harmonic rank should map to an Anki field');
+  assert(note.fields.IsWordAndSentenceCard === 'X', 'Lapis word-and-sentence card flag should support literal mappings');
   assert(note.tags.length === 2 && note.tags[0] === 'hoshitan' && note.tags[1] === 'test', 'Tags should be deduplicated');
   assert(!note.picture && !note.audio, 'Disabled media should not be attached');
   assert(overlayPosts.some(post => post.name === 'anki-export-result' && post.data.ok), 'Overlay should receive success');

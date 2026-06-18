@@ -790,9 +790,9 @@
 	      .replace(/@import[^;{}]*;?/gi, '')
 	      .replace(/[-\w]+\s*:\s*[^;{}]*url\s*\([^;{}]*\)\s*;?/gi, '');
 	  }
-	  function scopeDictionaryCss(cssText, dictionaryName) {
+	  function scopeDictionaryCss(cssText, dictionaryName, scopeSelector) {
 	    const source = String(cssText || '').slice(0, 100000);
-	    const scope = '#popup .dict-section[data-dictionary="' + cssAttributeValue(dictionaryName) + '"]';
+	    const scope = scopeSelector || ('#popup .dict-section[data-dictionary="' + cssAttributeValue(dictionaryName) + '"]');
 	    const scopeRules = text => {
 	      let output = '';
 	      let cursor = 0;
@@ -1274,8 +1274,10 @@
 	    const term = entry && entry.term ? entry.term : {};
 	    const glossaries = Array.isArray(term.glossaries) ? term.glossaries : [];
 	    const byDictionary = {};
+	    const byDictionaryHtml = {};
 	    const dictionaryOrder = [];
 	    const all = [];
+	    const allHtml = [];
 	    const brief = [];
 	    glossaries.forEach(glossary => {
 	      const text = glossaryPlainText(glossary);
@@ -1283,25 +1285,70 @@
 	      const dictionary = String((glossary && glossary.dict) || '').trim() || tr('Dictionary');
 	      if (!Object.prototype.hasOwnProperty.call(byDictionary, dictionary)) {
 	        byDictionary[dictionary] = [];
+	        byDictionaryHtml[dictionary] = [];
 	        dictionaryOrder.push(dictionary);
 	      }
+	      const html = ankiGlossaryItemHtml(glossary, dictionary);
 	      byDictionary[dictionary].push(text);
+	      byDictionaryHtml[dictionary].push(html);
 	      all.push('[' + dictionary + '] ' + text);
+	      allHtml.push(html);
 	      brief.push(text);
 	    });
 	    const singleGlossaries = {};
+	    const singleGlossariesHtml = {};
 	    dictionaryOrder.forEach(dictionary => {
 	      singleGlossaries[dictionary] = '[' + dictionary + '] ' + byDictionary[dictionary].join('\n');
+	      singleGlossariesHtml[dictionary] = wrapAnkiGlossaryHtml(byDictionaryHtml[dictionary], [dictionary]);
 	    });
 	    const selectedDictionary = dictionaryOrder[0] || '';
+	    const glossaryHtml = wrapAnkiGlossaryHtml(allHtml, dictionaryOrder);
 	    return {
 	      glossary: all.join('\n\n').slice(0, 30000),
+	      glossaryHtml,
 	      glossaryBrief: brief.join('\n\n').slice(0, 30000),
 	      glossaryFirst: selectedDictionary ? singleGlossaries[selectedDictionary] : '',
+	      glossaryFirstHtml: selectedDictionary ? singleGlossariesHtml[selectedDictionary] : '',
 	      selectedDictionary,
 	      selectedGlossary: selectedDictionary ? singleGlossaries[selectedDictionary] : '',
-	      singleGlossaries
+	      selectedGlossaryHtml: selectedDictionary ? singleGlossariesHtml[selectedDictionary] : '',
+	      singleGlossaries,
+	      singleGlossariesHtml
 	    };
+	  }
+	  function ankiDictionaryStylesHtml(dictionaries) {
+	    const source = state.config && state.config.dictionaryStyles && typeof state.config.dictionaryStyles === 'object'
+	      ? state.config.dictionaryStyles
+	      : {};
+	    const rules = [];
+	    let total = 0;
+	    (dictionaries || []).forEach(dictionary => {
+	      const css = String(source[dictionary] || '');
+	      if (!css.trim() || total >= 120000) return;
+	      const limited = css.slice(0, Math.max(0, Math.min(40000, 120000 - total)));
+	      total += limited.length;
+	      const scope = '.yomitan-glossary li[data-dictionary="' + cssAttributeValue(dictionary) + '"]';
+	      const scoped = scopeDictionaryCss(limited, dictionary, scope);
+	      if (scoped.trim()) rules.push(scoped);
+	    });
+	    return rules.length ? '<style>' + rules.join('\n') + '</style>' : '';
+	  }
+	  function wrapAnkiGlossaryHtml(items, dictionaries) {
+	    const body = (items || []).filter(Boolean).join('');
+	    if (!body) return '';
+	    return ankiDictionaryStylesHtml(dictionaries) +
+	      '<div style="text-align: left;" class="yomitan-glossary"><ol>' + body + '</ol></div>';
+	  }
+	  function ankiGlossaryItemHtml(glossary, dictionary) {
+	    const dict = String(dictionary || (glossary && glossary.dict) || '').trim() || tr('Dictionary');
+	    const body = renderGlossaryPayload(glossary);
+	    if (!body) return '';
+	    return '<li data-dictionary="' + escapeHtml(dict) + '"><i>(' + escapeHtml(dict) + ')</i> <span>' + body + '</span></li>';
+	  }
+	  function frequenciesHtmlForLines(lines) {
+	    const values = String(lines || '').split(/\n+/).map(line => normalizeWhitespace(line)).filter(Boolean);
+	    if (!values.length) return '';
+	    return '<ul style="text-align: left;">' + values.map(line => '<li>' + escapeHtml(line) + '</li>').join('') + '</ul>';
 	  }
 	  function furiganaPlainForEntry(entry) {
 	    const term = entry && entry.term ? entry.term : {};
@@ -1430,13 +1477,19 @@
 	      furiganaPlain: furiganaPlainForEntry(entry),
 	      definition: glossary.glossary,
 	      glossary: glossary.glossary,
+	      definitionHtml: glossary.glossaryHtml,
+	      glossaryHtml: glossary.glossaryHtml,
 	      glossaryBrief: glossary.glossaryBrief,
 	      glossaryFirst: glossary.glossaryFirst,
+	      glossaryFirstHtml: glossary.glossaryFirstHtml,
 	      selectedDictionary: glossary.selectedDictionary,
 	      selectedGlossary: glossary.selectedGlossary,
+	      selectedGlossaryHtml: glossary.selectedGlossaryHtml,
 	      singleGlossaries: glossary.singleGlossaries,
+	      singleGlossariesHtml: glossary.singleGlossariesHtml,
 	      popupSelectionText: popupSelectionText(),
 	      frequencies: frequency.frequencies,
+	      frequenciesHtml: frequenciesHtmlForLines(frequency.frequencies),
 	      frequencyHarmonicRank: frequency.frequencyHarmonicRank,
 	      pitchAccentPositions: pitch.pitchAccentPositions,
 	      pitchAccentCategories: pitch.pitchAccentCategories,

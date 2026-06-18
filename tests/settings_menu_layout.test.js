@@ -85,8 +85,13 @@ assert(/single-glossary-/.test(managerHtml), 'Settings manager should add per-di
 assert(!/\['\{book-cover\}', '\{book-cover\}'\]/.test(managerHtml), 'Settings should not expose the legacy book-cover mapping');
 assert(!/\['\{sasayaki-audio\}', '\{sasayaki-audio\}'\]/.test(managerHtml), 'Settings should not expose the legacy sasayaki-audio mapping');
 assert(/picture:\s*'\{image\}'/.test(managerHtml), 'Picture fields should auto-map to the canonical image mapping');
+assert(!/definitionpicture:\s*'\{image\}'/.test(managerHtml), 'DefinitionPicture should not receive the video screenshot by default');
 assert(/sentenceaudio:\s*'\{sentence-audio\}'/.test(managerHtml), 'SentenceAudio should auto-map to the canonical sentence-audio mapping');
+assert(/iswordandsentencecard:\s*'X'/.test(managerHtml), 'Lapis card type fields should default to a word-and-sentence card');
+assert(/frequency:\s*'\{frequencies-html\}'/.test(managerHtml), 'Lapis Frequency should receive HTML frequency metadata');
+assert(/freqsort:\s*'\{frequency-harmonic-rank\}'/.test(managerHtml), 'Lapis FreqSort should receive the sortable harmonic rank');
 assert(/\{frequency-harmonic-rank\}/.test(managerHtml), 'Settings manager should expose frequency metadata mappings');
+assert(/\{frequencies-html\}/.test(managerHtml), 'Settings manager should expose HTML frequency metadata mappings');
 assert(/\{pitch-accent-categories\}/.test(managerHtml), 'Settings manager should expose pitch accent mappings');
 assert(/data-panel="audio"/.test(managerHtml), 'Settings manager should expose a dedicated audio panel');
 assert(/data-global-setting="localAudioEnabled"/.test(managerHtml), 'Settings manager should expose local audio');
