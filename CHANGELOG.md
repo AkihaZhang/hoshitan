@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.0-dev.12 - 2026-06-18
+
+- Reduced the default Hoshitan and native IINA subtitle scale so the subtitle overlay starts smaller on video playback.
+- Made subtitle size controls in Settings save while typing, so scale changes apply without leaving the input.
+
+## 0.1.0-dev.11 - 2026-06-18
+
+- Removed the remaining client-executable lookup fallback from interactive lookup paths and rejected remote audio URLs in the plugin-side local audio bridge.
+- Throttled repeated audio button clicks for the same source to prevent playback churn during rapid lookup testing.
+
 ## 0.1.0-dev.10 - 2026-06-17
 
 - Added bounded LRU storage for large lookup results so repeated hover lookups cannot grow IINA's plugin memory for the whole playback session.

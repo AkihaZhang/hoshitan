@@ -23,8 +23,8 @@ assert(info.preferenceDefaults.audioProbeOnPopup === false, 'Popup audio probing
 assert(/hoshi-reader\.manhhaoo-do\.workers\.dev/.test(info.preferenceDefaults.audioSourcesJson), 'Word audio should default to the Hoshi Reader online source');
 assert(info.preferenceDefaults.localAudioEnabled === false, 'Local audio should be opt-in');
 assert(Object.prototype.hasOwnProperty.call(info.preferenceDefaults, 'localAudioDatabasePath'), 'Local audio database path should be configurable');
-assert(info.preferenceDefaults.fontScale <= 0.9, 'Hoshitan subtitle size should default smaller than the old oversized overlay');
-assert(info.preferenceDefaults.nativeSubtitleScale < 1, 'IINA native subtitles should default to a reduced scale while Hoshitan is active');
+assert(info.preferenceDefaults.fontScale <= 0.7, 'Hoshitan subtitle size should default compact enough for video overlays');
+assert(info.preferenceDefaults.nativeSubtitleScale <= 0.7, 'IINA native subtitles should default to a reduced scale while Hoshitan is active');
 assert(info.preferenceDefaults.popupTopMarginPx >= 48, 'Popup top safe margin should keep controls clear of the title bar');
 assert(!Object.prototype.hasOwnProperty.call(info.preferenceDefaults, 'directWorkerIpc'), 'Removed worker IPC compatibility preference should not be in defaults');
 assert(!Object.prototype.hasOwnProperty.call(info.preferenceDefaults, 'fallbackToClientExec'), 'Removed client executable lookup fallback should not be in defaults');
@@ -52,6 +52,8 @@ assert(/if\s*\(firstSource\)\s*saveAudioSources\(\)/.test(addAudioSourceSource),
 assert(/data-profile-pref="scanLength"/.test(managerHtml), 'Settings manager should expose per-profile scan length');
 assert(/data-profile-pref="popupTheme"/.test(managerHtml), 'Settings manager should expose per-profile popup color mode');
 assert(/data-profile-pref="nativeSubtitleScale"/.test(managerHtml), 'Settings manager should expose IINA native subtitle scale');
+assert(/const liveProfilePreferenceIds = \{ fontScale: true, nativeSubtitleScale: true \}/.test(managerHtml), 'Subtitle size settings should opt into live preference saving');
+assert(/addEventListener\('input', scheduleProfilePreferencesSave\)/.test(managerHtml), 'Subtitle size changes should save while typing');
 assert(/data-profile-pref="popupMaxWidth"/.test(managerHtml), 'Settings manager should expose popup width in pixels');
 assert(/data-profile-pref="popupMaxHeight"/.test(managerHtml), 'Settings manager should expose popup height in pixels');
 assert(/data-profile-pref="popupTopMarginPx"/.test(managerHtml), 'Settings manager should expose popup top safe margin');

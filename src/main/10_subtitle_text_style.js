@@ -174,7 +174,7 @@ function overlayConfig(options) {
     resolvedUiLanguage: resolvedUiLanguage(),
     language: selectedLanguageOverlayConfig(),
     lookupLanguage: language.id,
-    fontScale: prefNumber("fontScale", 0.9),
+    fontScale: prefNumber("fontScale", 0.65),
     popupScale: prefNumber("popupScale", 0.92),
     popupMaxWidth: Math.max(260, prefNumber("popupMaxWidth", 440)),
     popupMaxHeight: Math.max(180, prefNumber("popupMaxHeight", 520)),
@@ -245,8 +245,8 @@ function canHideNativeSubtitlesForCurrentLanguage() {
   } catch (_) { return false; }
 }
 function configuredNativeSubtitleScale() {
-  const value = prefNumber("nativeSubtitleScale", 0.72);
-  return Math.max(0.25, Math.min(2.0, Number.isFinite(value) ? value : 0.72));
+  const value = prefNumber("nativeSubtitleScale", 0.65);
+  return Math.max(0.25, Math.min(2.0, Number.isFinite(value) ? value : 0.65));
 }
 function applyNativeSubtitleScale() {
   if (!enabled) return;

@@ -1,7 +1,7 @@
 {
   "name": "Hoshitan",
   "identifier": "io.github.akihazhang.hoshitan",
-  "version": "0.1.0-dev.11",
+  "version": "0.1.0-dev.12",
   "author": {
     "name": "AkihaZhang"
   },
@@ -19,8 +19,8 @@
     "audioProbeOnPopup": false,
     "audioSourcesJson": "[{\"name\":\"Hoshi Reader\",\"url\":\"https://hoshi-reader.manhhaoo-do.workers.dev/?term={term}&reading={reading}\"}]",
     "lookupLanguage": "ja",
-    "fontScale": 0.9,
-    "nativeSubtitleScale": 0.72,
+    "fontScale": 0.65,
+    "nativeSubtitleScale": 0.65,
     "popupScale": 0.92,
     "popupMaxWidth": 440,
     "popupMaxHeight": 520,

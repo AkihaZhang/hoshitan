@@ -837,6 +837,7 @@
       rendering: false,
       audioSourceSerial: 0
     };
+    let profilePreferenceSaveTimer = null;
 
     const els = {
       activeProfileLabel: document.getElementById('activeProfileLabel'),
@@ -1119,6 +1120,14 @@
         tr('Saving profile settings...'),
         { busy: false, clearAfterMs: 2500 }
       );
+    }
+    function scheduleProfilePreferencesSave() {
+      if (state.rendering) return;
+      if (profilePreferenceSaveTimer) clearTimeout(profilePreferenceSaveTimer);
+      profilePreferenceSaveTimer = setTimeout(() => {
+        profilePreferenceSaveTimer = null;
+        saveProfilePreferences();
+      }, 180);
     }
     function saveGlobalSettings() {
       if (state.rendering) return;
@@ -1614,8 +1623,10 @@
       });
     });
     els.addAudioSource.addEventListener('click', addAudioSource);
+    const liveProfilePreferenceIds = { fontScale: true, nativeSubtitleScale: true };
     Array.from(document.querySelectorAll('[data-profile-pref]')).forEach(control => {
       control.addEventListener('change', saveProfilePreferences);
+      if (liveProfilePreferenceIds[control.id]) control.addEventListener('input', scheduleProfilePreferencesSave);
     });
     Array.from(document.querySelectorAll('[data-global-setting]')).forEach(control => {
       control.addEventListener('change', saveGlobalSettings);
