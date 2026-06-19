@@ -212,10 +212,11 @@ function respondToAudioSourceRequest(fromIndex, candidates, ok) {
   context.__elements.popup.appendChild(localButton);
   const beforeLocal = context.__sent.length;
   const localPromise = overlay.playAudioForTerm('読む', 'よむ', localButton, {});
-  const localRequest = respondToAudioSourceRequest(beforeLocal, [{ name: 'Local Audio', url: 'data:audio/mpeg;base64,SUQz' }]);
+  const localRequest = respondToAudioSourceRequest(beforeLocal, [{ name: 'Local Audio', url: 'file:///tmp/hoshitan%20local/audio.mp3' }]);
   const local = await localPromise;
   assert(local, 'Local audio should still resolve through the plugin bridge');
   assert(localRequest.url.indexOf('127.0.0.1:19742') >= 0, 'Only the local audio bridge URL should be sent to the plugin');
+  assert(played[played.length - 1] === 'file:///tmp/hoshitan%20local/audio.mp3', 'Local audio bridge file URLs should be playable without base64 conversion');
 
   overlay.applyConfig({
     audioSources: [{ name: 'LanguagePod101', url: 'https://assets.languagepod101.com/dictionary/japanese/audiomp3.php?kanji={term}&kana={reading}' }]

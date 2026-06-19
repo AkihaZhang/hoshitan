@@ -14,6 +14,7 @@
 #include <thread>
 #include <vector>
 
+#include <sqlite3.h>
 #include <utf8.h>
 
 #include "hoshidicts/deinflector.hpp"
@@ -21,7 +22,7 @@
 #include "hoshidicts/lookup.hpp"
 #include "hoshidicts/query.hpp"
 
-static constexpr const char* WRAPPER_VERSION = "1.6.0";
+static constexpr const char* WRAPPER_VERSION = "1.7.0";
 namespace fs = std::filesystem;
 
 static std::string json_escape(const std::string& s) {
@@ -50,6 +51,7 @@ static std::string json_escape(const std::string& s) {
 static std::string json_quote(const std::string& s) { return std::string("\"") + json_escape(s) + "\""; }
 static std::string error_json(const std::string& message) { return std::string("{\"ok\":false,\"error\":") + json_quote(message) + "}\n"; }
 static void print_error(const std::string& message) { std::cout << error_json(message); }
+static std::string json_get_string(const std::string& body, const std::string& key);
 static void print_string_array(const std::vector<std::string>& values) {
   std::cout << "[";
   for (size_t i = 0; i < values.size(); ++i) { if (i) std::cout << ","; std::cout << json_quote(values[i]); }
@@ -95,6 +97,129 @@ static std::string compact_glossary(const std::string& s) {
   size_t start = trimmed.find_first_not_of(" \t\r\n");
   if (start != std::string::npos && (trimmed[start] == '[' || trimmed[start] == '{')) return s;
   return utf8_prefix(s, 2000);
+}
+static std::string sqlite_error(sqlite3* db, const std::string& fallback) {
+  const char* message = db ? sqlite3_errmsg(db) : nullptr;
+  return message && *message ? std::string(message) : fallback;
+}
+struct SqliteDatabase {
+  sqlite3* db = nullptr;
+  explicit SqliteDatabase(const std::string& path) {
+    int flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX;
+    int rc = sqlite3_open_v2(path.c_str(), &db, flags, nullptr);
+    if (rc != SQLITE_OK) {
+      std::string message = sqlite_error(db, "could not open SQLite database");
+      if (db) sqlite3_close(db);
+      db = nullptr;
+      throw std::runtime_error(message);
+    }
+  }
+  ~SqliteDatabase() { if (db) sqlite3_close(db); }
+  SqliteDatabase(const SqliteDatabase&) = delete;
+  SqliteDatabase& operator=(const SqliteDatabase&) = delete;
+};
+struct SqliteStatement {
+  sqlite3_stmt* stmt = nullptr;
+  SqliteDatabase& database;
+  SqliteStatement(SqliteDatabase& db, const std::string& sql) : database(db) {
+    int rc = sqlite3_prepare_v2(database.db, sql.c_str(), -1, &stmt, nullptr);
+    if (rc != SQLITE_OK) throw std::runtime_error(sqlite_error(database.db, "could not prepare SQLite statement"));
+  }
+  ~SqliteStatement() { if (stmt) sqlite3_finalize(stmt); }
+  SqliteStatement(const SqliteStatement&) = delete;
+  SqliteStatement& operator=(const SqliteStatement&) = delete;
+};
+static void sqlite_bind_text_checked(SqliteStatement& statement, int index, const std::string& value) {
+  int rc = sqlite3_bind_text(statement.stmt, index, value.c_str(), static_cast<int>(value.size()), SQLITE_TRANSIENT);
+  if (rc != SQLITE_OK) throw std::runtime_error(sqlite_error(statement.database.db, "could not bind SQLite text value"));
+}
+static std::string local_audio_extension(const std::string& filename) {
+  auto dot = filename.find_last_of('.');
+  std::string ext = dot == std::string::npos ? "mp3" : filename.substr(dot + 1);
+  std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  if (ext == "mp3" || ext == "opus" || ext == "ogg" || ext == "m4a" || ext == "aac" || ext == "wav" || ext == "flac") return ext;
+  return "mp3";
+}
+static std::string safe_file_stem(const std::string& value) {
+  std::string out;
+  out.reserve(value.size());
+  bool replaced = false;
+  for (unsigned char c : value) {
+    bool ok = std::isalnum(c) || c == '.' || c == '_' || c == '-';
+    if (ok) {
+      out += static_cast<char>(c);
+      replaced = false;
+    } else if (!replaced) {
+      out += '-';
+      replaced = true;
+    }
+  }
+  while (!out.empty() && (out.front() == '.' || out.front() == '-')) out.erase(out.begin());
+  while (!out.empty() && (out.back() == '.' || out.back() == '-')) out.pop_back();
+  return out.empty() ? "word-audio" : out;
+}
+static std::string local_audio_source_order_sql() {
+  static const std::vector<std::string> sources = {
+    "nhk16", "daijisen", "shinmeikai8", "jpod", "jpod_alternate",
+    "taas", "ozk5", "forvo", "forvo_ext", "forvo_ext2"
+  };
+  std::ostringstream out;
+  out << "CASE lower(e.source) ";
+  for (size_t i = 0; i < sources.size(); ++i) out << "WHEN '" << sources[i] << "' THEN " << i << " ";
+  out << "ELSE 999 END";
+  return out.str();
+}
+static std::string local_audio_request_to_json(const std::string& body) {
+  const std::string database_path = json_get_string(body, "databasePath");
+  const std::string term = json_get_string(body, "term");
+  const std::string reading = json_get_string(body, "reading");
+  const std::string output_root = json_get_string(body, "outputRoot");
+  const std::string stem = safe_file_stem(json_get_string(body, "stem"));
+  if (database_path.empty()) throw std::runtime_error("local audio database path is empty");
+  if (term.empty()) throw std::runtime_error("local audio term is empty");
+  if (output_root.empty()) throw std::runtime_error("local audio output root is empty");
+  SqliteDatabase database(database_path);
+  const bool has_reading = !reading.empty();
+  const std::string reading_clause = has_reading
+      ? "CASE WHEN e.reading = ? THEN 0 WHEN e.reading = '' THEN 1 ELSE 2 END,"
+      : "CASE WHEN e.reading = '' THEN 0 ELSE 1 END,";
+  const std::string sql =
+      "SELECT a.id, e.source, a.file, a.data "
+      "FROM entries e JOIN android a ON a.file = e.file AND a.source = e.source "
+      "WHERE e.expression = ? "
+      "ORDER BY " + reading_clause + " " + local_audio_source_order_sql() + ", a.id "
+      "LIMIT 1;";
+  SqliteStatement statement(database, sql);
+  sqlite_bind_text_checked(statement, 1, term);
+  if (has_reading) sqlite_bind_text_checked(statement, 2, reading);
+  const int rc = sqlite3_step(statement.stmt);
+  if (rc == SQLITE_DONE) return "{\"ok\":true,\"found\":false}\n";
+  if (rc != SQLITE_ROW) throw std::runtime_error(sqlite_error(database.db, "local audio lookup failed"));
+  const int id = sqlite3_column_int(statement.stmt, 0);
+  const unsigned char* source_text = sqlite3_column_text(statement.stmt, 1);
+  const unsigned char* filename_text = sqlite3_column_text(statement.stmt, 2);
+  const void* data = sqlite3_column_blob(statement.stmt, 3);
+  const int data_size = sqlite3_column_bytes(statement.stmt, 3);
+  if (!data || data_size <= 0) return "{\"ok\":true,\"found\":false}\n";
+  const std::string source = source_text ? reinterpret_cast<const char*>(source_text) : "Local Audio";
+  const std::string filename = filename_text ? reinterpret_cast<const char*>(filename_text) : "";
+  const std::string extension = local_audio_extension(filename);
+  fs::path output_path = fs::path(output_root) / (stem + "." + extension);
+  fs::create_directories(output_path.parent_path());
+  {
+    std::ofstream out(output_path, std::ios::binary | std::ios::trunc);
+    if (!out) throw std::runtime_error("could not open local audio output file: " + output_path.string());
+    out.write(static_cast<const char*>(data), data_size);
+    if (!out) throw std::runtime_error("could not write local audio output file: " + output_path.string());
+  }
+  std::ostringstream out;
+  out << "{\"ok\":true,\"found\":true,\"id\":" << id
+      << ",\"source\":" << json_quote(source)
+      << ",\"filename\":" << json_quote(filename)
+      << ",\"extension\":" << json_quote(extension)
+      << ",\"path\":" << json_quote(output_path.string())
+      << ",\"bytes\":" << data_size << "}\n";
+  return out.str();
 }
 static void append_int_array(std::ostringstream& out, const std::vector<int>& values) {
   out << "[";
@@ -446,6 +571,15 @@ static void cmd_worker(int argc, char** argv) {
         std::string provided_id = json_get_string(body, "requestId");
         if (!provided_id.empty()) request_id = provided_id;
         resp = responses / (request_id + ".json");
+        std::string request_type = json_get_string(body, "type");
+        if (request_type == "localAudio") {
+          std::cerr << "local audio request " << request_id << "\n";
+          std::string out = local_audio_request_to_json(body);
+          write_file_atomic(resp, out);
+          std::cerr << "local audio response " << request_id << " bytes=" << out.size() << "\n";
+          fs::remove(req, ec);
+          continue;
+        }
         std::string text = json_get_string(body, "text");
         std::string mode = json_get_string(body, "mode");
         if (mode.empty()) mode = "yomitan-japanese";
@@ -538,7 +672,7 @@ static void cmd_client(int argc, char** argv) {
 }
 
 static void cmd_version() {
-  std::cout << "{\"ok\":true,\"name\":\"iina-hoshi-dicts\",\"backend\":\"Manhhao/hoshidicts\",\"wrapperVersion\":" << json_quote(WRAPPER_VERSION) << ",\"worker\":true,\"serve\":false,\"modes\":[\"yomitan-japanese\",\"exact\",\"prefix\"]}\n";
+  std::cout << "{\"ok\":true,\"name\":\"iina-hoshi-dicts\",\"backend\":\"Manhhao/hoshidicts\",\"wrapperVersion\":" << json_quote(WRAPPER_VERSION) << ",\"worker\":true,\"localAudio\":true,\"serve\":false,\"modes\":[\"yomitan-japanese\",\"exact\",\"prefix\"]}\n";
 }
 int main(int argc, char** argv) {
   try {

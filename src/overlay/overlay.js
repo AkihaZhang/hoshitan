@@ -76,6 +76,9 @@
     audioProbeCacheOrder: [],
     audioProbeInFlight: Object.create(null),
     audioAutoPlayed: Object.create(null),
+    audioAutoPlayTimer: null,
+    audioProbeTimer: null,
+    audioTriggerSeq: 0,
     audioSourceRequestSeq: 0,
     pendingAudioSourceRequests: Object.create(null),
     audioSourceMenu: null,
@@ -155,6 +158,8 @@
   const AUDIO_CACHE_MAX_ENTRIES = 24;
   const AUDIO_REPEAT_CLICK_THROTTLE_MS = 500;
   const AUDIO_IN_FLIGHT_DEDUP_MS = 5000;
+  const AUDIO_AUTO_PLAY_STABLE_MS = 320;
+  const AUDIO_PROBE_STABLE_MS = 420;
 	  let customPopupStyleEl = null;
 	  let lastCustomPopupCss = null;
 	  let dictionaryStylesEl = null;
@@ -198,17 +203,20 @@
 	    overlayDebug("source URL rejected invalid=" + JSON.stringify(value.slice(0, 160)));
 	    return '';
 	  }
-	  function safeAudioUrl(raw, baseUrl) {
+	  function safeAudioUrl(raw, baseUrl, options) {
 	    const value = String(raw || '').trim();
 	    if (!value) return '';
 	    if (/^data:audio\/(?:mpeg|mp3|mp4|aac|ogg|opus|wav|flac);base64,[A-Za-z0-9+/=\s]+$/i.test(value)) {
 	      return value.replace(/\s+/g, '');
 	    }
+	    const allowFile = options && options.allowFile === true;
 	    try {
 	      const url = typeof URL === 'function' ? new URL(value, baseUrl || undefined) : null;
 	      if (url && (url.protocol === 'http:' || url.protocol === 'https:')) return url.href;
+	      if (allowFile && url && url.protocol === 'file:' && url.pathname) return url.href;
 	    } catch (_) {}
 	    if (!baseUrl && /^https?:\/\/[^\s<>"']+$/i.test(value)) return value;
+	    if (allowFile && /^file:\/\/\/[^\s<>"']+$/i.test(value)) return value;
 	    return '';
 	  }
 	  function normalizeAudioSourceUrl(value) {
@@ -279,6 +287,13 @@
 	    state.audioPlayInFlightKey = '';
 	    state.audioPlayInFlightStartedAt = 0;
 	  }
+	  function clearDeferredAudioTriggers() {
+	    if (state.audioAutoPlayTimer) clearTimeout(state.audioAutoPlayTimer);
+	    if (state.audioProbeTimer) clearTimeout(state.audioProbeTimer);
+	    state.audioAutoPlayTimer = null;
+	    state.audioProbeTimer = null;
+	    state.audioTriggerSeq++;
+	  }
 	  function setBoundedCache(cache, orderName, key, value, limit) {
 	    const order = Array.isArray(state[orderName]) ? state[orderName] : [];
 	    if (Object.prototype.hasOwnProperty.call(cache, key)) {
@@ -322,8 +337,9 @@
 	  }
 	  function normalizeAudioCandidateList(candidates, sourceUrl) {
 	    const out = [];
+	    const allowFile = isPluginAudioBridgeSourceUrl(sourceUrl);
 	    (Array.isArray(candidates) ? candidates : []).forEach(item => {
-	      const audioUrl = safeAudioUrl(item && item.url, sourceUrl);
+	      const audioUrl = safeAudioUrl(item && item.url, sourceUrl, { allowFile });
 	      if (audioUrl) out.push({ url: audioUrl, name: normalizeWhitespace(item && item.name || '') });
 	    });
 	    return out;
@@ -1820,11 +1836,12 @@
     // hide transition and uses sequence/session guards to reject stale packets.
   }
 
-  function hidePopup() {
-    hideAudioSourceMenu();
-    state.audioPlayRequestSeq++;
-    cancelPendingAudioSourceRequests();
-    stopCurrentAudio();
+	  function hidePopup() {
+	    hideAudioSourceMenu();
+	    clearDeferredAudioTriggers();
+	    state.audioPlayRequestSeq++;
+	    cancelPendingAudioSourceRequests();
+	    stopCurrentAudio();
     setLookupPopupVisibility(false);
     popupEl.classList.add('hidden');
     state.currentPos = null;
@@ -1902,6 +1919,15 @@
 	      });
 	    } catch (_) {}
 	  }
+	  function schedulePopupAudioProbe() {
+	    if (state.audioProbeTimer) clearTimeout(state.audioProbeTimer);
+	    const triggerSeq = state.audioTriggerSeq;
+	    state.audioProbeTimer = setTimeout(() => {
+	      state.audioProbeTimer = null;
+	      if (triggerSeq !== state.audioTriggerSeq || popupEl.classList.contains('hidden')) return;
+	      probePopupAudioButtons();
+	    }, AUDIO_PROBE_STABLE_MS);
+	  }
 	  function bindPopupAudioButtons() {
 	    try {
 	      popupEl.querySelectorAll('.audio-button').forEach(button => {
@@ -1916,7 +1942,7 @@
 	          showAudioSourceMenu(button, event);
 	        });
 	      });
-	      if (state.config && state.config.audioProbeOnPopup) setTimeout(probePopupAudioButtons, 0);
+	      if (state.config && state.config.audioProbeOnPopup) schedulePopupAudioProbe();
 	    } catch (_) {}
 	  }
 	  function popupToolbarButton(action, label, path, disabled) {
@@ -1944,6 +1970,9 @@
 	  }
 	  function showPopup(anchor, heading, bodyHtml) {
 	    hideAudioSourceMenu();
+	    clearDeferredAudioTriggers();
+	    state.audioPlayRequestSeq++;
+	    cancelPendingAudioSourceRequests();
 	    state.currentAnchor = anchor || null;
 	    popupEl.innerHTML = '<div class="popup-action-bar">' + renderPopupActionBar() + '</div><div class="popup-scroll"><div class="head">' + renderPopupHead(heading || '', '', '', null, null) + '</div><div class="body">' + bodyHtml + '</div></div>';
 	    markPopupClickable();
@@ -1953,6 +1982,7 @@
 	  }
 	  function setPopupBody(bodyHtml, heading, reading, secondaryText, audioData, entryIndex) {
 	    hideAudioSourceMenu();
+	    clearDeferredAudioTriggers();
 	    const actionBar = popupEl.querySelector('.popup-action-bar');
 	    const head = popupEl.querySelector('.head');
 	    const body = popupEl.querySelector('.body');
@@ -2784,11 +2814,24 @@
 	    if (!data || !activeAudioSources().length) return;
 	    const key = String(state.lineId) + ':' + String(stored && stored.position !== undefined ? stored.position : state.currentPos) + ':' + audioTermReadingKey(data.term, data.reading);
 	    if (state.audioAutoPlayed[key]) return;
-	    state.audioAutoPlayed[key] = true;
-	    playAudioForTerm(data.term, data.reading, null, { auto: true }).catch(() => {});
+	    if (state.audioAutoPlayTimer) clearTimeout(state.audioAutoPlayTimer);
+	    const triggerSeq = state.audioTriggerSeq;
+	    const lineId = state.lineId;
+	    const position = state.currentPos;
+	    state.audioAutoPlayTimer = setTimeout(() => {
+	      state.audioAutoPlayTimer = null;
+	      if (triggerSeq !== state.audioTriggerSeq || lineId !== state.lineId || position !== state.currentPos) return;
+	      if (state.currentLookupStored !== stored || popupEl.classList.contains('hidden')) return;
+	      if (state.audioAutoPlayed[key]) return;
+	      state.audioAutoPlayed[key] = true;
+	      playAudioForTerm(data.term, data.reading, null, { auto: true }).catch(() => {});
+	    }, AUDIO_AUTO_PLAY_STABLE_MS);
 	  }
 	  function renderStoredLookup(stored, options) {
     options = options || {};
+    clearDeferredAudioTriggers();
+    state.audioPlayRequestSeq++;
+    cancelPendingAudioSourceRequests();
     state.currentLookupStored = stored || null;
     if (!stored || !stored.ok) {
       setPopupBody('<div class="error">' + escapeHtml((stored && stored.error) || tr('Lookup failed')) + '</div>');

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0-dev.17 - 2026-06-19
+
+- Stopped local overlay word audio from piping media through `base64` subprocess stdout; playback now reuses cached local file URLs.
+- Moved hover/autoplay local-audio lookup and extraction into the persistent native worker so rapid popup audio no longer spawns plugin-side sqlite subprocesses.
+- Added bounded local-audio bridge queuing and duplicate request coalescing so rapid hover autoplay cannot build an audio backlog.
+- Delayed popup audio autoplay and availability probing until the hovered lookup stays stable, and cancel stale audio bridge requests when a new lookup renders.
+
 ## 0.1.0-dev.15 - 2026-06-19
 
 - Fixed lookup timeout/high-CPU regressions caused by subtitle and profile warmups restarting the dictionary worker with flattened dictionary paths.

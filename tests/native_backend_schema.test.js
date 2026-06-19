@@ -15,6 +15,9 @@ assert(/add_freq_dict/.test(nativeSource), 'Native bridge should load frequency 
 assert(/add_pitch_dict/.test(nativeSource), 'Native bridge should load pitch dictionaries');
 assert(/prefix_lookup_to_json/.test(nativeSource), 'Native bridge should expose prefix lookup');
 assert(/"prefix"/.test(nativeSource), 'Native version/mode handling should include prefix mode');
+assert(/local_audio_request_to_json/.test(nativeSource), 'Native worker should resolve local audio without plugin-side sqlite subprocesses');
+assert(/localAudio/.test(nativeSource), 'Native version output should advertise local audio support');
+assert(/SQLite3::SQLite3/.test(fs.readFileSync(path.join(root, 'scripts/build_native_backend.sh'), 'utf8')), 'Native backend build should link SQLite for local audio');
 
 const buildScript = fs.readFileSync(path.join(root, 'scripts/build_plugin.py'), 'utf8');
 assert(/validate_hoshidicts_submodule/.test(buildScript), 'Package validation should check the HoshiDicts submodule');
