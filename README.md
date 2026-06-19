@@ -1,62 +1,61 @@
-# Hoshitan
+# Hoshitan ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20IINA-lightgrey) ![Status](https://img.shields.io/badge/status-beta-orange) ![License](https://img.shields.io/badge/license-GPLv3-blue)
+
+**English** | [简体中文](README.zh-CN.md)
 
 > [!WARNING]
-> Hoshitan is currently an early testing build. Development happens on the `dev` branch, there is no stable release yet, and settings or behavior may change without migration support.
+> Hoshitan is still a testing build. Development happens on the `dev` branch, there is no stable release yet, and settings or behavior may change without migration support.
 
-Hoshitan brings hover-to-lookup dictionary popups, word audio, and Anki card creation to subtitles in IINA on macOS.
+Hoshitan is an IINA plugin for subtitle lookup and Anki card creation. It adds hover dictionary popups, word audio, screenshots, subtitle audio clips, and AnkiConnect export to videos with text subtitles.
 
-The goal is a compact dictionary popup that feels native to a video player: quick enough for subtitles, structured enough for serious reading, and quiet enough to stay out of the movie's way.
+The project is an experimental fork of [afn478/iinatan](https://github.com/afn478/iinatan), with a separate feature set focused on Hoshi Reader style dictionary lookup and card mining.
 
-Hoshitan is an independent experimental fork of [afn478/iinatan](https://github.com/afn478/iinatan). It retains the upstream Git history and GPL-3.0 license while developing a separate feature set and release path.
+## Features
 
-## Screenshots
+- Hover over text subtitles in IINA to open dictionary popups.
+- Japanese lookup through HoshiDicts with Yomitan-compatible term dictionaries and deinflection.
+- Experimental English, French, German, Chinese, and Korean lookup modes for compatible Yomitan dictionaries.
+- Separate Term, Frequency, and Pitch dictionary groups, with profile-specific priority and enable/disable controls.
+- Popup rendering for structured Yomitan content, bundled dictionary `styles.css`, collapsible dictionary sections, nested lookup, and custom CSS.
+- Online word audio from Yomitan `audioSourceList` endpoints or direct URL templates.
+- Local word audio from a Hoshi Reader compatible `android.db`, without a separate localhost server.
+- AnkiConnect export with configurable deck, note type, field mapping, tags, screenshot, word audio, and subtitle audio.
+- Subtitle audio clips are exported as MP3.
+- English and Simplified Chinese UI for settings, menus, popups, status messages, and Anki actions.
 
-![Japanese popup over paused subtitles](docs/screenshots/japanese-popup.png)
+## Requirements
 
-| English lookup and language menu | Dictionary settings |
-| --- | --- |
-| ![English lookup with language menu](docs/screenshots/english-popup-language-menu.png) | ![Dictionary settings](docs/screenshots/dictionary-settings.png) |
+- macOS with [IINA](https://iina.io/).
+- Text subtitles such as `.ass`, `.srt`, or embedded text subtitle tracks. Image subtitles such as PGS cannot be dictionary-scanned.
+- Yomitan-compatible dictionaries. Japanese dictionaries can be split into Term, Frequency, and Pitch groups.
+- Optional: [Anki](https://apps.ankiweb.net/) with AnkiConnect for card creation.
+- Optional: FFmpeg for screenshot/audio export if IINA cannot find it automatically.
 
-## Feature Highlights
+## Install
 
-- Hover subtitle text to show dictionary entries without leaving IINA.
-- Pause-only popup behavior keeps lookups from interrupting normal playback.
-- Japanese lookup uses HoshiDicts with Yomitan-compatible dictionary data, including deinflection support.
-- Jitendex is the recommended Japanese dictionary and can be installed from the plugin settings.
-- English, French, German, Chinese, and Korean lookup modes are available for compatible dictionaries.
-- Japanese entries can show frequency and pitch-accent metadata when the dictionary provides it.
-- Dictionary popups support structured entries, compact tags, collapsed long sections, source links, and custom CSS.
-- Dictionary entries include configurable online and local word audio, with optional autoplay and per-source selection.
-- Dictionary entries can be exported through AnkiConnect with the sentence, selected expression, reading, definition, source timestamp, screenshot, word audio, and subtitle audio.
-- Menus, settings, dictionary status messages, and Anki actions support English and Simplified Chinese, with automatic macOS language detection.
-- Settings profiles make it possible to keep separate language, popup, playback, and dictionary setups.
-
-## Installation
-
-### Install From GitHub
+### From GitHub
 
 1. Open IINA's plugin manager.
 2. Choose **Install from GitHub**.
 3. Enter `AkihaZhang/hoshitan`.
 4. Enable the plugin.
-5. Open **Plugins -> Hoshitan -> Settings...** and install the recommended dictionary or import a Yomitan-compatible dictionary ZIP.
-6. Toggle Hoshitan with **Shift+H**.
+5. Open **Plugins -> Hoshitan -> Settings...**.
+6. Import or enable the dictionaries you want to use.
+7. Toggle Hoshitan with **Shift+H**.
 
-### Install a Release Package
+### Release Package
 
-There is no stable package release yet. Development packages may be attached to GitHub Actions runs from the `dev` branch.
+There is no stable release package yet. Testing packages are built from the `dev` branch.
 
-## Basic Japanese Setup
+## Basic Setup
 
 1. Open **Plugins -> Hoshitan -> Settings...**.
-2. Set the lookup language to **Japanese**.
-3. Install the recommended dictionary, Jitendex, from the dictionary panel.
-4. Make sure Jitendex is enabled.
-5. Open a video with Japanese subtitles.
+2. Choose a lookup language.
+3. Import Yomitan-compatible dictionaries from ZIP files or folders.
+4. Enable and order Term, Frequency, and Pitch dictionaries in the dictionary panel.
+5. Open a video with a text subtitle track.
 6. Pause playback, move the pointer over subtitle text, and wait for the popup.
-7. If the popup does not appear, press **Shift+H** to toggle Hoshitan on.
 
-Dictionary popups load each imported Yomitan dictionary's bundled `styles.css` when present. Double-click text inside a popup to perform a nested lookup, use the Back button to return, and use the close button or **Esc** to dismiss it.
+Double-click text inside a popup to perform nested lookup. Use the Back / Forward buttons, the close button, or **Esc** to navigate and dismiss the popup.
 
 ## Video Shortcuts
 
@@ -70,68 +69,48 @@ Dictionary popups load each imported Yomitan dictionary's bundled `styles.css` w
 | Close dictionary popup | `Esc` |
 | Stop the current video / return | `Cmd+W` |
 
-## Dictionaries
-
-Open **Plugins -> Hoshitan -> Settings...** to install the recommended Japanese dictionary, import local Yomitan-compatible dictionary ZIP files, enable or disable dictionaries, and reorder lookup priority.
-
-Installed dictionary state is stored in the plugin data folder. The active profile controls dictionary order, lookup language, popup appearance, playback behavior, import settings, and lookup settings.
-
-Language modes behave differently:
-
-- Japanese uses HoshiDicts text processing and deinflection.
-- English looks up whole words after lowercasing the hovered text.
-- French and German use Yomitan-style candidate and deinflection rules.
-- Chinese uses longest rightward-prefix lookup.
-- Korean performs exact contiguous-Hangul lookup.
-
-Compatibility metadata is advisory. A dictionary may still import even when Hoshitan cannot confidently identify its language.
-
-## Settings
-
-Use **Plugins -> Hoshitan -> Settings...** to create profiles, switch profiles, choose the lookup language, tune subtitle and popup appearance, manage playback behavior, configure audio, adjust lookup/import timeouts, and manage installed dictionaries.
-
-The interface language can follow macOS automatically or be set explicitly to English or Simplified Chinese. Changes apply immediately to the Settings window and dictionary popup.
-
-The top plugin menu also exposes **Settings...** and direct profile switching.
-
 ## Anki Export
 
-Anki Desktop and the AnkiConnect add-on must be running.
+Anki Desktop and AnkiConnect must be running.
 
-1. Open **Plugins -> Hoshitan -> Settings... -> Anki**.
-2. Connect to AnkiConnect, then select the target deck and note type.
-3. Selecting a note type automatically loads its exact field names. Field names and mapping placeholders remain in English in every interface language.
-4. Click **Auto-map fields** or assign `{expression}`, `{reading}`, `{sentence}`, `{definition}`, `{image}`, `{audio}`, `{sentence-audio}`, `{source}`, and `{dictionary}` manually.
-5. Configure screenshot, sentence audio, tags, audio padding, and the FFmpeg path.
-6. Pause on a subtitle, open a dictionary entry, and click **Add to Anki**.
+1. Open **Settings -> Anki**.
+2. Connect to AnkiConnect.
+3. Select the target deck and note type.
+4. Hoshitan loads the note type's exact field names from AnkiConnect.
+5. Click **Auto-map fields** or assign placeholders manually.
+6. Configure screenshots, subtitle MP3 audio, word audio, tags, audio padding, and FFmpeg.
+7. Open a dictionary popup and click **Add to Anki**.
 
-The export validates the selected deck, note type fields, and AnkiConnect response before reporting success. Media files are copied into Anki through AnkiConnect and temporary files are removed afterward.
+Field names and placeholders stay in English in every UI language. Common placeholders include `{expression}`, `{reading}`, `{sentence}`, `{definition}`, `{image}`, `{audio}`, `{sentence-audio}`, `{source}`, and `{dictionary}`.
 
 ## Word Audio
 
-Open **Plugins -> Hoshitan -> Settings... -> Audio**.
+Open **Settings -> Audio**.
 
-- Online sources accept Yomitan `audioSourceList` endpoints and direct audio URL templates. The default uses the Hoshi Reader online source.
-- Local audio accepts a Hoshi Reader-compatible `android.db`. Enable **Use local audio database** and select the database file; no separate localhost server is required.
-- Local sources are tried before online sources. The source priority follows Hoshi Reader: NHK, Daijisen, Shinmeikai, JapanesePod101, TAAS, OJAD/Ozk, then Forvo variants.
-- Map an Anki field to `{audio}` for word audio or `{sentence-audio}` for the current subtitle clip. Subtitle clips are exported as MP3.
+- Online sources can be Yomitan `audioSourceList` endpoints or direct audio URL templates.
+- Local audio uses a Hoshi Reader compatible `android.db`.
+- Local audio is tried before online sources when enabled.
+- The popup shows a missing-audio state when no source can provide audio.
+- Map an Anki field to `{audio}` for word audio and `{sentence-audio}` for the current subtitle clip.
 
-## Development / Contributing
+## Development
 
-Development notes, build commands, test commands, packaging details, and release steps live in [CONTRIBUTING.md](CONTRIBUTING.md).
+Development notes, build commands, tests, packaging, and release details live in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Useful commands:
+
+```bash
+npm test
+npm run package
+```
 
 ## License
 
-Hoshitan is licensed under the GNU General Public License v3.0 only (`GPL-3.0-only`). See `LICENSE` for the full license text.
-
-## Common Troubleshooting
-
-- If the plugin stalls, try restarting IINA first.
+Hoshitan is licensed under the GNU General Public License v3.0 only. See [LICENSE](LICENSE) for details.
 
 ## Thanks
 
-- [afn478/iinatan](https://github.com/afn478/iinatan) for the original IINA subtitle lookup plugin on which Hoshitan is based.
-- [Yomitan](https://github.com/yomidevs/yomitan) for the overall inspiration for popup dictionaries, as well as the deinflection logic base for non-Japanese languages.
-- [HoshiDicts](https://github.com/Manhhao/hoshidicts/) for the high-performance dictionary backend.
-- [Chimahon](https://github.com/sohilsayed/chimahon) and [Hoshi Reader Android](https://github.com/HuangAntimony/Hoshi-Reader-Android) for inspiration on how to use HoshiDicts effectively, particularly for multilingual support.
-- [Hoshi Reader Mac](https://github.com/W1ght/Hoshi-Reader-Mac) for the Anki field-mapping and local audio database workflows.
+- [afn478/iinatan](https://github.com/afn478/iinatan), the original IINA subtitle lookup plugin.
+- [Yomitan](https://github.com/yomidevs/yomitan), the popup dictionary ecosystem and compatible dictionary format.
+- [HoshiDicts](https://github.com/Manhhao/hoshidicts/), the native dictionary backend used by Hoshitan.
+- [Hoshi Reader Android](https://github.com/HuangAntimony/Hoshi-Reader-Android) and [Hoshi Reader Mac](https://github.com/W1ght/Hoshi-Reader-Mac), which inspired the dictionary, Anki, and local audio workflows.
