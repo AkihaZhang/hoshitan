@@ -31,6 +31,8 @@ assert(!Object.prototype.hasOwnProperty.call(info.preferenceDefaults, 'fallbackT
 assert(!Object.prototype.hasOwnProperty.call(info.preferenceDefaults, 'allowClientExecLookup'), 'Removed client executable lookup opt-in should not be in defaults');
 assert(info.preferenceDefaults.directIpcPollMs >= 16, 'Direct worker IPC polling should not default to a busy 2ms loop');
 assert(info.preferenceDefaults.workerIdleSleepMs >= 30, 'Worker idle polling should not default to a busy 2ms loop');
+assert(/"playPause":"Space"/.test(info.preferenceDefaults.keyboardShortcutsJson), 'Keyboard shortcuts should default to Space play/pause');
+assert(/"closeVideo":"Cmd\+W"/.test(info.preferenceDefaults.keyboardShortcutsJson), 'Keyboard shortcuts should default to Command-W close video');
 
 const preferencesHtml = fs.readFileSync(path.join(root, 'preferences.html'), 'utf8');
 assert(!/data-pref=/.test(preferencesHtml), 'IINA preferences page should not own profile settings');
@@ -41,6 +43,10 @@ const managerHtml = fs.readFileSync(path.join(root, 'dictionary-manager.html'), 
 assert(/Hoshitan Settings/.test(managerHtml), 'Settings manager should use the plugin settings title');
 assert(/data-profile-pref="lookupLanguage"/.test(managerHtml), 'Settings manager should expose per-profile language');
 assert(/data-profile-pref="pauseWhilePopupVisible"/.test(managerHtml), 'Settings manager should expose per-profile playback settings');
+assert(/id="shortcutList"/.test(managerHtml), 'Settings manager should expose editable shortcut mappings');
+assert(/keyboardShortcutsJson/.test(managerHtml), 'Shortcut mappings should be saved with profile preferences');
+assert(/function renderShortcuts\(\)/.test(managerHtml), 'Settings manager should render shortcut actions from plugin state');
+assert(/normalizeShortcutDisplayKey/.test(managerHtml), 'Settings manager should normalize manually entered shortcut names');
 assert(/data-profile-pref="audioAutoPlay"/.test(managerHtml), 'Settings manager should expose per-profile word audio auto-play');
 assert(/id="audioSourceList"/.test(managerHtml), 'Settings manager should expose the word audio source list');
 assert(/moveAudioSourceBefore/.test(managerHtml), 'Audio source priorities should support drag reordering');
@@ -100,6 +106,7 @@ assert(/\{pitch-accent-categories\}/.test(managerHtml), 'Settings manager should
 assert(/data-panel="audio"/.test(managerHtml), 'Settings manager should expose a dedicated audio panel');
 assert(/data-global-setting="localAudioEnabled"/.test(managerHtml), 'Settings manager should expose local audio');
 assert(/data-global-setting="localAudioDatabasePath"/.test(managerHtml), 'Settings manager should expose the Hoshi Reader database path');
+assert(!/android\.db path/.test(managerHtml), 'Settings manager should not force the local audio database filename');
 assert(/id="dictionaryList"/.test(managerHtml), 'Dictionary manager should include the installed dictionary list');
 assert(/Term Dictionaries/.test(managerHtml), 'Dictionary manager should group term dictionaries');
 assert(/Frequency Dictionaries/.test(managerHtml), 'Dictionary manager should group frequency dictionaries');
@@ -199,11 +206,14 @@ assert(
   lifecycleSource.indexOf('if (!videoWindowAvailableForOverlayLoad())') < lifecycleSource.indexOf('initializeOverlay();'),
   'Profile overlay reload should skip initializeOverlay before iina.window-loaded'
 );
-assert(/registerInputShortcut\("SPACE", "play\/pause"/.test(lifecycleSource), 'Video shortcuts should include Space play/pause');
-assert(/registerInputShortcut\("LEFT", "seek backward 5 seconds"/.test(lifecycleSource), 'Video shortcuts should include Left seek');
-assert(/registerInputShortcut\("\[", "previous subtitle"/.test(lifecycleSource), 'Video shortcuts should include previous subtitle');
-assert(/registerInputShortcut\("ESC", "close lookup popup"/.test(lifecycleSource), 'Video shortcuts should include Escape popup close');
-assert(/registerInputShortcut\("Meta\+w", "close video"/.test(lifecycleSource), 'Video shortcuts should include Command-W stop/back');
+assert(/function configuredKeyboardShortcuts\(\)/.test(lifecycleSource), 'Video shortcuts should read configured profile mappings');
+assert(/function syncKeyboardShortcutRegistrations\(\)/.test(lifecycleSource), 'Video shortcuts should register configured keys dynamically');
+assert(/shortcutInputKeysForDisplay/.test(lifecycleSource), 'Video shortcuts should translate display shortcuts to IINA input keys');
+assert(/playPause:\s*\(\)\s*=>\s*setPauseState\(!pauseState\(\)\)/.test(lifecycleSource), 'Video shortcuts should include play/pause action');
+assert(/seekBackward5:\s*\(\)\s*=>\s*core\.seek\(-5, true\)/.test(lifecycleSource), 'Video shortcuts should include Left seek action');
+assert(/previousSubtitle:\s*\(\)\s*=>\s*mpv\.command\("sub-seek", \["-1"\]\)/.test(lifecycleSource), 'Video shortcuts should include previous subtitle action');
+assert(/closePopup:\s*\(\)\s*=>\s*postToOverlay\("close-popup", \{\}\)/.test(lifecycleSource), 'Video shortcuts should include popup close action');
+assert(/closeVideo:\s*\(\)\s*=>\s*core\.stop\(\)/.test(lifecycleSource), 'Video shortcuts should include close video action');
 assert(/core\.seek\(-5, true\)/.test(lifecycleSource), 'Video seek shortcuts should use the typed IINA core API');
 assert(/mpv\.command\("sub-seek", \["-1"\]\)/.test(lifecycleSource), 'Subtitle seek command arguments should be strings');
 assert(/core\.stop\(\)/.test(lifecycleSource), 'Command-W should use the typed IINA core stop API');

@@ -201,13 +201,14 @@ function ensureOverlayBridge() {
 function handleNestedLookup(payload) {
   const requestId = String((payload && payload.requestId) || ("nested-" + String(++requestSerial)));
   const text = cleanSubtitleText(String((payload && payload.text) || "")).slice(0, 120);
+  const position = Math.max(0, Number((payload && payload.position) || 0) || 0);
   if (!enabled || !text) {
     postToOverlay("nested-lookup-result", { requestId, ok: false, error: "No lookup text was selected." });
     return;
   }
   (async () => {
     try {
-      const result = await lookupAtPosition(text, 0, requestId);
+      const result = await lookupAtPosition(text, position, requestId);
       postToOverlay("nested-lookup-result", { requestId, ok: true, result, text });
     } catch (error) {
       postToOverlay("nested-lookup-result", { requestId, ok: false, error: compactError(error), text });

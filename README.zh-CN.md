@@ -17,7 +17,7 @@ Hoshitan 是一个用于 IINA 的字幕查词和 Anki 制卡插件。它给文�
 - 词典按 Term、Frequency、Pitch 三类分组管理，支持配置方案内的启用、禁用和优先级排序。
 - 弹窗支持 Yomitan 结构化内容、词典自带 `styles.css`、可折叠词典区块、嵌套查词和自定义 CSS。
 - 在线单词音频支持 Yomitan `audioSourceList` 和直接音频 URL 模板。
-- 本地单词音频支持 Hoshi Reader 兼容的 `android.db`，不需要额外启动本地服务器。
+- 本地单词音频支持 Hoshi Reader 兼容的本地音频数据库导出，不需要额外启动本地服务器。
 - 通过 AnkiConnect 导出卡片，可配置牌组、笔记类型、字段映射、标签、截图、单词音频和字幕音频。
 - 字幕音频切片导出为 MP3。
 - 设置、菜单、弹窗、状态信息和 Anki 操作支持 English / 简体中文界面。
@@ -88,7 +88,7 @@ Hoshitan 是一个用于 IINA 的字幕查词和 Anki 制卡插件。它给文�
 打开 **Settings -> Audio**。
 
 - 在线音频源可以是 Yomitan `audioSourceList` 端点，也可以是直接音频 URL 模板。
-- 本地音频使用 Hoshi Reader 兼容的 `android.db`。
+- 本地音频使用 Hoshi Reader 兼容的本地音频数据库导出。
 - 启用本地音频后，会优先尝试本地音频，再尝试在线音频。
 - 没有对应音频时，弹窗会显示缺失状态。
 - Anki 字段映射到 `{audio}` 可导出单词音频，映射到 `{sentence-audio}` 可导出当前字幕音频切片。
@@ -113,4 +113,5 @@ Hoshitan 使用 GNU General Public License v3.0 only。详见 [LICENSE](LICENSE)
 - [afn478/iinatan](https://github.com/afn478/iinatan)，原始 IINA 字幕查词插件。
 - [Yomitan](https://github.com/yomidevs/yomitan)，弹窗词典生态和兼容词典格式。
 - [HoshiDicts](https://github.com/Manhhao/hoshidicts/)，Hoshitan 使用的原生词典后端。
-- [Hoshi Reader Android](https://github.com/HuangAntimony/Hoshi-Reader-Android) 和 [Hoshi Reader Mac](https://github.com/W1ght/Hoshi-Reader-Mac)，词典、Anki 和本地音频流程的参考来源。
+- [Hoshi Reader](https://github.com/Manhhao/Hoshi-Reader)，Hoshi Reader 系列工具和流程的源头项目。
+- [Hoshi Reader Android](https://github.com/HuangAntimony/Hoshi-Reader-Android)，词典、Anki 和本地音频流程的参考来源。

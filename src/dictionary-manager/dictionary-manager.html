@@ -207,7 +207,7 @@
       border-color: var(--danger);
       background: var(--danger-hover);
     }
-    .dictionary-list, .audio-source-list {
+    .dictionary-list, .audio-source-list, .shortcut-list {
       border: 1px solid var(--border);
       border-radius: 8px;
       overflow: hidden;
@@ -258,6 +258,31 @@
       font-weight: 600;
     }
     .anki-field-row input {
+      width: 100%;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .shortcut-row {
+      display: grid;
+      grid-template-columns: minmax(180px, 1fr) minmax(180px, 0.8fr) auto;
+      align-items: center;
+      gap: 12px;
+      min-height: 52px;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    .shortcut-row:last-child { border-bottom: 0; }
+    .shortcut-name {
+      min-width: 0;
+      font-weight: 600;
+      overflow-wrap: anywhere;
+    }
+    .shortcut-default {
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 400;
+    }
+    .shortcut-row input {
       width: 100%;
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     }
@@ -315,6 +340,7 @@
       .profile-controls { justify-content: flex-start; }
       .form-grid { grid-template-columns: minmax(0, 1fr); }
       .anki-field-row { grid-template-columns: minmax(0, 1fr); }
+      .shortcut-row { grid-template-columns: minmax(0, 1fr); }
       .tabs { overflow-x: auto; }
       .dictionary-row {
         grid-template-columns: 34px 24px minmax(0, 1fr);
@@ -390,6 +416,10 @@
         <label class="check-field"><input data-profile-pref="hideNativeSubtitles" type="checkbox"><span>Hide IINA subtitles while Hoshitan is on</span></label>
         <label class="check-field"><input data-profile-pref="pauseWhilePopupVisible" type="checkbox"><span>Pause while a popup is visible</span></label>
       </div>
+
+      <h3>Shortcuts</h3>
+      <p class="hint">Enter IINA key names such as Space, Left, S, Shift+H, or Cmd+W. Leave empty to restore the default.</p>
+      <section id="shortcutList" class="shortcut-list"></section>
 
     </section>
 
@@ -582,12 +612,12 @@
       <div class="form-grid">
         <label class="check-field"><input data-global-setting="localAudioEnabled" type="checkbox"><span>Use local audio database</span></label>
         <div class="field">
-          <label for="localAudioDatabasePath">android.db path</label>
+          <label for="localAudioDatabasePath">Local audio database path</label>
           <div class="toolbar">
             <input id="localAudioDatabasePath" data-global-setting="localAudioDatabasePath" type="text" spellcheck="false">
             <button id="chooseLocalAudioDatabase" type="button">Choose Database...</button>
           </div>
-          <small>Compatible with Hoshi Reader local audio databases.</small>
+          <small>Compatible with Hoshi Reader local audio database exports.</small>
         </div>
       </div>
     </section>
@@ -650,6 +680,20 @@
         'Turn on automatically for new windows': '在新窗口中自动开启',
         'Hide IINA subtitles while Hoshitan is on': 'Hoshitan 开启时隐藏 IINA 原生字幕',
         'Pause while a popup is visible': '词典弹窗显示时暂停播放',
+        'Shortcuts': '快捷键',
+        'Enter IINA key names such as Space, Left, S, Shift+H, or Cmd+W. Leave empty to restore the default.': '输入 IINA 快捷键名称，例如 Space、Left、S、Shift+H 或 Cmd+W。留空会恢复默认值。',
+        'Default: {key}': '默认：{key}',
+        'Reset': '重置',
+        'Toggle Hoshitan': '开关 Hoshitan',
+        'Play / pause': '播放 / 暂停',
+        'Seek backward 5 seconds': '后退 5 秒',
+        'Seek forward 5 seconds': '前进 5 秒',
+        'Previous subtitle': '上一句字幕',
+        'Next subtitle': '下一句字幕',
+        'Toggle subtitle display': '显示 / 隐藏查词字幕',
+        'Toggle fullscreen': '全屏切换',
+        'Close popup': '关闭弹窗',
+        'Close video / return': '关闭视频 / 返回',
         'Popup Settings': '弹窗设置',
         'Lookup And Results': '查词与结果',
         'Characters to scan': '扫描字符数',
@@ -720,9 +764,9 @@
         'Audio source URL': '音频源 URL',
         'Local Audio': '本地音频',
         'Use local audio database': '使用本地音频数据库',
-        'android.db path': 'android.db 路径',
+        'Local audio database path': '本地音频数据库路径',
         'Choose Database...': '选择数据库...',
-        'Compatible with Hoshi Reader local audio databases.': '兼容 Hoshi Reader 的本地音频数据库。',
+        'Compatible with Hoshi Reader local audio database exports.': '兼容 Hoshi Reader 的本地音频数据库导出。',
         'Choosing local audio database...': '正在选择本地音频数据库...',
         'Timeouts': '超时',
         'Overlay request timeout (ms)': '字幕弹层请求超时（毫秒）',
@@ -825,6 +869,8 @@
       dictionaries: [],
       profiles: [],
       audioSources: [],
+      shortcutActions: [],
+      keyboardShortcuts: {},
       profilePreferences: {},
       profilePreferenceDefaults: {},
       globalSettings: {},
@@ -860,6 +906,7 @@
       status: document.getElementById('status'),
       dictionaryList: document.getElementById('dictionaryList'),
       audioSourceList: document.getElementById('audioSourceList'),
+      shortcutList: document.getElementById('shortcutList'),
       ankiRefresh: document.getElementById('ankiRefresh'),
       ankiAutoMap: document.getElementById('ankiAutoMap'),
       ankiConnectionLabel: document.getElementById('ankiConnectionLabel'),
@@ -1027,6 +1074,104 @@
     function syncAudioSourcesFromProfile() {
       state.audioSources = normalizeAudioSources(profileValue('audioSourcesJson'));
     }
+    function shortcutActions() {
+      return Array.isArray(state.shortcutActions) ? state.shortcutActions.filter(action => action && action.id) : [];
+    }
+    function normalizeShortcutBaseName(value) {
+      const compact = String(value || '').trim().replace(/\s+/g, '');
+      const lower = compact.toLowerCase();
+      if (!compact) return '';
+      if (lower === 'space' || lower === 'spacebar') return 'Space';
+      if (lower === 'esc' || lower === 'escape') return 'Esc';
+      if (lower === 'left' || lower === 'arrowleft') return 'Left';
+      if (lower === 'right' || lower === 'arrowright') return 'Right';
+      if (lower === 'up' || lower === 'arrowup') return 'Up';
+      if (lower === 'down' || lower === 'arrowdown') return 'Down';
+      if (lower === 'return' || lower === 'enter') return 'Enter';
+      if (lower === 'tab') return 'Tab';
+      if (/^[a-z]$/i.test(compact)) return compact.toUpperCase();
+      return compact;
+    }
+    function normalizeShortcutModifierName(value) {
+      const raw = String(value || '').trim().toLowerCase();
+      if (raw === 'cmd' || raw === 'command' || raw === 'meta' || raw === 'super') return 'Cmd';
+      if (raw === 'control' || raw === 'ctrl') return 'Ctrl';
+      if (raw === 'option' || raw === 'alt') return 'Alt';
+      if (raw === 'shift') return 'Shift';
+      return raw ? String(value || '').trim() : '';
+    }
+    function normalizeShortcutDisplayKey(value, fallback) {
+      const fallbackText = String(fallback || '').trim();
+      const raw = String(value === undefined || value === null ? '' : value).trim() || fallbackText;
+      if (!raw) return '';
+      const parts = raw.replace(/\s+/g, '').split('+').filter(Boolean);
+      if (!parts.length) return fallbackText;
+      const base = normalizeShortcutBaseName(parts[parts.length - 1]);
+      if (!base) return fallbackText;
+      const seen = Object.create(null);
+      const modifiers = [];
+      for (let i = 0; i < parts.length - 1; i++) {
+        const modifier = normalizeShortcutModifierName(parts[i]);
+        if (!modifier || seen[modifier]) continue;
+        seen[modifier] = true;
+        modifiers.push(modifier);
+      }
+      return modifiers.concat([base]).join('+');
+    }
+    function parseKeyboardShortcuts(value) {
+      let raw = value;
+      if (typeof raw === 'string') {
+        const text = raw.trim();
+        if (!text) raw = {};
+        else {
+          try { raw = JSON.parse(text); } catch (_) { raw = {}; }
+        }
+      }
+      if (raw && typeof raw === 'object' && raw.shortcuts && typeof raw.shortcuts === 'object') raw = raw.shortcuts;
+      if (Array.isArray(raw)) {
+        const mapped = {};
+        raw.forEach(item => {
+          if (!item || typeof item !== 'object') return;
+          const id = String(item.id || item.action || '').trim();
+          const key = item.key !== undefined ? item.key : item.shortcut;
+          if (id) mapped[id] = key;
+        });
+        raw = mapped;
+      }
+      const source = raw && typeof raw === 'object' ? raw : {};
+      const out = {};
+      shortcutActions().forEach(action => {
+        const fallback = action.defaultKey || '';
+        const configured = Object.prototype.hasOwnProperty.call(source, action.id) ? source[action.id] : fallback;
+        out[action.id] = normalizeShortcutDisplayKey(configured, fallback);
+      });
+      return out;
+    }
+    function syncKeyboardShortcutsFromProfile() {
+      state.keyboardShortcuts = parseKeyboardShortcuts(profileValue('keyboardShortcutsJson'));
+    }
+    function serializeKeyboardShortcuts(shortcuts) {
+      const source = shortcuts && typeof shortcuts === 'object' ? shortcuts : {};
+      const out = {};
+      shortcutActions().forEach(action => {
+        out[action.id] = normalizeShortcutDisplayKey(source[action.id], action.defaultKey || '');
+      });
+      return JSON.stringify(out);
+    }
+    function updateKeyboardShortcut(actionId, value) {
+      const action = shortcutActions().find(item => item.id === actionId);
+      if (!action) return;
+      state.keyboardShortcuts[action.id] = normalizeShortcutDisplayKey(value, action.defaultKey || '');
+      renderShortcuts();
+      saveProfilePreferences();
+    }
+    function resetKeyboardShortcut(actionId) {
+      const action = shortcutActions().find(item => item.id === actionId);
+      if (!action) return;
+      state.keyboardShortcuts[action.id] = normalizeShortcutDisplayKey(action.defaultKey || '', action.defaultKey || '');
+      renderShortcuts();
+      saveProfilePreferences();
+    }
     function saveAudioSources() {
       saveProfilePreferences();
     }
@@ -1136,6 +1281,7 @@
         prefs[key] = readControlValue(control, state.profilePreferenceDefaults[key]);
       });
       prefs.audioSourcesJson = serializeAudioSources(state.audioSources);
+      prefs.keyboardShortcutsJson = serializeKeyboardShortcuts(state.keyboardShortcuts);
       return prefs;
     }
     function collectGlobalSettings() {
@@ -1204,6 +1350,7 @@
         setControlValue(control, globalValue(control.dataset.globalSetting));
       });
       syncAudioSourcesFromProfile();
+      syncKeyboardShortcutsFromProfile();
       state.rendering = false;
       translateStaticDocument();
     }
@@ -1632,6 +1779,61 @@
         els.audioSourceList.appendChild(row);
       });
     }
+    function renderShortcuts() {
+      els.shortcutList.innerHTML = '';
+      const actions = shortcutActions();
+      if (!actions.length) {
+        const empty = document.createElement('div');
+        empty.className = 'empty';
+        empty.textContent = tr('No response from the plugin script yet. Try closing and reopening settings.');
+        els.shortcutList.appendChild(empty);
+        return;
+      }
+      actions.forEach(action => {
+        const row = document.createElement('div');
+        row.className = 'shortcut-row';
+        row.dataset.actionId = action.id;
+
+        const name = document.createElement('div');
+        name.className = 'shortcut-name';
+        const label = document.createElement('div');
+        label.textContent = tr(action.label || action.id);
+        const defaultLabel = document.createElement('div');
+        defaultLabel.className = 'shortcut-default';
+        defaultLabel.textContent = tr('Default: {key}', { key: action.defaultKey || '' });
+        name.appendChild(label);
+        name.appendChild(defaultLabel);
+        row.appendChild(name);
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.autocomplete = 'off';
+        input.spellcheck = false;
+        input.value = String(state.keyboardShortcuts[action.id] || action.defaultKey || '');
+        input.placeholder = action.defaultKey || '';
+        input.dataset.busyControl = 'true';
+        input.disabled = state.busy;
+        const commit = () => updateKeyboardShortcut(action.id, input.value);
+        input.addEventListener('change', commit);
+        input.addEventListener('blur', commit);
+        input.addEventListener('keydown', event => {
+          if (event.key !== 'Enter') return;
+          commit();
+          input.blur();
+        });
+        row.appendChild(input);
+
+        const reset = document.createElement('button');
+        reset.type = 'button';
+        reset.textContent = tr('Reset');
+        reset.dataset.busyControl = 'true';
+        reset.disabled = state.busy;
+        reset.addEventListener('click', () => resetKeyboardShortcut(action.id));
+        row.appendChild(reset);
+
+        els.shortcutList.appendChild(row);
+      });
+    }
     function renderTabs() {
       Array.from(document.querySelectorAll('.tab')).forEach(tab => {
         tab.classList.toggle('active', tab.dataset.tab === state.activeTab);
@@ -1646,6 +1848,7 @@
       renderDictionaries();
       renderAnkiMetadata();
       renderAudioSources();
+      renderShortcuts();
       renderTabs();
       updateBusyState();
     }
@@ -1719,6 +1922,7 @@
       bridge.onMessage('dictionary-manager-state', payload => {
         state.dictionaries = Array.isArray(payload && payload.dictionaries) ? payload.dictionaries.slice() : [];
         state.profiles = Array.isArray(payload && payload.profiles) ? payload.profiles.slice() : [];
+        state.shortcutActions = Array.isArray(payload && payload.shortcutActions) ? payload.shortcutActions.slice() : [];
         state.profilePreferences = (payload && payload.profilePreferences && typeof payload.profilePreferences === 'object') ? Object.assign({}, payload.profilePreferences) : {};
         state.profilePreferenceDefaults = (payload && payload.profilePreferenceDefaults && typeof payload.profilePreferenceDefaults === 'object') ? Object.assign({}, payload.profilePreferenceDefaults) : {};
         state.globalSettings = (payload && payload.globalSettings && typeof payload.globalSettings === 'object') ? Object.assign({}, payload.globalSettings) : {};

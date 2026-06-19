@@ -39,6 +39,7 @@ function dictionaryManagerState() {
     profilePreferenceKeys: PROFILE_PREFERENCE_KEYS.slice(),
     profilePreferenceDefaults: Object.assign({}, PROFILE_PREFERENCE_DEFAULTS),
     profilePreferences: normalizeProfilePreferences(activeProfile.preferences),
+    shortcutActions: shortcutActionSummaries(),
     globalSettings: readGlobalSettingsSnapshot(),
     globalSettingDefaults: Object.assign({}, GLOBAL_SETTINGS_DEFAULTS),
     lookupLanguage: pref("lookupLanguage", "ja")

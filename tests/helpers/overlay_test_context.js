@@ -22,6 +22,7 @@ class FakeElement {
     this.dataset = {};
     this.attributes = {};
     this.listeners = {};
+    this.listenerLists = {};
     this.style = {};
     this.className = '';
     this.classList = new FakeClassList(this);
@@ -107,7 +108,13 @@ class FakeElement {
     this.parentNode.children = this.parentNode.children.filter(child => child !== this);
     this.parentNode = null;
   }
-  addEventListener(type, handler) { this.listeners[type] = handler; }
+  addEventListener(type, handler) {
+    if (!this.listenerLists[type]) this.listenerLists[type] = [];
+    this.listenerLists[type].push(handler);
+    this.listeners[type] = event => {
+      this.listenerLists[type].slice().forEach(fn => fn(event));
+    };
+  }
   querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
   querySelectorAll(selector) {
     const out = [];
@@ -143,10 +150,12 @@ function makeOverlayContext(options) {
   options = options || {};
   const elements = {
     subtitle: new FakeElement('subtitle'),
+    'popup-backdrop': new FakeElement('popup-backdrop'),
     popup: new FakeElement('popup'),
     status: new FakeElement('status'),
     task: new FakeElement('task')
   };
+  elements['popup-backdrop'].classList.add('hidden');
   elements.popup.classList.add('hidden');
   const head = new FakeElement('head');
   const body = new FakeElement('body');

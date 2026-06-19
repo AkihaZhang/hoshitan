@@ -10,7 +10,7 @@
 
 const { core, mpv, event, overlay, menu, input, ws, preferences, console, file, http, utils, standaloneWindow } = iina;
 
-const VERSION = "0.1.0-dev.17";
+const VERSION = "0.1.0-dev.18";
 
 let enabled = false;
 let initialized = false;
@@ -45,6 +45,7 @@ let hoverLookupSequence = 0;
 let hoverLookupActiveKey = "";
 let lastShortcutToggleAt = 0;
 let shortcutRegistered = false;
+let registeredShortcutInputKeys = Object.create(null);
 let subtitleDisplayEnabled = true;
 let lookupPopupPauseActive = false;
 let lookupPopupPauseShouldResume = false;
@@ -2207,6 +2208,19 @@ async function refreshSystemUiLanguage() {
 const DEFAULT_PROFILE_ID = "default";
 const DEFAULT_AUDIO_SOURCE_URL = "https://hoshi-reader.manhhaoo-do.workers.dev/?term={term}&reading={reading}";
 const DEFAULT_AUDIO_SOURCES_JSON = JSON.stringify([{ name: "Hoshi Reader", url: DEFAULT_AUDIO_SOURCE_URL }]);
+const SHORTCUT_ACTION_DEFINITIONS = [
+  { id: "toggleHoshitan", label: "Toggle Hoshitan", defaultKey: "Shift+H" },
+  { id: "playPause", label: "Play / pause", defaultKey: "Space" },
+  { id: "seekBackward5", label: "Seek backward 5 seconds", defaultKey: "Left" },
+  { id: "seekForward5", label: "Seek forward 5 seconds", defaultKey: "Right" },
+  { id: "previousSubtitle", label: "Previous subtitle", defaultKey: "[" },
+  { id: "nextSubtitle", label: "Next subtitle", defaultKey: "]" },
+  { id: "toggleSubtitleDisplay", label: "Toggle subtitle display", defaultKey: "S" },
+  { id: "toggleFullscreen", label: "Toggle fullscreen", defaultKey: "F" },
+  { id: "closePopup", label: "Close popup", defaultKey: "Esc" },
+  { id: "closeVideo", label: "Close video / return", defaultKey: "Cmd+W" }
+];
+const DEFAULT_KEYBOARD_SHORTCUTS_JSON = JSON.stringify(shortcutDefaultMap());
 const DIRECT_IPC_POLL_MS_DEFAULT = 16;
 const DIRECT_IPC_POLL_MS_MIN = 16;
 const DIRECT_IPC_POLL_MS_MAX = 250;
@@ -2220,6 +2234,7 @@ const PROFILE_PREFERENCE_DEFAULTS = {
   audioAutoPlay: false,
   audioProbeOnPopup: false,
   audioSourcesJson: DEFAULT_AUDIO_SOURCES_JSON,
+  keyboardShortcutsJson: DEFAULT_KEYBOARD_SHORTCUTS_JSON,
   lookupLanguage: "ja",
   scanLength: 24,
   maxEntries: 3,
@@ -2333,6 +2348,101 @@ function normalizeProfilePreferenceNumberValue(value, fallback, minValue, maxVal
   if (Number.isFinite(maxNumber)) out = Math.min(maxNumber, out);
   return out;
 }
+function shortcutDefaultMap() {
+  const out = {};
+  SHORTCUT_ACTION_DEFINITIONS.forEach(action => {
+    out[action.id] = action.defaultKey;
+  });
+  return out;
+}
+function shortcutDefinitionById(id) {
+  const key = String(id || "");
+  for (let i = 0; i < SHORTCUT_ACTION_DEFINITIONS.length; i++) {
+    if (SHORTCUT_ACTION_DEFINITIONS[i].id === key) return SHORTCUT_ACTION_DEFINITIONS[i];
+  }
+  return null;
+}
+function normalizeShortcutBaseName(value) {
+  const raw = String(value || "").trim();
+  const compact = raw.replace(/\s+/g, "");
+  const lower = compact.toLowerCase();
+  if (!compact) return "";
+  if (lower === "space" || lower === "spacebar") return "Space";
+  if (lower === "esc" || lower === "escape") return "Esc";
+  if (lower === "left" || lower === "arrowleft") return "Left";
+  if (lower === "right" || lower === "arrowright") return "Right";
+  if (lower === "up" || lower === "arrowup") return "Up";
+  if (lower === "down" || lower === "arrowdown") return "Down";
+  if (lower === "return" || lower === "enter") return "Enter";
+  if (lower === "tab") return "Tab";
+  if (/^[a-z]$/i.test(compact)) return compact.toUpperCase();
+  return compact;
+}
+function normalizeShortcutModifierName(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (raw === "cmd" || raw === "command" || raw === "meta" || raw === "super") return "Cmd";
+  if (raw === "control" || raw === "ctrl") return "Ctrl";
+  if (raw === "option" || raw === "alt") return "Alt";
+  if (raw === "shift") return "Shift";
+  return raw ? String(value || "").trim() : "";
+}
+function normalizeShortcutDisplayKey(value, fallback) {
+  const fallbackText = String(fallback || "").trim();
+  const text = String(value === undefined || value === null ? "" : value).trim();
+  const raw = text || fallbackText;
+  if (!raw) return "";
+  const parts = raw.replace(/\s+/g, "").split("+").filter(Boolean);
+  if (!parts.length) return fallbackText;
+  const base = normalizeShortcutBaseName(parts[parts.length - 1]);
+  if (!base) return fallbackText;
+  const seen = Object.create(null);
+  const modifiers = [];
+  for (let i = 0; i < parts.length - 1; i++) {
+    const modifier = normalizeShortcutModifierName(parts[i]);
+    if (!modifier || seen[modifier]) continue;
+    seen[modifier] = true;
+    modifiers.push(modifier);
+  }
+  return modifiers.concat([base]).join("+");
+}
+function normalizeKeyboardShortcuts(value) {
+  let raw = value;
+  if (typeof raw === "string") {
+    const text = raw.trim();
+    if (!text) raw = {};
+    else {
+      try { raw = JSON.parse(text); } catch (_) { raw = {}; }
+    }
+  }
+  if (raw && typeof raw === "object" && raw.shortcuts && typeof raw.shortcuts === "object") raw = raw.shortcuts;
+  if (Array.isArray(raw)) {
+    const mapped = {};
+    raw.forEach(item => {
+      if (!item || typeof item !== "object") return;
+      const id = String(item.id || item.action || "").trim();
+      const key = item.key !== undefined ? item.key : item.shortcut;
+      if (id) mapped[id] = key;
+    });
+    raw = mapped;
+  }
+  const source = raw && typeof raw === "object" ? raw : {};
+  const out = shortcutDefaultMap();
+  SHORTCUT_ACTION_DEFINITIONS.forEach(action => {
+    const configured = Object.prototype.hasOwnProperty.call(source, action.id) ? source[action.id] : out[action.id];
+    out[action.id] = normalizeShortcutDisplayKey(configured, action.defaultKey);
+  });
+  return out;
+}
+function normalizeKeyboardShortcutsJsonPreference(value) {
+  return JSON.stringify(normalizeKeyboardShortcuts(value));
+}
+function shortcutActionSummaries() {
+  return SHORTCUT_ACTION_DEFINITIONS.map(action => ({
+    id: action.id,
+    label: action.label,
+    defaultKey: action.defaultKey
+  }));
+}
 function emptyManifest() {
   return { dictionaries: {}, disabled: {}, dictionaryOrder: [], activeProfileId: DEFAULT_PROFILE_ID, profiles: {} };
 }
@@ -2368,6 +2478,7 @@ function normalizeProfilePreferences(prefs) {
   out.audioAutoPlay = normalizeProfilePreferenceBoolValue(out.audioAutoPlay, PROFILE_PREFERENCE_DEFAULTS.audioAutoPlay);
   out.audioProbeOnPopup = normalizeProfilePreferenceBoolValue(out.audioProbeOnPopup, PROFILE_PREFERENCE_DEFAULTS.audioProbeOnPopup);
   out.audioSourcesJson = normalizeAudioSourcesJsonPreference(out.audioSourcesJson, !hasAudioSources);
+  out.keyboardShortcutsJson = normalizeKeyboardShortcutsJsonPreference(out.keyboardShortcutsJson);
   out.directIpcPollMs = normalizeProfilePreferenceNumberValue(out.directIpcPollMs, DIRECT_IPC_POLL_MS_DEFAULT, DIRECT_IPC_POLL_MS_MIN, DIRECT_IPC_POLL_MS_MAX);
   out.workerIdleSleepMs = normalizeProfilePreferenceNumberValue(out.workerIdleSleepMs, WORKER_IDLE_SLEEP_MS_DEFAULT, WORKER_IDLE_SLEEP_MS_MIN, WORKER_IDLE_SLEEP_MS_MAX);
   return out;
@@ -2941,6 +3052,7 @@ function resetLookupRuntimeForProfileChange() {
 }
 function refreshRuntimeAfterProfileChange(reloadOverlay) {
   resetLookupRuntimeForProfileChange();
+  if (typeof syncKeyboardShortcutRegistrations === "function") syncKeyboardShortcutRegistrations();
   if (reloadOverlay && typeof reloadOverlayForProfileChange === "function") {
     reloadOverlayForProfileChange();
   } else if (typeof pushOverlayConfigForProfileChange === "function") {
@@ -3410,7 +3522,7 @@ async function chooseLocalAudioDatabasePath() {
     multiple: false
   };
   try {
-    const selected = await resolveMaybePromise(utils.chooseFile("Choose Hoshi Reader android.db", options));
+    const selected = await resolveMaybePromise(utils.chooseFile("Choose Hoshi Reader local audio database", options));
     const paths = normalizeChosenFilePaths(selected);
     return paths.length ? paths[0] : "";
   } catch (error) {
@@ -4184,13 +4296,14 @@ function ensureOverlayBridge() {
 function handleNestedLookup(payload) {
   const requestId = String((payload && payload.requestId) || ("nested-" + String(++requestSerial)));
   const text = cleanSubtitleText(String((payload && payload.text) || "")).slice(0, 120);
+  const position = Math.max(0, Number((payload && payload.position) || 0) || 0);
   if (!enabled || !text) {
     postToOverlay("nested-lookup-result", { requestId, ok: false, error: "No lookup text was selected." });
     return;
   }
   (async () => {
     try {
-      const result = await lookupAtPosition(text, 0, requestId);
+      const result = await lookupAtPosition(text, position, requestId);
       postToOverlay("nested-lookup-result", { requestId, ok: true, result, text });
     } catch (error) {
       postToOverlay("nested-lookup-result", { requestId, ok: false, error: compactError(error), text });
@@ -4974,58 +5087,113 @@ function toggleFromShortcut(data) {
     return true;
   }
 }
-function shortcutAction(label, action) {
-  return data => {
-    try {
-      if (data && data.isRepeat) return true;
-      action();
-    } catch (error) {
-      debugWarn("Shortcut " + label + " failed: " + compactError(error));
-    }
-    return true;
-  };
-}
 function toggleSubtitleDisplay() {
   subtitleDisplayEnabled = !subtitleDisplayEnabled;
   postToOverlay("subtitle-visibility", { visible: subtitleDisplayEnabled });
   showOSD(subtitleDisplayEnabled ? "Subtitles: On" : "Subtitles: Off");
 }
-function registerInputShortcut(key, label, action) {
-  try {
-    input.onKeyDown(key, shortcutAction(label, action), input.PRIORITY_HIGH);
-    debugLog("registered input shortcut " + key + " for " + label);
-  } catch (error) {
-    debugWarn("Could not register shortcut " + key + " for " + label + ": " + compactError(error));
+function shortcutBaseInputKey(baseName, hasShift) {
+  const base = normalizeShortcutBaseName(baseName);
+  if (base === "Space") return "SPACE";
+  if (base === "Esc") return "ESC";
+  if (base === "Left") return "LEFT";
+  if (base === "Right") return "RIGHT";
+  if (base === "Up") return "UP";
+  if (base === "Down") return "DOWN";
+  if (base === "Enter") return "ENTER";
+  if (base === "Tab") return "TAB";
+  if (/^[A-Z]$/.test(base)) return hasShift ? base : base.toLowerCase();
+  return base;
+}
+function shortcutInputKeysForDisplay(value) {
+  const display = normalizeShortcutDisplayKey(value, "");
+  if (!display) return [];
+  const parts = display.split("+").filter(Boolean);
+  if (!parts.length) return [];
+  const base = parts[parts.length - 1];
+  const modifierNames = parts.slice(0, -1);
+  const inputModifiers = modifierNames.map(modifier => {
+    if (modifier === "Cmd") return "Meta";
+    return modifier;
+  });
+  const hasShift = modifierNames.indexOf("Shift") >= 0;
+  const baseInput = shortcutBaseInputKey(base, hasShift);
+  const keys = [];
+  if (modifierNames.length === 1 && modifierNames[0] === "Shift" && /^[A-Z]$/.test(base)) {
+    keys.push(base);
   }
+  keys.push(inputModifiers.length ? inputModifiers.concat([baseInput]).join("+") : baseInput);
+  const seen = Object.create(null);
+  return keys.filter(key => {
+    if (!key || seen[key]) return false;
+    seen[key] = true;
+    return true;
+  });
+}
+function configuredKeyboardShortcuts() {
+  return normalizeKeyboardShortcuts(pref("keyboardShortcutsJson", DEFAULT_KEYBOARD_SHORTCUTS_JSON));
+}
+function shortcutDefinitionsForInputKey(inputKey) {
+  const current = configuredKeyboardShortcuts();
+  const matched = [];
+  SHORTCUT_ACTION_DEFINITIONS.forEach(action => {
+    const keys = shortcutInputKeysForDisplay(current[action.id] || action.defaultKey);
+    if (keys.indexOf(inputKey) >= 0) matched.push(action);
+  });
+  return matched;
+}
+function shortcutActionHandler(actionId) {
+  const handlers = {
+    toggleHoshitan: data => toggleFromShortcut(data),
+    playPause: () => setPauseState(!pauseState()),
+    seekBackward5: () => core.seek(-5, true),
+    seekForward5: () => core.seek(5, true),
+    previousSubtitle: () => mpv.command("sub-seek", ["-1"]),
+    nextSubtitle: () => mpv.command("sub-seek", ["1"]),
+    toggleSubtitleDisplay,
+    toggleFullscreen: () => mpv.set("fullscreen", !mpv.getFlag("fullscreen")),
+    closePopup: () => postToOverlay("close-popup", {}),
+    closeVideo: () => core.stop()
+  };
+  return handlers[actionId] || null;
+}
+function dispatchShortcutInputKey(inputKey, data) {
+  try {
+    if (data && data.isRepeat) return true;
+    const matches = shortcutDefinitionsForInputKey(inputKey);
+    if (!matches.length) return false;
+    const action = matches[0];
+    const handler = shortcutActionHandler(action.id);
+    if (!handler) {
+      debugWarn("No shortcut handler for " + action.id);
+      return true;
+    }
+    handler(data);
+  } catch (error) {
+    debugWarn("Shortcut " + inputKey + " failed: " + compactError(error));
+  }
+  return true;
+}
+function registerInputShortcut(key) {
+  if (!key || registeredShortcutInputKeys[key]) return;
+  try {
+    input.onKeyDown(key, data => dispatchShortcutInputKey(key, data), input.PRIORITY_HIGH);
+    registeredShortcutInputKeys[key] = true;
+    debugLog("registered input shortcut " + key);
+  } catch (error) {
+    debugWarn("Could not register shortcut " + key + ": " + compactError(error));
+  }
+}
+function syncKeyboardShortcutRegistrations() {
+  const current = configuredKeyboardShortcuts();
+  SHORTCUT_ACTION_DEFINITIONS.forEach(action => {
+    shortcutInputKeysForDisplay(current[action.id] || action.defaultKey).forEach(registerInputShortcut);
+  });
 }
 function registerShortcut() {
   if (shortcutRegistered) return;
   shortcutRegistered = true;
-  try {
-    // Prefer IINA's input module over menu keyBinding here. The menu shortcut could
-    // turn the overlay on but then fail to turn it off while the overlay/webview was
-    // active. We listen for mpv's uppercase H form, i.e. Shift+h.
-    input.onKeyDown("H", toggleFromShortcut, input.PRIORITY_HIGH);
-    debugLog("registered input shortcut H for Shift+H");
-  } catch (error) {
-    console.warn("Could not register H shortcut: " + compactError(error));
-  }
-  try {
-    // Fallback for builds/configs that accept explicit modifier notation.
-    input.onKeyDown("Shift+H", toggleFromShortcut, input.PRIORITY_HIGH);
-    debugLog("registered input shortcut Shift+H fallback");
-  } catch (error) {
-    console.warn("Could not register Shift+H fallback: " + compactError(error));
-  }
-  registerInputShortcut("SPACE", "play/pause", () => setPauseState(!pauseState()));
-  registerInputShortcut("LEFT", "seek backward 5 seconds", () => core.seek(-5, true));
-  registerInputShortcut("RIGHT", "seek forward 5 seconds", () => core.seek(5, true));
-  registerInputShortcut("[", "previous subtitle", () => mpv.command("sub-seek", ["-1"]));
-  registerInputShortcut("]", "next subtitle", () => mpv.command("sub-seek", ["1"]));
-  registerInputShortcut("s", "toggle subtitles", toggleSubtitleDisplay);
-  registerInputShortcut("f", "toggle fullscreen", () => mpv.set("fullscreen", !mpv.getFlag("fullscreen")));
-  registerInputShortcut("ESC", "close lookup popup", () => postToOverlay("close-popup", {}));
-  registerInputShortcut("Meta+w", "close video", () => core.stop());
+  syncKeyboardShortcutRegistrations();
 }
 
 function dictionaryManagerAvailable() {
@@ -5069,6 +5237,7 @@ function dictionaryManagerState() {
     profilePreferenceKeys: PROFILE_PREFERENCE_KEYS.slice(),
     profilePreferenceDefaults: Object.assign({}, PROFILE_PREFERENCE_DEFAULTS),
     profilePreferences: normalizeProfilePreferences(activeProfile.preferences),
+    shortcutActions: shortcutActionSummaries(),
     globalSettings: readGlobalSettingsSnapshot(),
     globalSettingDefaults: Object.assign({}, GLOBAL_SETTINGS_DEFAULTS),
     lookupLanguage: pref("lookupLanguage", "ja")

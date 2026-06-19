@@ -187,6 +187,14 @@
     }
     .char.ready { text-decoration: underline rgba(150, 195, 255, 0.55) 0.055em; text-underline-offset: 0.11em; }
     .char.nonlookup { pointer-events: none; }
+    #popup-backdrop {
+      position: absolute;
+      inset: 0;
+      z-index: 19;
+      background: transparent;
+      pointer-events: auto;
+    }
+    #popup-backdrop.hidden { display: none; pointer-events: none; }
     #popup {
       position: absolute;
       z-index: 20;
@@ -401,12 +409,13 @@
       from { opacity: 0.45; }
       to { opacity: 1; }
     }
-    .dict-section + .dict-section { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--popup-section-divider); }
+    .dict-section + .dict-section { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--popup-section-divider); }
     .dict-section > summary { list-style: none; }
     .dict-section > summary::-webkit-details-marker { display: none; }
-    .dict-header { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; margin-bottom: 8px; min-width: 0; cursor: pointer; user-select: none; }
+    .dict-header { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; min-height: 24px; margin-bottom: 0; min-width: 0; cursor: pointer; user-select: none; }
     .dict-header::before { content: "▶"; flex: 0 0 auto; color: var(--popup-faint); font-size: 9px; }
     .dict-section[open] > .dict-header::before { content: "▼"; }
+    .dict-section[open] > .dict-header { margin-bottom: 8px; }
     .dict-header .dict-name { color: var(--popup-muted); font-size: 13px; font-weight: 800; }
     .dict-section-body { min-width: 0; }
     .dict-glossary + .dict-glossary { margin-top: 8px; }

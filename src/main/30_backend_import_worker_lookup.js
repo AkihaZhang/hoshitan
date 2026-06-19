@@ -311,7 +311,7 @@ async function chooseLocalAudioDatabasePath() {
     multiple: false
   };
   try {
-    const selected = await resolveMaybePromise(utils.chooseFile("Choose Hoshi Reader android.db", options));
+    const selected = await resolveMaybePromise(utils.chooseFile("Choose Hoshi Reader local audio database", options));
     const paths = normalizeChosenFilePaths(selected);
     return paths.length ? paths[0] : "";
   } catch (error) {

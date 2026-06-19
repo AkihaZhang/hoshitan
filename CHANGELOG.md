@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0-dev.18 - 2026-06-19
+
+- Added per-profile editable video shortcuts in Settings while preserving the existing default key bindings.
+- Reworked shortcut registration around action IDs so future shortcut actions can be added from one shared definition table.
+- Made popup nested lookup respond to selected text and clicked text positions instead of requiring a double-click-only path.
+- Added click-outside-to-close behavior for lookup popups and tightened collapsed dictionary section spacing.
+- Updated local audio wording to avoid requiring a specific database filename and credited the original Hoshi Reader project.
+
 ## 0.1.0-dev.17 - 2026-06-19
 
 - Stopped local overlay word audio from piping media through `base64` subprocess stdout; playback now reuses cached local file URLs.

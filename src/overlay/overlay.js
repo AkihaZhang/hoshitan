@@ -1,6 +1,7 @@
 (function () {
   const subtitleEl = document.getElementById('subtitle');
   const popupEl = document.getElementById('popup');
+  const popupBackdropEl = document.getElementById('popup-backdrop');
   const statusEl = document.getElementById('status');
   const taskEl = document.getElementById('task');
 
@@ -1285,6 +1286,17 @@
 	    }
 	    return null;
 	  }
+	  function closestPopupInteractive(target) {
+	    let el = target;
+	    while (el && el !== popupEl) {
+	      const tag = String(el.tagName || '').toLowerCase();
+	      if (/^(button|input|select|textarea|summary)$/.test(tag)) return el;
+	      if (el.dataset && (el.dataset.popupAction || el.dataset.ankiEntryIndex || el.dataset.audioKey || el.dataset.externalUrl)) return el;
+	      if (el.classList && (el.classList.contains('audio-button') || el.classList.contains('audio-source-menu') || el.classList.contains('audio-source-menu-item'))) return el;
+	      el = el.parentNode;
+	    }
+	    return null;
+	  }
 	  function glossaryPlainText(glossary) {
 	    const raw = String((glossary && glossary.glossary) || '');
 	    const parsed = parseGlossaryJson(raw);
@@ -1474,14 +1486,71 @@
 	    }
 	    return escapeHtml(text);
 	  }
-	  function requestNestedLookup(text) {
+	  function lookupableTextSnippetAtOffset(text, offset) {
+	    const raw = String(text || '');
+	    const beforeChars = Array.from(raw.slice(0, Math.max(0, Number(offset) || 0)));
+	    const chars = Array.from(raw);
+	    if (!chars.length) return null;
+	    let index = Math.min(chars.length - 1, beforeChars.length);
+	    if (!isLookupableChar(chars[index]) && index > 0 && isLookupableChar(chars[index - 1])) index--;
+	    if (!isLookupableChar(chars[index])) return null;
+	    let start = index;
+	    let end = index + 1;
+	    while (start > 0 && isLookupableChar(chars[start - 1])) start--;
+	    while (end < chars.length && isLookupableChar(chars[end])) end++;
+	    const maxScan = Math.max(1, Number(state.config.scanLength || 24));
+	    const snippetEnd = Math.min(end, index + maxScan);
+	    const snippet = chars.slice(start, snippetEnd).join('');
+	    const position = Math.max(0, index - start);
+	    return snippet ? { text: snippet, position } : null;
+	  }
+	  function caretInfoFromPoint(x, y) {
+	    try {
+	      if (document.caretRangeFromPoint) {
+	        const range = document.caretRangeFromPoint(x, y);
+	        if (range && range.startContainer) return { node: range.startContainer, offset: range.startOffset || 0 };
+	      }
+	    } catch (_) {}
+	    try {
+	      if (document.caretPositionFromPoint) {
+	        const pos = document.caretPositionFromPoint(x, y);
+	        if (pos && pos.offsetNode) return { node: pos.offsetNode, offset: pos.offset || 0 };
+	      }
+	    } catch (_) {}
+	    return null;
+	  }
+	  function nestedLookupRequestFromSelection() {
+	    const text = popupSelectionText().slice(0, 120);
+	    if (!text || !Array.from(text).some(isLookupableChar)) return null;
+	    return { text, position: 0 };
+	  }
+	  function nestedLookupRequestFromEvent(event) {
+	    const selected = nestedLookupRequestFromSelection();
+	    if (selected) return selected;
+	    const x = Number(event && event.clientX);
+	    const y = Number(event && event.clientY);
+	    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+	    const info = caretInfoFromPoint(x, y);
+	    if (!info || !info.node) return null;
+	    const text = String(info.node.textContent || info.node.nodeValue || '');
+	    return lookupableTextSnippetAtOffset(text, info.offset || 0);
+	  }
+	  function triggerNestedLookupFromEvent(event) {
+	    if (!event || popupEl.classList.contains('hidden')) return false;
+	    if (closestPopupInteractive(event.target) || closestExternalLink(event.target)) return false;
+	    const request = nestedLookupRequestFromEvent(event);
+	    if (!request || !request.text) return false;
+	    try { event.preventDefault(); event.stopPropagation(); } catch (_) {}
+	    return requestNestedLookup(request.text, request.position || 0);
+	  }
+	  function requestNestedLookup(text, position) {
 	    const lookupText = normalizeWhitespace(text).slice(0, 120);
 	    if (!lookupText || !state.currentLookupStored || state.nestedLookupRequestId) return false;
 	    const requestId = 'nested-' + String(Date.now()) + '-' + String(++state.nestedLookupRequestSeq);
 	    state.nestedLookupRequestId = requestId;
 	    state.nestedLookupStatusText = lookupText;
 	    refreshPopupActionBar();
-	    const payload = { type: 'nested-lookup', requestId, text: lookupText, at: Date.now() };
+	    const payload = { type: 'nested-lookup', requestId, text: lookupText, position: Math.max(0, Number(position) || 0), at: Date.now() };
 	    if (!sendBridgeMessage(payload)) {
 	      try { iina.postMessage('nested-lookup', payload); }
 	      catch (error) {
@@ -1628,12 +1697,15 @@
 	  popupEl.addEventListener('mouseenter', cancelHidePopupTimer);
 	  popupEl.addEventListener('mouseleave', scheduleHidePopup);
 	  popupEl.addEventListener('click', onPopupClick, true);
+	  popupEl.addEventListener('click', event => {
+	    triggerNestedLookupFromEvent(event);
+	  });
+	  popupEl.addEventListener('mouseup', event => {
+	    if (!popupSelectionText()) return;
+	    triggerNestedLookupFromEvent(event);
+	  });
 	  popupEl.addEventListener('dblclick', event => {
-	    if (closestPopupAction(event.target) || closestAnkiButton(event.target) || closestExternalLink(event.target)) return;
-	    const text = popupSelectionText().slice(0, 120);
-	    if (!text || !Array.from(text).some(isLookupableChar)) return;
-	    try { event.preventDefault(); event.stopPropagation(); } catch (_) {}
-	    requestNestedLookup(text);
+	    triggerNestedLookupFromEvent(event);
 	  });
   function trapPopupWheel(ev) {
     if (popupEl.classList.contains('hidden')) return;
@@ -1844,6 +1916,7 @@
 	    stopCurrentAudio();
     setLookupPopupVisibility(false);
     popupEl.classList.add('hidden');
+    if (popupBackdropEl) popupBackdropEl.classList.add('hidden');
     state.currentPos = null;
     state.currentAnchor = null;
     state.currentLookupStored = null;
@@ -1976,6 +2049,7 @@
 	    state.currentAnchor = anchor || null;
 	    popupEl.innerHTML = '<div class="popup-action-bar">' + renderPopupActionBar() + '</div><div class="popup-scroll"><div class="head">' + renderPopupHead(heading || '', '', '', null, null) + '</div><div class="body">' + bodyHtml + '</div></div>';
 	    markPopupClickable();
+	    if (popupBackdropEl) popupBackdropEl.classList.remove('hidden');
 	    popupEl.classList.remove('hidden');
 	    setLookupPopupVisibility(true);
 	    placePopup(anchor);
@@ -3074,6 +3148,13 @@
     if (nodeContains(menu, event && event.target)) return;
     hideAudioSourceMenu();
   });
+  if (popupBackdropEl) {
+    popupBackdropEl.addEventListener('click', event => {
+      try { event.preventDefault(); event.stopPropagation(); } catch (_) {}
+      hideAudioSourceMenu();
+      hidePopup();
+    });
+  }
   document.addEventListener('keydown', event => {
     if (event && event.key === 'Escape') {
       hideAudioSourceMenu();

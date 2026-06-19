@@ -1,6 +1,19 @@
 const DEFAULT_PROFILE_ID = "default";
 const DEFAULT_AUDIO_SOURCE_URL = "https://hoshi-reader.manhhaoo-do.workers.dev/?term={term}&reading={reading}";
 const DEFAULT_AUDIO_SOURCES_JSON = JSON.stringify([{ name: "Hoshi Reader", url: DEFAULT_AUDIO_SOURCE_URL }]);
+const SHORTCUT_ACTION_DEFINITIONS = [
+  { id: "toggleHoshitan", label: "Toggle Hoshitan", defaultKey: "Shift+H" },
+  { id: "playPause", label: "Play / pause", defaultKey: "Space" },
+  { id: "seekBackward5", label: "Seek backward 5 seconds", defaultKey: "Left" },
+  { id: "seekForward5", label: "Seek forward 5 seconds", defaultKey: "Right" },
+  { id: "previousSubtitle", label: "Previous subtitle", defaultKey: "[" },
+  { id: "nextSubtitle", label: "Next subtitle", defaultKey: "]" },
+  { id: "toggleSubtitleDisplay", label: "Toggle subtitle display", defaultKey: "S" },
+  { id: "toggleFullscreen", label: "Toggle fullscreen", defaultKey: "F" },
+  { id: "closePopup", label: "Close popup", defaultKey: "Esc" },
+  { id: "closeVideo", label: "Close video / return", defaultKey: "Cmd+W" }
+];
+const DEFAULT_KEYBOARD_SHORTCUTS_JSON = JSON.stringify(shortcutDefaultMap());
 const DIRECT_IPC_POLL_MS_DEFAULT = 16;
 const DIRECT_IPC_POLL_MS_MIN = 16;
 const DIRECT_IPC_POLL_MS_MAX = 250;
@@ -14,6 +27,7 @@ const PROFILE_PREFERENCE_DEFAULTS = {
   audioAutoPlay: false,
   audioProbeOnPopup: false,
   audioSourcesJson: DEFAULT_AUDIO_SOURCES_JSON,
+  keyboardShortcutsJson: DEFAULT_KEYBOARD_SHORTCUTS_JSON,
   lookupLanguage: "ja",
   scanLength: 24,
   maxEntries: 3,
@@ -127,6 +141,101 @@ function normalizeProfilePreferenceNumberValue(value, fallback, minValue, maxVal
   if (Number.isFinite(maxNumber)) out = Math.min(maxNumber, out);
   return out;
 }
+function shortcutDefaultMap() {
+  const out = {};
+  SHORTCUT_ACTION_DEFINITIONS.forEach(action => {
+    out[action.id] = action.defaultKey;
+  });
+  return out;
+}
+function shortcutDefinitionById(id) {
+  const key = String(id || "");
+  for (let i = 0; i < SHORTCUT_ACTION_DEFINITIONS.length; i++) {
+    if (SHORTCUT_ACTION_DEFINITIONS[i].id === key) return SHORTCUT_ACTION_DEFINITIONS[i];
+  }
+  return null;
+}
+function normalizeShortcutBaseName(value) {
+  const raw = String(value || "").trim();
+  const compact = raw.replace(/\s+/g, "");
+  const lower = compact.toLowerCase();
+  if (!compact) return "";
+  if (lower === "space" || lower === "spacebar") return "Space";
+  if (lower === "esc" || lower === "escape") return "Esc";
+  if (lower === "left" || lower === "arrowleft") return "Left";
+  if (lower === "right" || lower === "arrowright") return "Right";
+  if (lower === "up" || lower === "arrowup") return "Up";
+  if (lower === "down" || lower === "arrowdown") return "Down";
+  if (lower === "return" || lower === "enter") return "Enter";
+  if (lower === "tab") return "Tab";
+  if (/^[a-z]$/i.test(compact)) return compact.toUpperCase();
+  return compact;
+}
+function normalizeShortcutModifierName(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (raw === "cmd" || raw === "command" || raw === "meta" || raw === "super") return "Cmd";
+  if (raw === "control" || raw === "ctrl") return "Ctrl";
+  if (raw === "option" || raw === "alt") return "Alt";
+  if (raw === "shift") return "Shift";
+  return raw ? String(value || "").trim() : "";
+}
+function normalizeShortcutDisplayKey(value, fallback) {
+  const fallbackText = String(fallback || "").trim();
+  const text = String(value === undefined || value === null ? "" : value).trim();
+  const raw = text || fallbackText;
+  if (!raw) return "";
+  const parts = raw.replace(/\s+/g, "").split("+").filter(Boolean);
+  if (!parts.length) return fallbackText;
+  const base = normalizeShortcutBaseName(parts[parts.length - 1]);
+  if (!base) return fallbackText;
+  const seen = Object.create(null);
+  const modifiers = [];
+  for (let i = 0; i < parts.length - 1; i++) {
+    const modifier = normalizeShortcutModifierName(parts[i]);
+    if (!modifier || seen[modifier]) continue;
+    seen[modifier] = true;
+    modifiers.push(modifier);
+  }
+  return modifiers.concat([base]).join("+");
+}
+function normalizeKeyboardShortcuts(value) {
+  let raw = value;
+  if (typeof raw === "string") {
+    const text = raw.trim();
+    if (!text) raw = {};
+    else {
+      try { raw = JSON.parse(text); } catch (_) { raw = {}; }
+    }
+  }
+  if (raw && typeof raw === "object" && raw.shortcuts && typeof raw.shortcuts === "object") raw = raw.shortcuts;
+  if (Array.isArray(raw)) {
+    const mapped = {};
+    raw.forEach(item => {
+      if (!item || typeof item !== "object") return;
+      const id = String(item.id || item.action || "").trim();
+      const key = item.key !== undefined ? item.key : item.shortcut;
+      if (id) mapped[id] = key;
+    });
+    raw = mapped;
+  }
+  const source = raw && typeof raw === "object" ? raw : {};
+  const out = shortcutDefaultMap();
+  SHORTCUT_ACTION_DEFINITIONS.forEach(action => {
+    const configured = Object.prototype.hasOwnProperty.call(source, action.id) ? source[action.id] : out[action.id];
+    out[action.id] = normalizeShortcutDisplayKey(configured, action.defaultKey);
+  });
+  return out;
+}
+function normalizeKeyboardShortcutsJsonPreference(value) {
+  return JSON.stringify(normalizeKeyboardShortcuts(value));
+}
+function shortcutActionSummaries() {
+  return SHORTCUT_ACTION_DEFINITIONS.map(action => ({
+    id: action.id,
+    label: action.label,
+    defaultKey: action.defaultKey
+  }));
+}
 function emptyManifest() {
   return { dictionaries: {}, disabled: {}, dictionaryOrder: [], activeProfileId: DEFAULT_PROFILE_ID, profiles: {} };
 }
@@ -162,6 +271,7 @@ function normalizeProfilePreferences(prefs) {
   out.audioAutoPlay = normalizeProfilePreferenceBoolValue(out.audioAutoPlay, PROFILE_PREFERENCE_DEFAULTS.audioAutoPlay);
   out.audioProbeOnPopup = normalizeProfilePreferenceBoolValue(out.audioProbeOnPopup, PROFILE_PREFERENCE_DEFAULTS.audioProbeOnPopup);
   out.audioSourcesJson = normalizeAudioSourcesJsonPreference(out.audioSourcesJson, !hasAudioSources);
+  out.keyboardShortcutsJson = normalizeKeyboardShortcutsJsonPreference(out.keyboardShortcutsJson);
   out.directIpcPollMs = normalizeProfilePreferenceNumberValue(out.directIpcPollMs, DIRECT_IPC_POLL_MS_DEFAULT, DIRECT_IPC_POLL_MS_MIN, DIRECT_IPC_POLL_MS_MAX);
   out.workerIdleSleepMs = normalizeProfilePreferenceNumberValue(out.workerIdleSleepMs, WORKER_IDLE_SLEEP_MS_DEFAULT, WORKER_IDLE_SLEEP_MS_MIN, WORKER_IDLE_SLEEP_MS_MAX);
   return out;
@@ -735,6 +845,7 @@ function resetLookupRuntimeForProfileChange() {
 }
 function refreshRuntimeAfterProfileChange(reloadOverlay) {
   resetLookupRuntimeForProfileChange();
+  if (typeof syncKeyboardShortcutRegistrations === "function") syncKeyboardShortcutRegistrations();
   if (reloadOverlay && typeof reloadOverlayForProfileChange === "function") {
     reloadOverlayForProfileChange();
   } else if (typeof pushOverlayConfigForProfileChange === "function") {

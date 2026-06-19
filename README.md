@@ -17,7 +17,7 @@ The project is an experimental fork of [afn478/iinatan](https://github.com/afn47
 - Separate Term, Frequency, and Pitch dictionary groups, with profile-specific priority and enable/disable controls.
 - Popup rendering for structured Yomitan content, bundled dictionary `styles.css`, collapsible dictionary sections, nested lookup, and custom CSS.
 - Online word audio from Yomitan `audioSourceList` endpoints or direct URL templates.
-- Local word audio from a Hoshi Reader compatible `android.db`, without a separate localhost server.
+- Local word audio from Hoshi Reader compatible local audio database exports, without a separate localhost server.
 - AnkiConnect export with configurable deck, note type, field mapping, tags, screenshot, word audio, and subtitle audio.
 - Subtitle audio clips are exported as MP3.
 - English and Simplified Chinese UI for settings, menus, popups, status messages, and Anki actions.
@@ -88,7 +88,7 @@ Field names and placeholders stay in English in every UI language. Common placeh
 Open **Settings -> Audio**.
 
 - Online sources can be Yomitan `audioSourceList` endpoints or direct audio URL templates.
-- Local audio uses a Hoshi Reader compatible `android.db`.
+- Local audio uses Hoshi Reader compatible local audio database exports.
 - Local audio is tried before online sources when enabled.
 - The popup shows a missing-audio state when no source can provide audio.
 - Map an Anki field to `{audio}` for word audio and `{sentence-audio}` for the current subtitle clip.
@@ -113,4 +113,5 @@ Hoshitan is licensed under the GNU General Public License v3.0 only. See [LICENS
 - [afn478/iinatan](https://github.com/afn478/iinatan), the original IINA subtitle lookup plugin.
 - [Yomitan](https://github.com/yomidevs/yomitan), the popup dictionary ecosystem and compatible dictionary format.
 - [HoshiDicts](https://github.com/Manhhao/hoshidicts/), the native dictionary backend used by Hoshitan.
-- [Hoshi Reader Android](https://github.com/HuangAntimony/Hoshi-Reader-Android) and [Hoshi Reader Mac](https://github.com/W1ght/Hoshi-Reader-Mac), which inspired the dictionary, Anki, and local audio workflows.
+- [Hoshi Reader](https://github.com/Manhhao/Hoshi-Reader), the original project behind the Hoshi Reader family of tools and workflows.
+- [Hoshi Reader Android](https://github.com/HuangAntimony/Hoshi-Reader-Android), which inspired the dictionary, Anki, and local audio workflows.

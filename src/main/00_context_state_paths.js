@@ -10,7 +10,7 @@
 
 const { core, mpv, event, overlay, menu, input, ws, preferences, console, file, http, utils, standaloneWindow } = iina;
 
-const VERSION = "0.1.0-dev.17";
+const VERSION = "0.1.0-dev.18";
 
 let enabled = false;
 let initialized = false;
@@ -45,6 +45,7 @@ let hoverLookupSequence = 0;
 let hoverLookupActiveKey = "";
 let lastShortcutToggleAt = 0;
 let shortcutRegistered = false;
+let registeredShortcutInputKeys = Object.create(null);
 let subtitleDisplayEnabled = true;
 let lookupPopupPauseActive = false;
 let lookupPopupPauseShouldResume = false;
