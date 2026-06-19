@@ -1,7 +1,7 @@
 {
   "name": "Hoshitan",
   "identifier": "io.github.akihazhang.hoshitan",
-  "version": "0.1.0-dev.20",
+  "version": "0.1.0-dev.21",
   "author": {
     "name": "AkihaZhang"
   },
@@ -37,7 +37,7 @@
     "uiTheme": "auto",
     "subtitlePollMs": 120,
     "popupMaxHeightVh": 34,
-    "popupSubtitleGapPx": 34,
+    "popupSubtitleGapPx": 8,
     "popupTopMarginPx": 56,
     "pauseWhilePopupVisible": true,
     "lookupTimeoutMs": 9000,

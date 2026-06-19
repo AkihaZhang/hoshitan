@@ -505,7 +505,7 @@
         </div>
         <div class="field">
           <label for="popupSubtitleGapPx">Gap above subtitles (px)</label>
-          <input id="popupSubtitleGapPx" data-profile-pref="popupSubtitleGapPx" type="number" min="12" max="96" step="1">
+          <input id="popupSubtitleGapPx" data-profile-pref="popupSubtitleGapPx" type="number" min="4" max="96" step="1">
         </div>
         <div class="field">
           <label for="popupTopMarginPx">Popup top margin (px)</label>
@@ -549,7 +549,7 @@
       <h2>Dictionaries</h2>
       <h3>Installed Dictionaries</h3>
       <div class="toolbar">
-        <button id="importZip" class="primary" type="button">Import ZIP...</button>
+        <button id="importZip" class="primary" type="button">Import ZIPs...</button>
         <span class="spacer"></span>
         <button id="refresh" type="button">Refresh</button>
       </div>
@@ -594,10 +594,6 @@
       </div>
 
       <h3>Fields</h3>
-      <div class="toolbar">
-        <button id="ankiAutoMap" type="button">Auto-map fields</button>
-        <span class="hint">Fields are loaded from the selected Anki note type. Choose a suggestion or type an English placeholder manually.</span>
-      </div>
       <section id="ankiFieldMappings" class="anki-field-mappings" data-no-i18n></section>
       <div class="form-grid" style="margin-top: 12px;">
         <div class="field"><label for="ankiTags">Tags</label><input id="ankiTags" data-global-setting="ankiTags" type="text" spellcheck="false"><small>Separate tags with spaces or commas.</small></div>
@@ -767,7 +763,7 @@
         'Frequency Dictionaries': '频率词典',
         'Pitch Dictionaries': '音调词典',
         '{count} dictionaries': '{count} 个词典',
-        'Import ZIP...': '导入 ZIP...',
+        'Import ZIPs...': '批量导入 ZIP...',
         'Refresh': '刷新',
         'Dictionary Import': '词典导入',
         'Use lower-memory dictionary import': '使用低内存模式导入词典',
@@ -781,8 +777,6 @@
         'Deck': '牌组',
         'Note type': '笔记类型',
         'Fields': '字段',
-        'Auto-map fields': '自动映射字段',
-        'Fields are loaded from the selected Anki note type. Choose a suggestion or type an English placeholder manually.': '字段会从所选 Anki 笔记类型自动加载。可以选择建议，也可以手动输入英文占位符。',
         'Tags': '标签',
         'Separate tags with spaces or commas.': '使用空格或逗号分隔标签。',
         'Media': '媒体',
@@ -964,7 +958,6 @@
       audioSourceList: document.getElementById('audioSourceList'),
       shortcutList: document.getElementById('shortcutList'),
       ankiRefresh: document.getElementById('ankiRefresh'),
-      ankiAutoMap: document.getElementById('ankiAutoMap'),
       ankiConnectionLabel: document.getElementById('ankiConnectionLabel'),
       ankiDeckName: document.getElementById('ankiDeckName'),
       ankiModelName: document.getElementById('ankiModelName'),
@@ -1030,7 +1023,7 @@
     }
     function updateBusyState() {
       const disabled = !!state.busy;
-      [els.importZip, els.refresh, els.newProfile, els.renameProfile, els.ankiRefresh, els.ankiAutoMap, els.addAudioSource, els.chooseLocalAudioDatabase].filter(Boolean).forEach(button => {
+      [els.importZip, els.refresh, els.newProfile, els.renameProfile, els.ankiRefresh, els.addAudioSource, els.chooseLocalAudioDatabase].filter(Boolean).forEach(button => {
         button.disabled = disabled;
       });
       const profile = activeProfile();
@@ -1442,6 +1435,95 @@
       return out;
     }
     function suggestedAnkiMapping(fieldName) {
+      const exactName = String(fieldName || '');
+      const modelName = String((els.ankiModelName && els.ankiModelName.value) || globalValue('ankiModelName') || '').trim();
+      const exactTemplates = {
+        Lapis: {
+          Expression: '{expression}',
+          ExpressionFurigana: '{furigana-plain}',
+          ExpressionReading: '{reading}',
+          ExpressionAudio: '{audio}',
+          SelectionText: '{popup-selection-text}',
+          MainDefinition: '{glossary-first}',
+          Sentence: '{sentence}',
+          Glossary: '{glossary}',
+          PitchPosition: '{pitch-accent-positions}',
+          PitchCategories: '{pitch-accent-categories}',
+          Frequency: '{frequencies}',
+          FreqSort: '{frequency-harmonic-rank}',
+          MiscInfo: '{document-title}',
+          IsWordAndSentenceCard: 'x'
+        },
+        Kiku: {
+          Expression: '{expression}',
+          ExpressionFurigana: '{furigana-plain}',
+          ExpressionReading: '{reading}',
+          ExpressionAudio: '{audio}',
+          SelectionText: '{popup-selection-text}',
+          MainDefinition: '{glossary-first}',
+          Sentence: '{sentence}',
+          Glossary: '{glossary}',
+          PitchPosition: '{pitch-accent-positions}',
+          PitchCategories: '{pitch-accent-categories}',
+          Frequency: '{frequencies}',
+          FreqSort: '{frequency-harmonic-rank}',
+          MiscInfo: '{document-title}',
+          IsWordAndSentenceCard: 'x'
+        },
+        Senren: {
+          word: '{expression}',
+          reading: '{reading}',
+          sentence: '{sentence}',
+          sentenceCard: 'x',
+          selectionText: '{popup-selection-text}',
+          definition: '{glossary-first}',
+          wordAudio: '{audio}',
+          glossary: '{glossary}',
+          pitchPositions: '{pitch-accent-positions}',
+          pitchCategories: '{pitch-accent-categories}',
+          frequencies: '{frequencies}',
+          freqSort: '{frequency-harmonic-rank}',
+          miscInfo: '{document-title}'
+        }
+      };
+      if (exactTemplates[modelName] && Object.prototype.hasOwnProperty.call(exactTemplates[modelName], exactName)) {
+        return exactTemplates[modelName][exactName] || '';
+      }
+      const key = String(fieldName || '').replace(/[\s_-]+/g, '').toLowerCase();
+      const candidates = {
+        expression: '{expression}',
+        word: '{expression}',
+        term: '{expression}',
+        vocab: '{expression}',
+        expressionfurigana: '{furigana-plain}',
+        expressionreading: '{reading}',
+        reading: '{reading}',
+        kana: '{reading}',
+        sentence: '{sentence}',
+        sentencefurigana: '{sentence}',
+        front: '{sentence}',
+        selectiontext: '{popup-selection-text}',
+        maindefinition: '{glossary-first}',
+        definition: '{glossary-first}',
+        glossary: '{glossary}',
+        meaning: '{glossary}',
+        back: '{glossary}',
+        expressionaudio: '{audio}',
+        wordaudio: '{audio}',
+        audio: '{audio}',
+        iswordandsentencecard: 'x',
+        pitchposition: '{pitch-accent-positions}',
+        pitchcategories: '{pitch-accent-categories}',
+        frequency: '{frequencies}',
+        freqsort: '{frequency-harmonic-rank}',
+        miscinfo: '{document-title}',
+        source: '{source}',
+        notes: '{source}',
+        dictionary: '{dictionary}'
+      };
+      return candidates[key] || '';
+    }
+    function legacySuggestedAnkiMapping(fieldName) {
       const key = String(fieldName || '').replace(/[\s_-]+/g, '').toLowerCase();
       const candidates = {
         expression: '{expression}',
@@ -1478,6 +1560,24 @@
         dictionary: '{dictionary}'
       };
       return candidates[key] || '';
+    }
+    function shouldRefreshAutomaticAnkiMappings() {
+      const names = state.ankiFieldNames.map(name => String(name || '')).filter(Boolean);
+      const mappings = state.ankiFieldMappings || {};
+      const configured = Object.keys(mappings);
+      if (!names.length) return false;
+      if (!configured.length) return true;
+      let hasDifferentAutomaticValue = false;
+      for (let i = 0; i < configured.length; i++) {
+        const name = configured[i];
+        const value = String(mappings[name] || '').trim();
+        const current = suggestedAnkiMapping(name);
+        const legacy = legacySuggestedAnkiMapping(name);
+        if (value !== current) hasDifferentAutomaticValue = true;
+        if (value === current || value === legacy) continue;
+        return false;
+      }
+      return hasDifferentAutomaticValue;
     }
     function ankiMappingOptions() {
       const options = [
@@ -1942,7 +2042,6 @@
       { modelName: els.ankiModelName.value },
       tr('Connecting to AnkiConnect...')
     ));
-    els.ankiAutoMap.addEventListener('click', autoMapAnkiFields);
     els.ankiModelName.addEventListener('change', () => {
       state.globalSettings.ankiModelName = els.ankiModelName.value;
       command(
@@ -2007,7 +2106,7 @@
         state.ankiFieldNames = Array.isArray(payload && payload.fieldNames) ? payload.fieldNames.slice() : [];
         state.ankiLoadedModel = String((payload && payload.modelName) || '');
         pruneAnkiFieldMappings();
-        if (state.ankiConnected && state.ankiFieldNames.length && !Object.keys(state.ankiFieldMappings).length) {
+        if (state.ankiConnected && state.ankiFieldNames.length && shouldRefreshAutomaticAnkiMappings()) {
           autoMapAnkiFields(false);
           saveAnkiFieldMappings();
         }

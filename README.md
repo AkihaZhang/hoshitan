@@ -77,7 +77,7 @@ Anki Desktop and AnkiConnect must be running.
 2. Connect to AnkiConnect.
 3. Select the target deck and note type.
 4. Hoshitan loads the note type's exact field names from AnkiConnect.
-5. Click **Auto-map fields** or assign placeholders manually.
+5. Known Lapis-style fields are filled automatically; adjust placeholders manually when needed.
 6. Configure screenshots, subtitle MP3 audio, word audio, tags, audio padding, and FFmpeg.
 7. Open a dictionary popup and click **Add to Anki**.
 

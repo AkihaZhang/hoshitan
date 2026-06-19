@@ -243,14 +243,24 @@ async function chooseAndImportDictionary() {
   }
 }
 
+function chosenFilePathString(value) {
+  if (value && typeof value === "object") {
+    const candidates = [value.path, value.filePath, value.url, value.fileURL, value.absoluteString];
+    for (let i = 0; i < candidates.length; i++) {
+      const candidate = String(candidates[i] || "").trim();
+      if (candidate) return candidate.replace(/^file:\/\//, "");
+    }
+  }
+  return String(value || "").trim();
+}
 function normalizeChosenFilePaths(value) {
-  if (Array.isArray(value)) return value.map(item => String(item || "").trim()).filter(Boolean);
+  if (Array.isArray(value)) return value.map(item => chosenFilePathString(item)).filter(Boolean);
   const s = String(value || "").trim();
   if (!s) return [];
   if (s.charAt(0) === "[") {
     try {
       const parsed = JSON.parse(s);
-      if (Array.isArray(parsed)) return parsed.map(item => String(item || "").trim()).filter(Boolean);
+      if (Array.isArray(parsed)) return parsed.map(item => chosenFilePathString(item)).filter(Boolean);
     } catch (_) {}
   }
   if (s.indexOf("\n") >= 0) return s.split(/\r?\n/).map(item => item.trim()).filter(Boolean);
@@ -267,8 +277,12 @@ async function chooseDictionaryZipPaths() {
   }
   const options = {
     allowedFileTypes: ["zip"],
+    canChooseDirectories: false,
+    canChooseFiles: true,
+    allowsOtherFileTypes: false,
     allowsMultipleSelection: true,
     allowMultipleSelection: true,
+    allowMultipleSelections: true,
     multiple: true
   };
   debugLog("manual dictionary import: opening file chooser with zip filter and multi-select");
@@ -287,7 +301,14 @@ async function chooseDictionaryZipPaths() {
 
   debugLog("manual dictionary import: opening fallback unfiltered file chooser");
   try {
-    const selected = await resolveMaybePromise(utils.chooseFile(t("dict.chooseZip"), { allowsMultipleSelection: true, allowMultipleSelection: true, multiple: true }));
+    const selected = await resolveMaybePromise(utils.chooseFile(t("dict.chooseZip"), {
+      canChooseDirectories: false,
+      canChooseFiles: true,
+      allowsMultipleSelection: true,
+      allowMultipleSelection: true,
+      allowMultipleSelections: true,
+      multiple: true
+    }));
     const paths = normalizeChosenFilePaths(selected);
     debugLog("manual dictionary import: unfiltered chooser returned count=" + paths.length + " sample=" + JSON.stringify(paths.slice(0, 5)));
     return paths;

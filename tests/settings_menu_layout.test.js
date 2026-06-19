@@ -87,7 +87,7 @@ assert(/<option value="de">Deutsch<\/option>/.test(managerHtml), 'German should 
 assert(/<option value="ko">한국어<\/option>/.test(managerHtml), 'Korean should use its native display name');
 assert(/function translateStaticDocument\(\)/.test(managerHtml), 'Settings manager should translate static UI text');
 assert(/data-global-setting="ankiModelName"/.test(managerHtml), 'Settings manager should expose the Anki note type');
-assert(/id="ankiAutoMap"/.test(managerHtml), 'Settings manager should offer automatic Anki field mapping');
+assert(!/id="ankiAutoMap"/.test(managerHtml), 'Settings manager should not show a manual auto-map button');
 assert(/id="ankiFieldMappings"/.test(managerHtml), 'Settings manager should render fields returned by AnkiConnect');
 assert(/ankiFieldMappingsJson/.test(managerHtml), 'Settings manager should persist raw Anki field mappings');
 assert(/data-no-i18n/.test(managerHtml), 'Raw Anki fields should be excluded from UI translation');
@@ -97,16 +97,18 @@ assert(/document\.createElement\('datalist'\)/.test(managerHtml), 'Anki field ma
 assert(/input\.addEventListener\('blur', commitMapping\)/.test(managerHtml), 'Manual Anki field mappings should save when focus leaves the field');
 assert(/event\.key !== 'Enter'/.test(managerHtml), 'Manual Anki field mappings should save on Enter');
 assert(/dictionary-manager-anki-refresh/.test(managerHtml), 'Settings manager should load Anki deck and field metadata');
+assert(/function shouldRefreshAutomaticAnkiMappings\(\)/.test(managerHtml), 'Settings manager should migrate stale generated Anki mappings');
 assert(/function ankiMappingOptions\(\)/.test(managerHtml), 'Settings manager should centralize Hoshi-compatible Anki mapping options');
 assert(/single-glossary-/.test(managerHtml), 'Settings manager should add per-dictionary glossary mappings');
 assert(!/\['\{book-cover\}', '\{book-cover\}'\]/.test(managerHtml), 'Settings should not expose the legacy book-cover mapping');
 assert(!/\['\{sasayaki-audio\}', '\{sasayaki-audio\}'\]/.test(managerHtml), 'Settings should not expose the legacy sasayaki-audio mapping');
-assert(/picture:\s*'\{image\}'/.test(managerHtml), 'Picture fields should auto-map to the canonical image mapping');
-assert(!/definitionpicture:\s*'\{image\}'/.test(managerHtml), 'DefinitionPicture should not receive the video screenshot by default');
-assert(/sentenceaudio:\s*'\{sentence-audio\}'/.test(managerHtml), 'SentenceAudio should auto-map to the canonical sentence-audio mapping');
-assert(/iswordandsentencecard:\s*'X'/.test(managerHtml), 'Lapis card type fields should default to a word-and-sentence card');
-assert(/frequency:\s*'\{frequencies-html\}'/.test(managerHtml), 'Lapis Frequency should receive HTML frequency metadata');
-assert(/freqsort:\s*'\{frequency-harmonic-rank\}'/.test(managerHtml), 'Lapis FreqSort should receive the sortable harmonic rank');
+const suggestedMappingSource = managerHtml.slice(managerHtml.indexOf('function suggestedAnkiMapping'), managerHtml.indexOf('function legacySuggestedAnkiMapping'));
+assert(!/picture:\s*'\{image\}'/.test(suggestedMappingSource), 'Picture fields should not auto-map to screenshots by default');
+assert(!/definitionpicture:\s*'\{image\}'/.test(suggestedMappingSource), 'DefinitionPicture should not receive the video screenshot by default');
+assert(!/sentenceaudio:\s*'\{sentence-audio\}'/.test(suggestedMappingSource), 'SentenceAudio should not auto-map to subtitle clips by default');
+assert(/IsWordAndSentenceCard:\s*'x'/.test(suggestedMappingSource), 'Lapis card type fields should default to a word-and-sentence card');
+assert(/Frequency:\s*'\{frequencies\}'/.test(suggestedMappingSource), 'Lapis Frequency should match the Hoshi Android default');
+assert(/FreqSort:\s*'\{frequency-harmonic-rank\}'/.test(suggestedMappingSource), 'Lapis FreqSort should receive the sortable harmonic rank');
 assert(/\{frequency-harmonic-rank\}/.test(managerHtml), 'Settings manager should expose frequency metadata mappings');
 assert(/\{frequencies-html\}/.test(managerHtml), 'Settings manager should expose HTML frequency metadata mappings');
 assert(/\{pitch-accent-categories\}/.test(managerHtml), 'Settings manager should expose pitch accent mappings');
@@ -127,7 +129,7 @@ assert(/dictionary-manager-delete-profile/.test(managerHtml), 'Settings manager 
 assert(/Delete/.test(managerHtml), 'Dictionary manager rows should include a delete button');
 assert(!/id="recommendedList"/.test(managerHtml), 'Settings manager should not promote a recommended dictionary download');
 assert(!/Recommended Downloads/.test(managerHtml), 'Settings manager should not show the recommended downloads section');
-assert(/Import ZIP/.test(managerHtml), 'Dictionary manager should expose ZIP import');
+assert(/Import ZIPs/.test(managerHtml), 'Dictionary manager should expose batch ZIP import');
 assert(/typeof iina !== 'undefined'/.test(managerHtml), 'Dictionary manager should use the IINA webview message bridge');
 assert(/id="profileSelect"/.test(managerHtml), 'Dictionary manager should expose profile selection');
 assert(!/Import from Folder/.test(managerHtml), 'Dictionary manager should not expose manual folder import');
@@ -188,6 +190,9 @@ assert(!/dictionary-manager-download-recommended/.test(managerBridgeSource), 'Se
 assert(/deleteDictionary\(String\(name\)\)/.test(managerBridgeSource), 'Dictionary manager delete commands should remove installed dictionaries');
 assert(/function runDictionaryManagerZipImport\(\)/.test(managerBridgeSource), 'Dictionary ZIP import should use a picker-aware action path');
 assert(!/postDictionaryManagerStatus\("Opening ZIP picker\.\.\."/.test(managerBridgeSource), 'ZIP picker opening status should be transient webview state only');
+const importSource = fs.readFileSync(path.join(root, 'src/main/30_backend_import_worker_lookup.js'), 'utf8');
+assert(/allowsMultipleSelection:\s*true/.test(importSource), 'Dictionary ZIP picker should request multi-selection');
+assert(/function chosenFilePathString/.test(importSource), 'Dictionary ZIP picker should normalize object-style file paths');
 assert(/t\("manager\.importCancelled"\)/.test(managerBridgeSource), 'Dictionary manager should acknowledge cancelled ZIP imports');
 assert(!/runDictionaryManagerAction\("Importing dictionary"/.test(managerBridgeSource), 'ZIP import should not enter busy state before file selection');
 

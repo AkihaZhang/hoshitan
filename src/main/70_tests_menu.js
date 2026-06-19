@@ -84,7 +84,7 @@ function runSettingsAuditChecks() {
   check(Number.isFinite(Number(cfg.maxEntries)) && cfg.maxEntries >= 1, "maxEntries should be numeric");
   check(Number.isFinite(Number(cfg.maxGlossesPerEntry)) && cfg.maxGlossesPerEntry >= 1, "maxGlossesPerEntry should be numeric");
   check(Number.isFinite(Number(cfg.popupMaxHeight)) && cfg.popupMaxHeight >= 180, "popupMaxHeight should be sent to overlay");
-  check(Number.isFinite(Number(cfg.popupSubtitleGapPx)) && cfg.popupSubtitleGapPx >= 12, "popupSubtitleGapPx should be sent to overlay");
+  check(Number.isFinite(Number(cfg.popupSubtitleGapPx)) && cfg.popupSubtitleGapPx >= 4, "popupSubtitleGapPx should be sent to overlay");
   check(["dark", "light", "inherit"].indexOf(cfg.popupTheme) >= 0, "popupTheme should be sent to overlay");
   check(["dark", "light", ""].indexOf(cfg.popupThemeHint || "") >= 0, "popupThemeHint should resolve to a concrete hint when present");
   check(cfg.etymologyCollapseDefault === "collapsed" || cfg.etymologyCollapseDefault === "expanded", "etymologyCollapseDefault should be sent to overlay");

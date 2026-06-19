@@ -39,7 +39,7 @@ const PROFILE_PREFERENCE_DEFAULTS = {
   popupMaxWidth: 440,
   popupMaxHeight: 520,
   popupMaxHeightVh: 34,
-  popupSubtitleGapPx: 34,
+  popupSubtitleGapPx: 8,
   popupTopMarginPx: 56,
   popupTheme: "inherit",
   subtitlePollMs: 120,
@@ -273,6 +273,8 @@ function normalizeProfilePreferences(prefs) {
   out.audioProbeOnPopup = normalizeProfilePreferenceBoolValue(out.audioProbeOnPopup, PROFILE_PREFERENCE_DEFAULTS.audioProbeOnPopup);
   out.audioSourcesJson = normalizeAudioSourcesJsonPreference(out.audioSourcesJson, !hasAudioSources);
   out.keyboardShortcutsJson = normalizeKeyboardShortcutsJsonPreference(out.keyboardShortcutsJson);
+  if (Number(out.popupSubtitleGapPx) === 34) out.popupSubtitleGapPx = PROFILE_PREFERENCE_DEFAULTS.popupSubtitleGapPx;
+  out.popupSubtitleGapPx = normalizeProfilePreferenceNumberValue(out.popupSubtitleGapPx, PROFILE_PREFERENCE_DEFAULTS.popupSubtitleGapPx, 4, 96);
   out.directIpcPollMs = normalizeProfilePreferenceNumberValue(out.directIpcPollMs, DIRECT_IPC_POLL_MS_DEFAULT, DIRECT_IPC_POLL_MS_MIN, DIRECT_IPC_POLL_MS_MAX);
   out.workerIdleSleepMs = normalizeProfilePreferenceNumberValue(out.workerIdleSleepMs, WORKER_IDLE_SLEEP_MS_DEFAULT, WORKER_IDLE_SLEEP_MS_MIN, WORKER_IDLE_SLEEP_MS_MAX);
   return out;

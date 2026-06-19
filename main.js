@@ -10,7 +10,7 @@
 
 const { core, mpv, event, overlay, menu, input, ws, preferences, console, file, http, utils, standaloneWindow } = iina;
 
-const VERSION = "0.1.0-dev.20";
+const VERSION = "0.1.0-dev.21";
 
 let enabled = false;
 let initialized = false;
@@ -1857,7 +1857,7 @@ function overlayConfig(options) {
     popupMaxWidth: Math.max(260, prefNumber("popupMaxWidth", 440)),
     popupMaxHeight: Math.max(180, prefNumber("popupMaxHeight", 520)),
     popupMaxHeightVh: Math.max(20, prefNumber("popupMaxHeightVh", 34)),
-    popupSubtitleGapPx: Math.max(12, prefNumber("popupSubtitleGapPx", 34)),
+    popupSubtitleGapPx: Math.max(4, prefNumber("popupSubtitleGapPx", 8)),
     popupTopMarginPx: Math.max(0, prefNumber("popupTopMarginPx", 56)),
     popupTheme,
     popupThemeHint: popupTheme === "inherit" && (uiTheme === "dark" || uiTheme === "light")
@@ -2061,7 +2061,7 @@ const I18N_MESSAGES = {
     "dict.workerAvailable": "The new dictionary will be available for hover popups.",
     "dict.lookupReady": "Dictionary lookup ready.",
     "dict.preparingLookup": "Preparing dictionary lookup...",
-    "dict.chooseZip": "Choose Yomitan dictionary ZIPs",
+    "dict.chooseZip": "Choose one or more Yomitan dictionary ZIPs",
     "dict.noZip": "No dictionary ZIP was selected.",
     "dict.notZip": "Selected file is not a .zip dictionary: {path}",
     "dict.missingZip": "Selected dictionary ZIP does not exist: {path}",
@@ -2159,7 +2159,7 @@ const I18N_MESSAGES = {
     "dict.workerAvailable": "新词典很快即可用于字幕悬停查词。",
     "dict.lookupReady": "词典查词已就绪。",
     "dict.preparingLookup": "正在准备词典查词...",
-    "dict.chooseZip": "选择 Yomitan 词典 ZIP",
+    "dict.chooseZip": "选择一个或多个 Yomitan 词典 ZIP",
     "dict.noZip": "未选择词典 ZIP。",
     "dict.notZip": "所选文件不是 .zip 词典：{path}",
     "dict.missingZip": "所选词典 ZIP 不存在：{path}",
@@ -2258,7 +2258,7 @@ const PROFILE_PREFERENCE_DEFAULTS = {
   popupMaxWidth: 440,
   popupMaxHeight: 520,
   popupMaxHeightVh: 34,
-  popupSubtitleGapPx: 34,
+  popupSubtitleGapPx: 8,
   popupTopMarginPx: 56,
   popupTheme: "inherit",
   subtitlePollMs: 120,
@@ -2492,6 +2492,8 @@ function normalizeProfilePreferences(prefs) {
   out.audioProbeOnPopup = normalizeProfilePreferenceBoolValue(out.audioProbeOnPopup, PROFILE_PREFERENCE_DEFAULTS.audioProbeOnPopup);
   out.audioSourcesJson = normalizeAudioSourcesJsonPreference(out.audioSourcesJson, !hasAudioSources);
   out.keyboardShortcutsJson = normalizeKeyboardShortcutsJsonPreference(out.keyboardShortcutsJson);
+  if (Number(out.popupSubtitleGapPx) === 34) out.popupSubtitleGapPx = PROFILE_PREFERENCE_DEFAULTS.popupSubtitleGapPx;
+  out.popupSubtitleGapPx = normalizeProfilePreferenceNumberValue(out.popupSubtitleGapPx, PROFILE_PREFERENCE_DEFAULTS.popupSubtitleGapPx, 4, 96);
   out.directIpcPollMs = normalizeProfilePreferenceNumberValue(out.directIpcPollMs, DIRECT_IPC_POLL_MS_DEFAULT, DIRECT_IPC_POLL_MS_MIN, DIRECT_IPC_POLL_MS_MAX);
   out.workerIdleSleepMs = normalizeProfilePreferenceNumberValue(out.workerIdleSleepMs, WORKER_IDLE_SLEEP_MS_DEFAULT, WORKER_IDLE_SLEEP_MS_MIN, WORKER_IDLE_SLEEP_MS_MAX);
   return out;
@@ -3472,14 +3474,24 @@ async function chooseAndImportDictionary() {
   }
 }
 
+function chosenFilePathString(value) {
+  if (value && typeof value === "object") {
+    const candidates = [value.path, value.filePath, value.url, value.fileURL, value.absoluteString];
+    for (let i = 0; i < candidates.length; i++) {
+      const candidate = String(candidates[i] || "").trim();
+      if (candidate) return candidate.replace(/^file:\/\//, "");
+    }
+  }
+  return String(value || "").trim();
+}
 function normalizeChosenFilePaths(value) {
-  if (Array.isArray(value)) return value.map(item => String(item || "").trim()).filter(Boolean);
+  if (Array.isArray(value)) return value.map(item => chosenFilePathString(item)).filter(Boolean);
   const s = String(value || "").trim();
   if (!s) return [];
   if (s.charAt(0) === "[") {
     try {
       const parsed = JSON.parse(s);
-      if (Array.isArray(parsed)) return parsed.map(item => String(item || "").trim()).filter(Boolean);
+      if (Array.isArray(parsed)) return parsed.map(item => chosenFilePathString(item)).filter(Boolean);
     } catch (_) {}
   }
   if (s.indexOf("\n") >= 0) return s.split(/\r?\n/).map(item => item.trim()).filter(Boolean);
@@ -3496,8 +3508,12 @@ async function chooseDictionaryZipPaths() {
   }
   const options = {
     allowedFileTypes: ["zip"],
+    canChooseDirectories: false,
+    canChooseFiles: true,
+    allowsOtherFileTypes: false,
     allowsMultipleSelection: true,
     allowMultipleSelection: true,
+    allowMultipleSelections: true,
     multiple: true
   };
   debugLog("manual dictionary import: opening file chooser with zip filter and multi-select");
@@ -3516,7 +3532,14 @@ async function chooseDictionaryZipPaths() {
 
   debugLog("manual dictionary import: opening fallback unfiltered file chooser");
   try {
-    const selected = await resolveMaybePromise(utils.chooseFile(t("dict.chooseZip"), { allowsMultipleSelection: true, allowMultipleSelection: true, multiple: true }));
+    const selected = await resolveMaybePromise(utils.chooseFile(t("dict.chooseZip"), {
+      canChooseDirectories: false,
+      canChooseFiles: true,
+      allowsMultipleSelection: true,
+      allowMultipleSelection: true,
+      allowMultipleSelections: true,
+      multiple: true
+    }));
     const paths = normalizeChosenFilePaths(selected);
     debugLog("manual dictionary import: unfiltered chooser returned count=" + paths.length + " sample=" + JSON.stringify(paths.slice(0, 5)));
     return paths;
@@ -6084,7 +6107,7 @@ function runSettingsAuditChecks() {
   check(Number.isFinite(Number(cfg.maxEntries)) && cfg.maxEntries >= 1, "maxEntries should be numeric");
   check(Number.isFinite(Number(cfg.maxGlossesPerEntry)) && cfg.maxGlossesPerEntry >= 1, "maxGlossesPerEntry should be numeric");
   check(Number.isFinite(Number(cfg.popupMaxHeight)) && cfg.popupMaxHeight >= 180, "popupMaxHeight should be sent to overlay");
-  check(Number.isFinite(Number(cfg.popupSubtitleGapPx)) && cfg.popupSubtitleGapPx >= 12, "popupSubtitleGapPx should be sent to overlay");
+  check(Number.isFinite(Number(cfg.popupSubtitleGapPx)) && cfg.popupSubtitleGapPx >= 4, "popupSubtitleGapPx should be sent to overlay");
   check(["dark", "light", "inherit"].indexOf(cfg.popupTheme) >= 0, "popupTheme should be sent to overlay");
   check(["dark", "light", ""].indexOf(cfg.popupThemeHint || "") >= 0, "popupThemeHint should resolve to a concrete hint when present");
   check(cfg.etymologyCollapseDefault === "collapsed" || cfg.etymologyCollapseDefault === "expanded", "etymologyCollapseDefault should be sent to overlay");

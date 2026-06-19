@@ -189,7 +189,7 @@ function overlayConfig(options) {
     popupMaxWidth: Math.max(260, prefNumber("popupMaxWidth", 440)),
     popupMaxHeight: Math.max(180, prefNumber("popupMaxHeight", 520)),
     popupMaxHeightVh: Math.max(20, prefNumber("popupMaxHeightVh", 34)),
-    popupSubtitleGapPx: Math.max(12, prefNumber("popupSubtitleGapPx", 34)),
+    popupSubtitleGapPx: Math.max(4, prefNumber("popupSubtitleGapPx", 8)),
     popupTopMarginPx: Math.max(0, prefNumber("popupTopMarginPx", 56)),
     popupTheme,
     popupThemeHint: popupTheme === "inherit" && (uiTheme === "dark" || uiTheme === "light")

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0-dev.21 - 2026-06-19
+
+- Reduced the default popup-to-subtitle gap and migrated the old 34px profile default to the tighter value.
+- Removed the manual Auto-map fields button while keeping automatic Anki field prefilling after AnkiConnect loads note fields.
+- Aligned Lapis, Kiku, and Senren field prefills with Hoshi Android defaults, excluding screenshot and sentence-audio fields from automatic prefilling.
+- Made dictionary ZIP import explicitly multi-select and more tolerant of picker return formats.
+
 ## 0.1.0-dev.20 - 2026-06-19
 
 - Made the global Theme setting drive the lookup popup when the per-profile Popup color mode is set to inherit.

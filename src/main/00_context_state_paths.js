@@ -10,7 +10,7 @@
 
 const { core, mpv, event, overlay, menu, input, ws, preferences, console, file, http, utils, standaloneWindow } = iina;
 
-const VERSION = "0.1.0-dev.20";
+const VERSION = "0.1.0-dev.21";
 
 let enabled = false;
 let initialized = false;

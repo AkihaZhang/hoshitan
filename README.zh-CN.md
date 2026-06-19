@@ -77,7 +77,7 @@ Hoshitan 是一个用于 IINA 的字幕查词和 Anki 制卡插件。它给文�
 2. 连接 AnkiConnect。
 3. 选择目标牌组和笔记类型。
 4. Hoshitan 会从 AnkiConnect 读取该笔记类型的真实字段名。
-5. 点击 **Auto-map fields**，或手动配置占位符。
+5. 已知 Lapis 风格字段会自动预填；需要时可以手动调整占位符。
 6. 配置截图、字幕 MP3 音频、单词音频、标签、音频 padding 和 FFmpeg。
 7. 打开词典弹窗后点击 **Add to Anki**。
 
