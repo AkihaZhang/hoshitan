@@ -154,6 +154,7 @@ assert(/addDebugMenuItem\(debugMenu, t\("menu\.filePicker"\)/.test(rebuildMenu),
 assert(/function revealPathInFinder\(path, label\)/.test(menuSource), 'Debug reveal actions should share one reveal helper');
 assert(/utils\.open\(p\)/.test(menuSource), 'Debug reveal actions should prefer the documented utils.open path');
 assert(!/file\.showInFinder\(dataRoot\(\)\)/.test(rebuildMenu), 'Plugin data folder reveal should not rely on the older direct Finder call');
+assert(!/ensureBackendWorker\(activeDictionaryPaths/.test(menuSource), 'Debug and benchmark worker startup must preserve dictionary groups');
 
 const managerBridgeSource = fs.readFileSync(path.join(root, 'src/main/65_dictionary_manager_window.js'), 'utf8');
 const openDictionaryManagerSource = managerBridgeSource.slice(managerBridgeSource.indexOf('function openDictionaryManager()'));
@@ -185,6 +186,12 @@ assert(/runWorkerQueueLookupDirect/.test(lookupViaWorkerSource), 'Interactive lo
 assert(!/runWorkerLookupViaClientExec/.test(lookupViaWorkerSource), 'Interactive lookup must not fall back to client executable lookup');
 
 const lifecycleSource = fs.readFileSync(path.join(root, 'src/main/60_overlay_lifecycle_toggle.js'), 'utf8');
+const warmBackendSource = lifecycleSource.slice(
+  lifecycleSource.indexOf('function warmActiveProfileBackend()'),
+  lifecycleSource.indexOf('function pushOverlayConfigForProfileChange()')
+);
+assert(/activeDictionaryGroups\(language\)/.test(warmBackendSource), 'Profile backend warmup should preserve dictionary groups');
+assert(!/activeDictionaryPaths/.test(warmBackendSource), 'Profile backend warmup must not flatten frequency and pitch dictionaries into term dictionaries');
 assert(/function reloadOverlayForProfileChange\(\)/.test(lifecycleSource), 'Profile changes should be able to reload the overlay');
 assert(/function videoWindowAvailableForOverlayLoad\(\)/.test(lifecycleSource), 'Profile overlay reload should have a video-window availability guard');
 assert(/core\.window\.loaded/.test(lifecycleSource), 'Profile overlay reload should check IINA window availability before overlay.loadFile');
@@ -204,6 +211,12 @@ assert(!/mpv\.command\([^;\n]*\[\s*\]\)/.test(lifecycleSource), 'IINA mpv comman
 assert(!/mpv\.command\([^;\n]*\[\s*-?\d/.test(lifecycleSource), 'IINA mpv command arrays must not contain JavaScript numbers');
 
 const subtitleSource = fs.readFileSync(path.join(root, 'src/main/10_subtitle_text_style.js'), 'utf8');
+const publishSubtitleSource = subtitleSource.slice(
+  subtitleSource.indexOf('function publishSubtitle(text)'),
+  subtitleSource.indexOf('function replayCurrentSubtitle()')
+);
+assert(/activeDictionaryGroups\(language\)/.test(publishSubtitleSource), 'Subtitle publish warmup should preserve dictionary groups');
+assert(!/activeDictionaryPaths/.test(publishSubtitleSource), 'Subtitle publish warmup must not flatten frequency and pitch dictionaries into term dictionaries');
 assert(/function configuredNativeSubtitleScale\(\)/.test(subtitleSource), 'Native subtitle scale should be configurable');
 assert(/mpv\.set\("sub-scale"/.test(subtitleSource), 'Native subtitle scale should be applied through mpv');
 const canHideSource = subtitleSource.slice(

@@ -12,6 +12,8 @@ const values = { 'sub-text': '', 'secondary-sub-text': '' };
 const posts = [];
 const context = {
   clock: 1000,
+  dictGroups: { term: ['/dict/term'], frequency: ['/dict/frequency'], pitch: ['/dict/pitch'] },
+  workerWarmups: [],
   enabled: true,
   lastSubtitle: null,
   subtitleEmptySince: 0,
@@ -37,9 +39,15 @@ const context = {
     return true;
   },
   selectedLanguageModule() { return { id: 'ja', hasLookupText: text => !!text }; },
-  activeDictionaryPaths() { return []; },
+  activeDictionaryPaths() { throw new Error('subtitle publishing must use grouped dictionaries for worker warmup'); },
+  activeDictionaryGroups() { return context.dictGroups; },
+  workerLookupTermPaths(groups) { return groups.term.slice(); },
+  workerDictionaryCount(groups) { return groups.term.length + groups.frequency.length + groups.pitch.length; },
   overlayConfig() { return {}; },
-  ensureBackendWorker() { return Promise.resolve(); },
+  ensureBackendWorker(dicts) {
+    context.workerWarmups.push(dicts);
+    return Promise.resolve();
+  },
   debugVerbose() {},
   debugLog() {},
   compactError(error) { return String(error && error.message ? error.message : error); },
@@ -59,6 +67,9 @@ values['sub-text'] = '主字幕';
 context.pollSubtitle();
 assert(posts.filter(post => post.name === 'subtitle').length === 1, 'A new subtitle should be published');
 assert(context.textSubtitleOverlayRefreshes === 1, 'The first text subtitle should refresh the overlay attachment once');
+assert(context.workerWarmups.length === 1, 'A lookup-capable subtitle should warm the backend worker');
+assert(context.workerWarmups[0].frequency[0] === '/dict/frequency', 'Subtitle worker warmup should preserve frequency dictionaries');
+assert(context.workerWarmups[0].pitch[0] === '/dict/pitch', 'Subtitle worker warmup should preserve pitch dictionaries');
 const firstLineId = posts.find(post => post.name === 'subtitle').data.lineId;
 
 values['sub-text'] = '';

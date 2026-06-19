@@ -103,7 +103,7 @@ async function testBackendLookup() {
 async function restartBackendWorkerFromMenu() {
   const language = selectedLanguageModule();
   await stopBackendWorker();
-  await ensureBackendWorker(activeDictionaryPaths(language), language);
+  await ensureBackendWorker(activeDictionaryGroups(language), language);
   alert("Dictionary lookup restarted for " + language.label + ".");
 }
 async function stopBackendWorkerFromMenu() {
@@ -219,8 +219,8 @@ async function runLookupPerformanceBenchmark() {
     debugLog("BENCH starting lookup performance benchmark workerQueue=true");
     showOSD("Hoshitan lookup benchmark started");
     const language = selectedLanguageModule();
-    const dicts = activeDictionaryPaths(language);
-    if (!dicts.length) throw new Error("No enabled dictionaries installed.");
+    const dicts = activeDictionaryGroups(language);
+    if (!workerLookupTermPaths(dicts).length) throw new Error("No enabled term dictionaries installed.");
     await ensureBackendWorker(dicts, language);
     if (typeof resetLookupCache === "function") resetLookupCache();
     else lookupCache = Object.create(null);

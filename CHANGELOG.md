@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.0-dev.15 - 2026-06-19
+
+- Fixed lookup timeout/high-CPU regressions caused by subtitle and profile warmups restarting the dictionary worker with flattened dictionary paths.
+- Kept worker startup on the grouped term, frequency, and pitch dictionary configuration so hover lookups are not interrupted by background warmups.
+
 ## 0.1.0-dev.14 - 2026-06-18
 
 - Removed the recommended Jitendex download flow; enabled local Yomitan dictionaries are no longer treated as dependent on a bundled recommendation.

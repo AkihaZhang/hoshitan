@@ -10,7 +10,7 @@
 
 const { core, mpv, event, overlay, menu, input, ws, preferences, console, file, http, utils, standaloneWindow } = iina;
 
-const VERSION = "0.1.0-dev.14";
+const VERSION = "0.1.0-dev.15";
 
 let enabled = false;
 let initialized = false;
@@ -1885,13 +1885,14 @@ function publishSubtitle(text) {
   currentSubtitleLineId = ++subtitleLineSerial;
   lastSubtitlePublishedAt = Date.now();
   const language = selectedLanguageModule();
-  const dicts = activeDictionaryPaths(language);
-  debugVerbose("publishSubtitle lineId=" + currentSubtitleLineId + " language=" + language.id + " activeDicts=" + dicts.length + " len=" + String(normalized || "").length + " text=" + JSON.stringify(String(normalized || "").slice(0, 80)));
+  const dicts = activeDictionaryGroups(language);
+  const termPaths = workerLookupTermPaths(dicts);
+  debugVerbose("publishSubtitle lineId=" + currentSubtitleLineId + " language=" + language.id + " activeDicts=" + workerDictionaryCount(dicts) + " termDicts=" + termPaths.length + " len=" + String(normalized || "").length + " text=" + JSON.stringify(String(normalized || "").slice(0, 80)));
   postToOverlay("subtitle", { text: normalized, config: overlayConfig({ includeDictionaryStyles: false }), lineId: currentSubtitleLineId });
   postToOverlay("line-lookup-reset", { lineId: currentSubtitleLineId });
   // v1.5.0: no full-line background precompute. Hover requests are looked up
   // directly and serialized so the hovered word is never blocked by a batch.
-  if (normalized && language.hasLookupText(normalized) && dicts.length) {
+  if (normalized && language.hasLookupText(normalized) && termPaths.length) {
     ensureBackendWorker(dicts, language).catch(error => {
       debugLog("background worker warmup failed lineId=" + currentSubtitleLineId + ": " + compactError(error));
     });
@@ -4674,7 +4675,7 @@ function prepareRuntimeAfterProfileChange() {
 function warmActiveProfileBackend() {
   if (!enabled) return;
   const language = selectedLanguageModule();
-  const dicts = activeDictionaryPaths(language);
+  const dicts = activeDictionaryGroups(language);
   prepareLookupBackendForEnabledOverlay(language, dicts).then(() => {
     if (!enabled) return;
     lookupBackendReadyForNativeHide = true;
@@ -5794,7 +5795,7 @@ async function testBackendLookup() {
 async function restartBackendWorkerFromMenu() {
   const language = selectedLanguageModule();
   await stopBackendWorker();
-  await ensureBackendWorker(activeDictionaryPaths(language), language);
+  await ensureBackendWorker(activeDictionaryGroups(language), language);
   alert("Dictionary lookup restarted for " + language.label + ".");
 }
 async function stopBackendWorkerFromMenu() {
@@ -5910,8 +5911,8 @@ async function runLookupPerformanceBenchmark() {
     debugLog("BENCH starting lookup performance benchmark workerQueue=true");
     showOSD("Hoshitan lookup benchmark started");
     const language = selectedLanguageModule();
-    const dicts = activeDictionaryPaths(language);
-    if (!dicts.length) throw new Error("No enabled dictionaries installed.");
+    const dicts = activeDictionaryGroups(language);
+    if (!workerLookupTermPaths(dicts).length) throw new Error("No enabled term dictionaries installed.");
     await ensureBackendWorker(dicts, language);
     if (typeof resetLookupCache === "function") resetLookupCache();
     else lookupCache = Object.create(null);

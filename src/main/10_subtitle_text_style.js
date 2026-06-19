@@ -218,13 +218,14 @@ function publishSubtitle(text) {
   currentSubtitleLineId = ++subtitleLineSerial;
   lastSubtitlePublishedAt = Date.now();
   const language = selectedLanguageModule();
-  const dicts = activeDictionaryPaths(language);
-  debugVerbose("publishSubtitle lineId=" + currentSubtitleLineId + " language=" + language.id + " activeDicts=" + dicts.length + " len=" + String(normalized || "").length + " text=" + JSON.stringify(String(normalized || "").slice(0, 80)));
+  const dicts = activeDictionaryGroups(language);
+  const termPaths = workerLookupTermPaths(dicts);
+  debugVerbose("publishSubtitle lineId=" + currentSubtitleLineId + " language=" + language.id + " activeDicts=" + workerDictionaryCount(dicts) + " termDicts=" + termPaths.length + " len=" + String(normalized || "").length + " text=" + JSON.stringify(String(normalized || "").slice(0, 80)));
   postToOverlay("subtitle", { text: normalized, config: overlayConfig({ includeDictionaryStyles: false }), lineId: currentSubtitleLineId });
   postToOverlay("line-lookup-reset", { lineId: currentSubtitleLineId });
   // v1.5.0: no full-line background precompute. Hover requests are looked up
   // directly and serialized so the hovered word is never blocked by a batch.
-  if (normalized && language.hasLookupText(normalized) && dicts.length) {
+  if (normalized && language.hasLookupText(normalized) && termPaths.length) {
     ensureBackendWorker(dicts, language).catch(error => {
       debugLog("background worker warmup failed lineId=" + currentSubtitleLineId + ": " + compactError(error));
     });

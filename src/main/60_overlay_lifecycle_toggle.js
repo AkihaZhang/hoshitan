@@ -68,7 +68,7 @@ function prepareRuntimeAfterProfileChange() {
 function warmActiveProfileBackend() {
   if (!enabled) return;
   const language = selectedLanguageModule();
-  const dicts = activeDictionaryPaths(language);
+  const dicts = activeDictionaryGroups(language);
   prepareLookupBackendForEnabledOverlay(language, dicts).then(() => {
     if (!enabled) return;
     lookupBackendReadyForNativeHide = true;
