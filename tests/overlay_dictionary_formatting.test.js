@@ -432,6 +432,9 @@ assert(overlay.safeExternalUrl('ftp://example.test/file') === '', 'Unsafe URL sc
 const css = fs.readFileSync(path.join(root, 'src/overlay/overlay.css'), 'utf8');
 assert(/:root\.theme-light/.test(css), 'Popup CSS should define a concrete light theme');
 assert(!/theme-inherit/.test(css), 'Popup CSS should not define a separate inherit theme');
+assert(/#subtitle \{[^}]*z-index:\s*15;/s.test(css), 'Subtitle hover layer should stay above the outside-click backdrop');
+assert(/#popup-backdrop \{[^}]*z-index:\s*10;/s.test(css), 'Outside-click backdrop should stay below subtitle hover targets');
+assert(/#popup \{[^}]*z-index:\s*20;/s.test(css), 'Lookup popup should stay above the subtitle and backdrop layers');
 assert(/#popup \.head \{[^}]*padding: 14px 18px 12px;[^}]*\}/.test(css), 'Popup header should keep its spacing');
 assert(!/#popup \.head \{[^}]*border-bottom:/s.test(css), 'Popup header should not draw a horizontal rule below the headword');
 assert(/\.entry \+ \.entry \{[^}]*border-top:/s.test(css), 'Entry separators should remain between dictionary entries');

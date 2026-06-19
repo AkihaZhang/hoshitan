@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0-dev.19 - 2026-06-19
+
+- Fixed a hover lookup regression where the click-outside backdrop could sit above subtitle word targets and make the popup flicker.
+- Moved editable video shortcuts into a dedicated Settings tab.
+- Added an explicit Settings window theme option for automatic, dark, and light appearances.
+
 ## 0.1.0-dev.18 - 2026-06-19
 
 - Added per-profile editable video shortcuts in Settings while preserving the existing default key bindings.

@@ -58,6 +58,7 @@ const GLOBAL_SETTINGS_DEFAULTS = {
   lowRamImport: true,
   importTimeoutMs: 1800000,
   uiLanguage: "auto",
+  uiTheme: "auto",
   ankiConnectUrl: "http://127.0.0.1:8765",
   ankiApiKey: "",
   ankiDeckName: "Default",

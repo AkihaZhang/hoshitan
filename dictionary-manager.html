@@ -18,8 +18,11 @@
       --row-hover: rgba(10, 132, 255, 0.08);
       --control: rgba(255, 255, 255, 0.78);
     }
+    :root.theme-light {
+      color-scheme: light;
+    }
     @media (prefers-color-scheme: dark) {
-      :root {
+      :root:not(.theme-light) {
         --bg: rgba(30, 30, 34, 0.96);
         --panel: rgba(44, 44, 50, 0.82);
         --text: rgba(245, 245, 247, 0.94);
@@ -30,6 +33,18 @@
         --row-hover: rgba(10, 132, 255, 0.16);
         --control: rgba(58, 58, 64, 0.88);
       }
+    }
+    :root.theme-dark {
+      color-scheme: dark;
+      --bg: rgba(30, 30, 34, 0.96);
+      --panel: rgba(44, 44, 50, 0.82);
+      --text: rgba(245, 245, 247, 0.94);
+      --muted: rgba(220, 220, 224, 0.66);
+      --border: rgba(255, 255, 255, 0.16);
+      --danger-border: rgba(255, 105, 97, 0.46);
+      --danger-hover: rgba(255, 105, 97, 0.14);
+      --row-hover: rgba(10, 132, 255, 0.16);
+      --control: rgba(58, 58, 64, 0.88);
     }
     * { box-sizing: border-box; }
     body {
@@ -379,6 +394,7 @@
       <button class="tab" type="button" data-tab="dictionaries">Dictionaries</button>
       <button class="tab" type="button" data-tab="anki">Anki</button>
       <button class="tab" type="button" data-tab="audio">Audio</button>
+      <button class="tab" type="button" data-tab="shortcuts">Shortcuts</button>
       <button class="tab" type="button" data-tab="advanced">Advanced</button>
     </nav>
     <div id="status" class="status"></div>
@@ -408,6 +424,15 @@
           </select>
           <small>Switching languages reloads the overlay and lookup worker.</small>
         </div>
+        <div class="field">
+          <label for="uiTheme">Interface theme</label>
+          <select id="uiTheme" data-global-setting="uiTheme">
+            <option value="auto">Automatic</option>
+            <option value="dark">Dark</option>
+            <option value="light">Light</option>
+          </select>
+          <small>Controls the settings window. Popup color mode is in Popup.</small>
+        </div>
       </div>
 
       <h3>Playback</h3>
@@ -416,10 +441,6 @@
         <label class="check-field"><input data-profile-pref="hideNativeSubtitles" type="checkbox"><span>Hide IINA subtitles while Hoshitan is on</span></label>
         <label class="check-field"><input data-profile-pref="pauseWhilePopupVisible" type="checkbox"><span>Pause while a popup is visible</span></label>
       </div>
-
-      <h3>Shortcuts</h3>
-      <p class="hint">Enter IINA key names such as Space, Left, S, Shift+H, or Cmd+W. Leave empty to restore the default.</p>
-      <section id="shortcutList" class="shortcut-list"></section>
 
     </section>
 
@@ -622,6 +643,12 @@
       </div>
     </section>
 
+    <section class="panel" data-panel="shortcuts">
+      <h2>Shortcut Settings</h2>
+      <p class="hint">Enter IINA key names such as Space, Left, S, Shift+H, or Cmd+W. Leave empty to restore the default.</p>
+      <section id="shortcutList" class="shortcut-list"></section>
+    </section>
+
     <section class="panel" data-panel="advanced">
       <h2>Advanced</h2>
       <h3>Timeouts</h3>
@@ -672,8 +699,10 @@
         'Profile Settings': '配置方案设置',
         'Language': '语言',
         'Interface language': '界面语言',
+        'Interface theme': '界面主题',
         'Automatic': '自动',
         'Automatic follows the macOS or WebView language.': '自动模式跟随 macOS 或 WebView 语言。',
+        'Controls the settings window. Popup color mode is in Popup.': '控制设置窗口外观。弹窗配色模式在“弹窗”页设置。',
         'Lookup language': '查词语言',
         'Switching languages reloads the overlay and lookup worker.': '切换语言会重新加载字幕弹层和查词进程。',
         'Playback': '播放',
@@ -681,6 +710,7 @@
         'Hide IINA subtitles while Hoshitan is on': 'Hoshitan 开启时隐藏 IINA 原生字幕',
         'Pause while a popup is visible': '词典弹窗显示时暂停播放',
         'Shortcuts': '快捷键',
+        'Shortcut Settings': '快捷键设置',
         'Enter IINA key names such as Space, Left, S, Shift+H, or Cmd+W. Leave empty to restore the default.': '输入 IINA 快捷键名称，例如 Space、Left、S、Shift+H 或 Cmd+W。留空会恢复默认值。',
         'Default: {key}': '默认：{key}',
         'Reset': '重置',
@@ -817,6 +847,10 @@
       if (raw === 'zh-cn' || raw === 'zh-hans' || raw.indexOf('zh-hans-') === 0 || raw.indexOf('zh-cn-') === 0) return 'zh-CN';
       return raw === 'en' ? 'en' : (raw === 'auto' || !raw ? 'auto' : 'en');
     }
+    function normalizedUiTheme(value) {
+      const raw = String(value || '').trim().toLowerCase();
+      return raw === 'dark' || raw === 'light' ? raw : 'auto';
+    }
     function browserUiLanguage() {
       try {
         const languages = (navigator.languages || [navigator.language || 'en']).join(' ');
@@ -832,6 +866,19 @@
           : 'auto'
       );
       return configured === 'auto' ? browserUiLanguage() : configured;
+    }
+    function currentUiTheme() {
+      return normalizedUiTheme(
+        state && state.globalSettings && state.globalSettings.uiTheme !== undefined
+          ? state.globalSettings.uiTheme
+          : 'auto'
+      );
+    }
+    function applySettingsTheme() {
+      const theme = currentUiTheme();
+      document.documentElement.classList.toggle('theme-light', theme === 'light');
+      document.documentElement.classList.toggle('theme-dark', theme === 'dark');
+      document.documentElement.dataset.settingsTheme = theme;
     }
     function tr(key, values) {
       const table = UI_MESSAGES[currentUiLanguage()] || {};
@@ -882,6 +929,7 @@
       ankiFieldMappings: {},
       ankiConnected: false,
       uiLanguage: 'auto',
+      uiTheme: 'auto',
       activeProfileId: 'default',
       activeProfileName: 'Profile 1',
       busy: false,
@@ -1351,6 +1399,7 @@
       });
       syncAudioSourcesFromProfile();
       syncKeyboardShortcutsFromProfile();
+      applySettingsTheme();
       state.rendering = false;
       translateStaticDocument();
     }
@@ -1873,6 +1922,10 @@
       setStatus('', 'info', false);
       translateStaticDocument();
       render();
+    });
+    document.getElementById('uiTheme').addEventListener('change', () => {
+      state.globalSettings.uiTheme = document.getElementById('uiTheme').value;
+      applySettingsTheme();
     });
     els.importZip.addEventListener('click', () => command('dictionary-manager-import-zip', {}, tr('Opening ZIP picker...'), { busy: false, clearAfterMs: 5000 }));
     els.refresh.addEventListener('click', () => command('dictionary-manager-refresh', {}, tr('Refreshing dictionary list...')));

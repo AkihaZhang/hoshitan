@@ -17,6 +17,7 @@ assert(info.preferenceDefaults.etymologyCollapseDefault === 'collapsed', 'Etymol
 assert(info.preferenceDefaults.wiktionaryEtymologyCollapseOverride === 'collapsed', 'Wiktionary/Kaikki override should default collapsed');
 assert(info.preferenceDefaults.popupTheme === 'inherit', 'Popup theme should default to inheriting IINA appearance');
 assert(info.preferenceDefaults.uiLanguage === 'auto', 'UI language should default to system detection');
+assert(info.preferenceDefaults.uiTheme === 'auto', 'Settings theme should default to system appearance');
 assert(Object.prototype.hasOwnProperty.call(info.preferenceDefaults, 'customPopupCss'), 'Custom popup CSS preference should exist');
 assert(info.preferenceDefaults.audioAutoPlay === false, 'Word audio auto-play should default off');
 assert(info.preferenceDefaults.audioProbeOnPopup === false, 'Popup audio probing should default off to avoid plugin-side process churn');
@@ -44,6 +45,8 @@ assert(/Hoshitan Settings/.test(managerHtml), 'Settings manager should use the p
 assert(/data-profile-pref="lookupLanguage"/.test(managerHtml), 'Settings manager should expose per-profile language');
 assert(/data-profile-pref="pauseWhilePopupVisible"/.test(managerHtml), 'Settings manager should expose per-profile playback settings');
 assert(/id="shortcutList"/.test(managerHtml), 'Settings manager should expose editable shortcut mappings');
+assert(/data-tab="shortcuts"/.test(managerHtml), 'Settings manager should expose shortcuts as a dedicated tab');
+assert(/data-panel="shortcuts"/.test(managerHtml), 'Settings manager should expose shortcuts as a dedicated panel');
 assert(/keyboardShortcutsJson/.test(managerHtml), 'Shortcut mappings should be saved with profile preferences');
 assert(/function renderShortcuts\(\)/.test(managerHtml), 'Settings manager should render shortcut actions from plugin state');
 assert(/normalizeShortcutDisplayKey/.test(managerHtml), 'Settings manager should normalize manually entered shortcut names');
@@ -73,6 +76,8 @@ assert(/id="workerIdleSleepMs"[^>]*min="30"[^>]*max="250"/.test(managerHtml), 'W
 assert(/data-global-setting="lowRamImport"/.test(managerHtml), 'Settings manager should expose global dictionary import settings');
 assert(/data-global-setting="ankiDeckName"/.test(managerHtml), 'Settings manager should expose the Anki deck');
 assert(/data-global-setting="uiLanguage"/.test(managerHtml), 'Settings manager should expose UI language selection');
+assert(/data-global-setting="uiTheme"/.test(managerHtml), 'Settings manager should expose settings theme selection');
+assert(/function applySettingsTheme\(\)/.test(managerHtml), 'Settings manager should apply the selected settings theme immediately');
 assert(/简体中文/.test(managerHtml), 'Settings manager should include Simplified Chinese');
 assert(/<option value="ja">日本語<\/option>/.test(managerHtml), 'Lookup language names should use native display names');
 assert(/<option value="fr">Français<\/option>/.test(managerHtml), 'French should use its native display name');

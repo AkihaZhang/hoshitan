@@ -10,7 +10,7 @@
 
 const { core, mpv, event, overlay, menu, input, ws, preferences, console, file, http, utils, standaloneWindow } = iina;
 
-const VERSION = "0.1.0-dev.18";
+const VERSION = "0.1.0-dev.19";
 
 let enabled = false;
 let initialized = false;
@@ -2265,6 +2265,7 @@ const GLOBAL_SETTINGS_DEFAULTS = {
   lowRamImport: true,
   importTimeoutMs: 1800000,
   uiLanguage: "auto",
+  uiTheme: "auto",
   ankiConnectUrl: "http://127.0.0.1:8765",
   ankiApiKey: "",
   ankiDeckName: "Default",
