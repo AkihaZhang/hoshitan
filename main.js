@@ -10,7 +10,7 @@
 
 const { core, mpv, event, overlay, menu, input, ws, preferences, console, file, http, utils, standaloneWindow } = iina;
 
-const VERSION = "0.1.0-dev.19";
+const VERSION = "0.1.0-dev.20";
 
 let enabled = false;
 let initialized = false;
@@ -1797,6 +1797,14 @@ function normalizePopupThemePreference(value) {
   if (theme === "dark" || theme === "light" || theme === "inherit") return theme;
   return "inherit";
 }
+function normalizeUiThemePreference(value) {
+  const theme = String(value || "").trim().toLowerCase();
+  if (theme === "dark" || theme === "light" || theme === "auto") return theme;
+  return "auto";
+}
+function configuredUiTheme() {
+  return normalizeUiThemePreference(pref("uiTheme", "auto"));
+}
 function normalizeAppearanceHint(value) {
   const theme = String(value || "").trim().toLowerCase();
   if (theme === "dark" || theme === "light") return theme;
@@ -1837,6 +1845,8 @@ function overlayConfig(options) {
   options = options || {};
   const language = selectedLanguageModule();
   scheduleIINAAppearanceHintRefresh(false);
+  const uiTheme = configuredUiTheme();
+  const popupTheme = normalizePopupThemePreference(pref("popupTheme", "inherit"));
   const config = {
     uiLanguage: configuredUiLanguage(),
     resolvedUiLanguage: resolvedUiLanguage(),
@@ -1849,8 +1859,10 @@ function overlayConfig(options) {
     popupMaxHeightVh: Math.max(20, prefNumber("popupMaxHeightVh", 34)),
     popupSubtitleGapPx: Math.max(12, prefNumber("popupSubtitleGapPx", 34)),
     popupTopMarginPx: Math.max(0, prefNumber("popupTopMarginPx", 56)),
-    popupTheme: normalizePopupThemePreference(pref("popupTheme", "inherit")),
-    popupThemeHint: normalizeAppearanceHint(iinaAppearanceHint),
+    popupTheme,
+    popupThemeHint: popupTheme === "inherit" && (uiTheme === "dark" || uiTheme === "light")
+      ? uiTheme
+      : normalizeAppearanceHint(iinaAppearanceHint),
     ...readSubtitleStyleConfig(),
     maxEntries: Math.max(1, prefNumber("maxEntries", 3)),
     maxGlossesPerEntry: Math.max(1, prefNumber("maxGlossesPerEntry", 4)),
@@ -3140,6 +3152,7 @@ function readGlobalSettingsSnapshot() {
 function updateGlobalSettings(prefs) {
   const values = prefs && typeof prefs === "object" ? prefs : {};
   const previousUiLanguage = configuredUiLanguage();
+  const previousUiTheme = configuredUiTheme();
   GLOBAL_SETTINGS_KEYS.forEach(key => {
     try {
       if (Object.prototype.hasOwnProperty.call(values, key) && typeof preferences !== "undefined" && preferences && typeof preferences.set === "function") {
@@ -3148,9 +3161,13 @@ function updateGlobalSettings(prefs) {
     } catch (_) {}
   });
   try { if (typeof preferences !== "undefined" && preferences && preferences.sync) preferences.sync(); } catch (_) {}
-  if (configuredUiLanguage() !== previousUiLanguage) {
+  const uiLanguageChanged = configuredUiLanguage() !== previousUiLanguage;
+  const uiThemeChanged = configuredUiTheme() !== previousUiTheme;
+  if (uiLanguageChanged) {
     refreshSystemUiLanguage().catch(() => {});
     try { rebuildMenu(); } catch (_) {}
+  }
+  if (uiLanguageChanged || uiThemeChanged) {
     try { if (initialized) postToOverlay("config", overlayConfig()); } catch (_) {}
   }
   if (typeof postDictionaryManagerState === "function") postDictionaryManagerState();

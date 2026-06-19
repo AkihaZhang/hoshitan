@@ -78,6 +78,8 @@ assert(/data-global-setting="ankiDeckName"/.test(managerHtml), 'Settings manager
 assert(/data-global-setting="uiLanguage"/.test(managerHtml), 'Settings manager should expose UI language selection');
 assert(/data-global-setting="uiTheme"/.test(managerHtml), 'Settings manager should expose settings theme selection');
 assert(/function applySettingsTheme\(\)/.test(managerHtml), 'Settings manager should apply the selected settings theme immediately');
+assert(/Controls the settings window and the lookup popup unless Popup color mode overrides it\./.test(managerHtml), 'Theme help text should explain lookup popup inheritance');
+assert(/Inherit follows Theme first, then IINA or system appearance\./.test(managerHtml), 'Popup theme help text should explain inherited theme priority');
 assert(/简体中文/.test(managerHtml), 'Settings manager should include Simplified Chinese');
 assert(/<option value="ja">日本語<\/option>/.test(managerHtml), 'Lookup language names should use native display names');
 assert(/<option value="fr">Français<\/option>/.test(managerHtml), 'French should use its native display name');
@@ -180,6 +182,8 @@ assert(/dictionary-manager-delete/.test(managerBridgeSource), 'Dictionary manage
 assert(/dictionary-manager-rename-profile/.test(managerBridgeSource), 'Settings manager should handle profile rename commands');
 assert(/dictionary-manager-delete-profile/.test(managerBridgeSource), 'Settings manager should handle profile delete commands');
 assert(/dictionary-manager-update-global-settings/.test(managerBridgeSource), 'Settings manager should handle global import settings');
+assert(/const previousUiTheme = configuredUiTheme\(\)/.test(fs.readFileSync(path.join(root, 'src/main/20_dictionary_manifest.js'), 'utf8')), 'Global theme changes should be detected when saving settings');
+assert(/uiLanguageChanged \|\| uiThemeChanged/.test(fs.readFileSync(path.join(root, 'src/main/20_dictionary_manifest.js'), 'utf8')), 'Global theme changes should push updated overlay config');
 assert(!/dictionary-manager-download-recommended/.test(managerBridgeSource), 'Settings manager should not handle hidden recommended downloads');
 assert(/deleteDictionary\(String\(name\)\)/.test(managerBridgeSource), 'Dictionary manager delete commands should remove installed dictionaries');
 assert(/function runDictionaryManagerZipImport\(\)/.test(managerBridgeSource), 'Dictionary ZIP import should use a picker-aware action path');
@@ -226,6 +230,8 @@ assert(!/mpv\.command\([^;\n]*\[\s*\]\)/.test(lifecycleSource), 'IINA mpv comman
 assert(!/mpv\.command\([^;\n]*\[\s*-?\d/.test(lifecycleSource), 'IINA mpv command arrays must not contain JavaScript numbers');
 
 const subtitleSource = fs.readFileSync(path.join(root, 'src/main/10_subtitle_text_style.js'), 'utf8');
+assert(/function configuredUiTheme\(\)/.test(subtitleSource), 'Overlay config should read the global theme setting');
+assert(/popupTheme === "inherit" && \(uiTheme === "dark" \|\| uiTheme === "light"\)/.test(subtitleSource), 'Inherited popup theme should follow the global theme before IINA appearance');
 const publishSubtitleSource = subtitleSource.slice(
   subtitleSource.indexOf('function publishSubtitle(text)'),
   subtitleSource.indexOf('function replayCurrentSubtitle()')

@@ -933,6 +933,7 @@ function readGlobalSettingsSnapshot() {
 function updateGlobalSettings(prefs) {
   const values = prefs && typeof prefs === "object" ? prefs : {};
   const previousUiLanguage = configuredUiLanguage();
+  const previousUiTheme = configuredUiTheme();
   GLOBAL_SETTINGS_KEYS.forEach(key => {
     try {
       if (Object.prototype.hasOwnProperty.call(values, key) && typeof preferences !== "undefined" && preferences && typeof preferences.set === "function") {
@@ -941,9 +942,13 @@ function updateGlobalSettings(prefs) {
     } catch (_) {}
   });
   try { if (typeof preferences !== "undefined" && preferences && preferences.sync) preferences.sync(); } catch (_) {}
-  if (configuredUiLanguage() !== previousUiLanguage) {
+  const uiLanguageChanged = configuredUiLanguage() !== previousUiLanguage;
+  const uiThemeChanged = configuredUiTheme() !== previousUiTheme;
+  if (uiLanguageChanged) {
     refreshSystemUiLanguage().catch(() => {});
     try { rebuildMenu(); } catch (_) {}
+  }
+  if (uiLanguageChanged || uiThemeChanged) {
     try { if (initialized) postToOverlay("config", overlayConfig()); } catch (_) {}
   }
   if (typeof postDictionaryManagerState === "function") postDictionaryManagerState();

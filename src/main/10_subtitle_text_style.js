@@ -129,6 +129,14 @@ function normalizePopupThemePreference(value) {
   if (theme === "dark" || theme === "light" || theme === "inherit") return theme;
   return "inherit";
 }
+function normalizeUiThemePreference(value) {
+  const theme = String(value || "").trim().toLowerCase();
+  if (theme === "dark" || theme === "light" || theme === "auto") return theme;
+  return "auto";
+}
+function configuredUiTheme() {
+  return normalizeUiThemePreference(pref("uiTheme", "auto"));
+}
 function normalizeAppearanceHint(value) {
   const theme = String(value || "").trim().toLowerCase();
   if (theme === "dark" || theme === "light") return theme;
@@ -169,6 +177,8 @@ function overlayConfig(options) {
   options = options || {};
   const language = selectedLanguageModule();
   scheduleIINAAppearanceHintRefresh(false);
+  const uiTheme = configuredUiTheme();
+  const popupTheme = normalizePopupThemePreference(pref("popupTheme", "inherit"));
   const config = {
     uiLanguage: configuredUiLanguage(),
     resolvedUiLanguage: resolvedUiLanguage(),
@@ -181,8 +191,10 @@ function overlayConfig(options) {
     popupMaxHeightVh: Math.max(20, prefNumber("popupMaxHeightVh", 34)),
     popupSubtitleGapPx: Math.max(12, prefNumber("popupSubtitleGapPx", 34)),
     popupTopMarginPx: Math.max(0, prefNumber("popupTopMarginPx", 56)),
-    popupTheme: normalizePopupThemePreference(pref("popupTheme", "inherit")),
-    popupThemeHint: normalizeAppearanceHint(iinaAppearanceHint),
+    popupTheme,
+    popupThemeHint: popupTheme === "inherit" && (uiTheme === "dark" || uiTheme === "light")
+      ? uiTheme
+      : normalizeAppearanceHint(iinaAppearanceHint),
     ...readSubtitleStyleConfig(),
     maxEntries: Math.max(1, prefNumber("maxEntries", 3)),
     maxGlossesPerEntry: Math.max(1, prefNumber("maxGlossesPerEntry", 4)),

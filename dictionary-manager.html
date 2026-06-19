@@ -47,9 +47,14 @@
       --control: rgba(58, 58, 64, 0.88);
     }
     * { box-sizing: border-box; }
+    html {
+      min-height: 100%;
+      background: var(--bg);
+    }
     body {
       margin: 0;
       min-width: 760px;
+      min-height: 100vh;
       background: var(--bg);
       color: var(--text);
       font: 13px -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
@@ -60,6 +65,7 @@
       justify-content: space-between;
       gap: 16px;
       padding: 16px 18px 12px;
+      background: var(--bg);
       border-bottom: 1px solid var(--border);
     }
     h1, h2, h3 {
@@ -82,7 +88,7 @@
       font-weight: 700;
       text-transform: uppercase;
     }
-    main { padding: 12px 18px 18px; }
+    main { padding: 12px 18px 18px; background: var(--bg); }
     button, select, input, textarea {
       appearance: none;
       border: 1px solid var(--border);
@@ -425,13 +431,13 @@
           <small>Switching languages reloads the overlay and lookup worker.</small>
         </div>
         <div class="field">
-          <label for="uiTheme">Interface theme</label>
+          <label for="uiTheme">Theme</label>
           <select id="uiTheme" data-global-setting="uiTheme">
             <option value="auto">Automatic</option>
             <option value="dark">Dark</option>
             <option value="light">Light</option>
           </select>
-          <small>Controls the settings window. Popup color mode is in Popup.</small>
+          <small>Controls the settings window and the lookup popup unless Popup color mode overrides it.</small>
         </div>
       </div>
 
@@ -471,10 +477,11 @@
         <div class="field">
           <label for="popupTheme">Color mode</label>
           <select id="popupTheme" data-profile-pref="popupTheme">
-            <option value="inherit">Inherit IINA preference</option>
+            <option value="inherit">Inherit Theme / IINA</option>
             <option value="dark">Dark</option>
             <option value="light">Light</option>
           </select>
+          <small>Inherit follows Theme first, then IINA or system appearance.</small>
         </div>
         <div class="field">
           <label for="fontScale">Hoshitan subtitle size</label>
@@ -699,10 +706,10 @@
         'Profile Settings': '配置方案设置',
         'Language': '语言',
         'Interface language': '界面语言',
-        'Interface theme': '界面主题',
+        'Theme': '主题',
         'Automatic': '自动',
         'Automatic follows the macOS or WebView language.': '自动模式跟随 macOS 或 WebView 语言。',
-        'Controls the settings window. Popup color mode is in Popup.': '控制设置窗口外观。弹窗配色模式在“弹窗”页设置。',
+        'Controls the settings window and the lookup popup unless Popup color mode overrides it.': '控制设置窗口和查词弹窗；如果“弹窗”页的配色模式显式指定，则以弹窗设置为准。',
         'Lookup language': '查词语言',
         'Switching languages reloads the overlay and lookup worker.': '切换语言会重新加载字幕弹层和查词进程。',
         'Playback': '播放',
@@ -732,7 +739,8 @@
         'Lookup timeout (ms)': '查词超时（毫秒）',
         'Appearance': '外观',
         'Color mode': '配色模式',
-        'Inherit IINA preference': '跟随 IINA 设置',
+        'Inherit Theme / IINA': '跟随主题 / IINA',
+        'Inherit follows Theme first, then IINA or system appearance.': '“跟随”会先跟随主题设置，再跟随 IINA 或系统外观。',
         'Dark': '深色',
         'Light': '浅色',
         'Subtitle size': '字幕大小',

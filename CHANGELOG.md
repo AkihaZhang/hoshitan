@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0-dev.20 - 2026-06-19
+
+- Made the global Theme setting drive the lookup popup when the per-profile Popup color mode is set to inherit.
+- Pushed overlay configuration immediately after Theme changes so popup colors update without reopening the video.
+- Filled the settings window background from the HTML root through the header so forced dark mode does not leave a white top strip in the WebView content.
+
 ## 0.1.0-dev.19 - 2026-06-19
 
 - Fixed a hover lookup regression where the click-outside backdrop could sit above subtitle word targets and make the popup flicker.
